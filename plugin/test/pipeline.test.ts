@@ -210,3 +210,39 @@ test('a ui job hands the reviewer the screenshots a script took, and lists them 
   assert.match(calls[0]!.prompt, /This is a UI job on the app target/);
   assert.match(d.published[0]!.body, /## Screenshots[\s\S]*build\/home@390x844\.png/);
 });
+
+test('pushed screenshots are shown in the PR as images, and a failed push falls back to their paths', async () => {
+  const ui = 'commands:\n  test: grep -q done src/feature.txt\nui:\n  targets:\n    app: { url: "http://127.0.0.1:$PORT", serve: "true" }\n';
+  const shots: NonNullable<Parameters<typeof deps>[1]>['shots'] = async (_cwd, job, _profile, dir) => ({ dir, reused: false, shots: { job: job.id, target: 'app', tree: 't', at: '', build: ['build/home@390x844.png', 'build/home@1280x800.png'], reference: [], design: 'missing' } });
+  const spec = () => writeSpec('size: small\ndifficulty: routine\ntype: ui');
+  const repo = makeRepo();
+  write(repo, '.animus/animus.yaml', ui);
+  git(repo, ['commit', '-qam', 'ui target']);
+
+  const a = fakeAgent([say('done'), () => clean()]);
+  const pushed = deps(a.agent, { shots, evidence: ({ files }) => Object.fromEntries(files.map((f) => [f, `https://example.test/${f}`])) });
+  const run = await runJob({ repo, specFile: spec() }, pushed);
+  const body = pushed.published[0]!.body;
+  assert.match(body, /<img src="https:\/\/example\.test\/build\/home@390x844\.png" alt="home@390x844" width="390">/);
+  assert.match(body, /!\[home@1280x800\]\(https:\/\/example\.test\/build\/home@1280x800\.png\)/);
+  assert.match(body, new RegExp(`animus-evidence/${run.job}`));
+
+  const b = fakeAgent([say('done'), () => clean()]);
+  const refused = deps(b.agent, { shots, evidence: () => { throw new AnimusError('no remote'); } });
+  assert.equal((await runJob({ repo, specFile: spec() }, refused)).outcome, 'pr');
+  assert.match(refused.published[0]!.body, /- `build\/home@390x844\.png`[\s\S]*The images were not pushed/);
+});
+
+test('a job of another type that changes a ui target\'s files gets screenshots too', async () => {
+  const repo = makeRepo();
+  write(repo, '.animus/animus.yaml', 'commands:\n  test: grep -q done src/feature.txt\nui:\n  targets:\n    app: { url: "http://127.0.0.1:$PORT", serve: "true", paths: ["src/**"] }\n');
+  git(repo, ['commit', '-qam', 'ui target']);
+  const { agent, calls } = fakeAgent([say('done'), () => clean()]);
+  const targets: (string | undefined)[] = [];
+  const d = deps(agent, { shots: async (_cwd, job, _profile, dir) => { targets.push(job.target); return { dir, reused: false, shots: { job: job.id, target: 'app', tree: 't', at: '', build: ['build/home@390x844.png'], reference: [], design: 'missing' } }; } });
+  const run = await runJob({ repo, specFile: writeSpec(SMALL) }, d);
+  assert.equal(run.outcome, 'pr');
+  assert.deepEqual(targets, ['app']);
+  assert.equal(calls[1]!.role, 'reviewer');
+  assert.match(d.published[0]!.body, /## Screenshots/);
+});

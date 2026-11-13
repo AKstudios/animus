@@ -2,7 +2,7 @@
 // run log, one JSON line per run (docs/factory.md, "What to log"). Both live
 // under Animus's home, outside every repository, so a job leaves nothing in
 // the project but its branch.
-import { appendFileSync, existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
+import { appendFileSync, existsSync, mkdirSync, readdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import type { Tokens } from './agent.ts';
@@ -117,4 +117,45 @@ export function describeRuns(runs: readonly Run[]): string {
   ]);
   const widths = rows[0]!.map((_, i) => Math.max(...rows.map((row) => row[i]!.length)));
   return rows.map((row) => row.map((cell, i) => cell.padEnd(widths[i]!)).join('  ').trimEnd()).join('\n');
+}
+
+/** Whether the detached process of a job still runs. */
+export function running(job: string): boolean {
+  try {
+    process.kill(Number(readFileSync(join(jobDir(job), 'pid'), 'utf8')), 0);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+const lastLines = (file: string, n: number) => (existsSync(file) ? readFileSync(file, 'utf8').trimEnd().split('\n').slice(-n) : []);
+
+/** `animus status <job>`: where one job is, from its files alone. */
+export function describeJob(job: string): string {
+  const state = loadState(job);
+  const last = readRuns().filter((r) => r.job === job).at(-1);
+  const log = join(jobDir(job), 'run.log');
+  const lines = [job];
+  if (running(job)) lines.push('  running');
+  else if (last) lines.push(`  ${last.outcome}${last.pr ? `: ${last.pr}` : ''}${last.question ? `: ${last.question}` : ''}${last.reason ? `: ${last.reason.split('\n')[0]}` : ''}`);
+  else if (state) lines.push(`  stopped without finishing; pick it up with: animus resume ${job} --detach`);
+  else if (existsSync(log)) lines.push('  did not start');
+  else return `no job ${job} under ${jobDir('')}`;
+  if (last?.outcome === 'needs-input' && !running(job)) lines.push(`  answer with: animus resume ${job} --answer "<your answer>" --detach`);
+  if (state) lines.push(`  branch ${state.workspace.branch} in ${state.repo}`);
+  const tail = lastLines(log, 12);
+  if (tail.length) lines.push(`  the end of ${log}:`, ...tail.map((l) => `    ${l}`));
+  return lines.join('\n');
+}
+
+/** `animus status`: the jobs running now, then the latest results. */
+export function describeStatus(): string {
+  const root = join(animusHome(), 'jobs');
+  const jobs = existsSync(root) ? readdirSync(root) : [];
+  const live = jobs.filter(running).map((job) => `running  ${job}  ${lastLines(join(jobDir(job), 'run.log'), 1)[0]?.trim() ?? ''}`);
+  const runs = readRuns();
+  const ended = new Set(runs.map((r) => r.job));
+  const lost = jobs.filter((job) => !running(job) && !ended.has(job) && existsSync(join(jobDir(job), 'state.json'))).map((job) => `stopped  ${job}  did not finish; animus resume ${job} --detach`);
+  return [...live, ...lost, describeRuns(runs.slice(-8))].join('\n');
 }

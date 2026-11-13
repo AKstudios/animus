@@ -3,6 +3,8 @@
 // A job that failed after its fix rounds gets a draft with the failure report,
 // so the work is not lost. The factory never merges.
 import { spawnSync } from 'node:child_process';
+import { rmSync } from 'node:fs';
+import { basename, join } from 'node:path';
 import type { CheckResult } from './gates.ts';
 import type { Plan } from './profiles.ts';
 import { ANSI, git, AnimusError } from './proc.ts';
@@ -25,8 +27,8 @@ export type PrInput = {
   /** Blockers still open when the job stopped. */
   open: readonly Finding[];
   protectedTouched: readonly string[];
-  /** Screenshot files, and the folder on the machine that ran the job. */
-  shots?: { dir: string; files: readonly string[] };
+  /** Screenshot files and the folder they are in; urls once they are pushed, by file. */
+  shots?: { dir: string; files: readonly string[]; urls?: Record<string, string>; branch?: string };
   escalations: readonly { size?: string; difficulty?: string; why: string }[];
   /** Why the job failed; makes this a failure report. */
   failure?: string;
@@ -80,7 +82,16 @@ export function prBody(p: PrInput): string {
   if (skipped.length) out.push(`Skipped: ${skipped.map((g) => `${g.name} (${g.output})`).join('; ')}.`, '');
 
   if (p.shots?.files.length) {
-    out.push('## Screenshots', '', `Animus took ${p.shots.files.length} screenshot(s) of the running app on the final commit${p.review ? ', and the reviewer looked at them' : ''}. GitHub's CLI cannot attach images, so they are on the machine that ran the job, in \`${p.shots.dir}\`:`, '', ...p.shots.files.map((f) => `- \`${f}\``), '');
+    const urls = p.shots.urls;
+    out.push('## Screenshots', '', `Animus took these of the running app on the final commit${p.review ? ', and the reviewer looked at them' : ''}. Each is one window high; a taller page comes in numbered parts from the top.`, '');
+    for (const f of p.shots.files) {
+      const name = basename(f).replace(/\.[^.]+$/, '');
+      const url = urls?.[f];
+      const width = Number(/@(\d+)x/.exec(name)?.[1] ?? 0);
+      if (url) out.push(`**${name}**`, '', width && width <= 500 ? `<img src="${url}" alt="${name}" width="${width}">` : `![${name}](${url})`, '');
+      else out.push(`- \`${f}\``);
+    }
+    out.push(urls ? `The images are on the branch \`${p.shots.branch}\`, which is not part of this change. Delete it when you no longer need them.` : `The images were not pushed. They are on the machine that ran the job, in \`${p.shots.dir}\`.`, '');
   }
   const followUps = p.review?.findings.filter((f) => f.severity === 'should-fix' && !f.for_person) ?? [];
   if (followUps.length) out.push('## Follow-ups', '', 'Should-fix findings that did not go back for a fix:', '', ...followUps.map((f) => `- ${finding(f)}`), '');
@@ -116,3 +127,35 @@ function gh(cwd: string, args: string[], input?: string, quiet = false): string 
   }
   return r.stdout.trim().split('\n').pop();
 }
+
+export const evidenceBranch = (job: string) => `animus-evidence/${job}`;
+
+export type Evidence = (p: { cwd: string; job: string; dir: string; files: readonly string[] }) => Record<string, string>;
+
+/**
+ * Makes a job's screenshots visible in its pull request. GitHub's CLI cannot
+ * attach images, so they go in one commit with no parent on a branch of their
+ * own, built through a scratch index so no worktree is touched, and the body
+ * links each by that commit. The job's own branch never holds them. Returns
+ * each file's URL.
+ */
+export const pushEvidence: Evidence = ({ cwd, job, dir, files }) => {
+  const remote = git(cwd, ['remote', 'get-url', 'origin']);
+  const repo = /github\.com[:/]([^/]+\/[^/]+?)(?:\.git)?\/?$/.exec(remote)?.[1];
+  if (!repo) throw new AnimusError(`origin (${remote}) is not a GitHub repository, so the screenshots cannot be linked`);
+  const index = join(git(cwd, ['rev-parse', '--absolute-git-dir']), 'animus-evidence-index');
+  const run = (args: string[]) => {
+    const r = spawnSync('git', args, { cwd, encoding: 'utf8', env: { ...process.env, GIT_INDEX_FILE: index } });
+    if (r.status !== 0) throw new AnimusError(`git ${args[0]}: ${(r.stderr || r.stdout).trim()}`);
+    return r.stdout.trim();
+  };
+  try {
+    rmSync(index, { force: true });
+    for (const f of files) run(['update-index', '--add', '--cacheinfo', `100644,${run(['hash-object', '-w', join(dir, f)])},${basename(f)}`]);
+    const commit = run(['commit-tree', run(['write-tree']), '-m', `Screenshots for Animus job ${job}`]);
+    run(['push', '--quiet', 'origin', `+${commit}:refs/heads/${evidenceBranch(job)}`]);
+    return Object.fromEntries(files.map((f) => [f, `https://github.com/${repo}/blob/${commit}/${encodeURIComponent(basename(f))}?raw=true`]));
+  } finally {
+    rmSync(index, { force: true });
+  }
+};

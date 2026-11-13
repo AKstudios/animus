@@ -13,7 +13,7 @@ import type { Agent, AgentResult } from './agent.ts';
 import { describe, jobChecks, runChecks, type CheckResult } from './gates.ts';
 import { commitAll, mainCheckout, matchesAny, touchedFiles } from './git.ts';
 import { appendRun, jobDir, saveState, writeJson, type JobState, type Outcome, type Run } from './log.ts';
-import { prBody, type Publish } from './pr.ts';
+import { evidenceBranch, prBody, type Evidence, type Publish } from './pr.ts';
 import { loadProfile } from './profile.ts';
 import { describePlan, escalate, modelFor, PLUGIN_ROOT, raise, resolvePlan, type Factory, type Tier } from './profiles.ts';
 import { animusCommand, git, AnimusError, tryGit } from './proc.ts';
@@ -28,6 +28,8 @@ export type Deps = {
   agent: Agent;
   publish: Publish;
   log: (line: string) => void;
+  /** Pushes a job's screenshots where its pull request can show them; left out, the PR lists their paths. */
+  evidence?: Evidence;
   /** Takes a UI job's screenshots; replaced in tests. */
   shots?: typeof takeShots;
 };
@@ -36,6 +38,8 @@ export type RunOptions = {
   repo: string;
   /** The spec file; not needed when resuming. */
   specFile?: string;
+  /** The job's id, when the caller chose it: a detached run is told its id before it starts. */
+  job?: string;
   /** Stop before the push: the PR body is written to the job's folder. */
   dryRun?: boolean;
   /** Open the pull request as a draft even when the job succeeds. */
@@ -94,7 +98,7 @@ export async function runJob(opts: RunOptions, deps: Deps): Promise<Run> {
   const spec = loadSpec(prior ? prior.spec : opts.specFile!);
   let plan = prior?.plan ?? resolvePlan(factory, spec);
   const repoProfile = loadProfile(repo);
-  const job = prior?.job ?? newJobId(spec.title);
+  const job = prior?.job ?? opts.job ?? newJobId(spec.title);
   const ui = plan.type === 'ui' ? uiJobOf(job, spec) : undefined;
   if (ui) {
     const problem = uiProblem(repoProfile, ui);
@@ -149,7 +153,7 @@ export async function runJob(opts: RunOptions, deps: Deps): Promise<Run> {
   let review: Review | undefined;
   let reviewRounds = 0;
   let open: Finding[] = [];
-  let shots: { dir: string; files: string[] } | undefined;
+  let shots: { dir: string; files: string[]; urls?: Record<string, string>; branch?: string } | undefined;
   const found = new Map<string, Finding>();
   let actedOn = 0;
 
@@ -226,8 +230,8 @@ export async function runJob(opts: RunOptions, deps: Deps): Promise<Run> {
     }
   };
 
-  const shoot = async (): Promise<string> => {
-    const r = await timed('evidence', () => (deps.shots ?? takeShots)(wt, ui!, repoProfile, join(dir, 'shots')));
+  const shoot = async (of: UiJob = ui!): Promise<string> => {
+    const r = await timed('evidence', () => (deps.shots ?? takeShots)(wt, of, repoProfile, join(dir, 'shots')));
     shots = { dir: r.dir, files: r.shots.build };
     log(`${r.reused ? 'screenshots unchanged' : `${r.shots.build.length} screenshot(s) taken`}: ${r.dir}`);
     return describeShots(r.dir, r.shots, r.reused);
@@ -280,6 +284,19 @@ export async function runJob(opts: RunOptions, deps: Deps): Promise<Run> {
 
     // ------------------------------------------------------------- evidence
     if (ui) await shoot();
+    else {
+      // Not a ui job, but it changed files a ui target is built from: show the app anyway.
+      const files = touchedFiles(wt, ws.base, git(wt, ['rev-parse', 'HEAD']));
+      const target = repoProfile.ui.targets.find((t) => t.paths.length && files.some((f) => matchesAny(f, t.paths)));
+      if (target) {
+        try {
+          await shoot({ id: job, target: target.name, pages: [], designs: [] });
+        } catch (err) {
+          if (!(err instanceof AnimusError)) throw err;
+          log(`no screenshots: ${err.message.split('\n')[0]}`);
+        }
+      }
+    }
     outcome = opts.dryRun ? 'dry-run' : 'pr';
   } catch (err) {
     if (!(err instanceof Stop) && !(err instanceof AnimusError)) throw err;
@@ -297,6 +314,16 @@ export async function runJob(opts: RunOptions, deps: Deps): Promise<Run> {
   const failed = outcome === 'failed';
   if (outcome !== 'needs-input' && head !== ws.base) {
     const models = [...new Set(run.agents.map((a) => `${a.role} ${a.model} (${a.effort})`))].join(', ');
+    if (shots && !opts.dryRun && deps.evidence) {
+      try {
+        const s = shots;
+        s.urls = await timed('pr', () => deps.evidence!({ cwd: wt, job, dir: s.dir, files: s.files }));
+        s.branch = evidenceBranch(job);
+      } catch (err) {
+        if (!(err instanceof AnimusError)) throw err;
+        log(`the screenshots could not be pushed: ${err.message.split('\n')[0]}`);
+      }
+    }
     const body = prBody({
       job, spec, plan, summary, gates: lastGates, gateAttempts: run.gates.length, fixRounds: run.fix_rounds, reviewRounds, open: failed ? open : [],
       protectedTouched: run.protected_touched, escalations: run.escalations, models, cost_usd: run.cost_usd,

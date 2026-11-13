@@ -4,7 +4,7 @@ description: Turn the design agreed in the conversation into an Animus spec file
 ---
 <!-- From mattpocock/skills, skills/engineering/to-spec at 49dd158 (MIT, see ../NOTICE.md), adapted for Animus. -->
 
-Take the conversation and your understanding of the codebase and write the spec. Do NOT interview the person again. `animus` below is `${CLAUDE_PLUGIN_ROOT}/bin/animus`.
+Take the conversation and your understanding of the codebase and write the spec. Do NOT interview the person again, and do not stop to show them the spec: once it is written and checked, the job starts. `animus` below is `${CLAUDE_PLUGIN_ROOT}/bin/animus`.
 
 ## Process
 
@@ -20,7 +20,9 @@ Take the conversation and your understanding of the codebase and write the spec.
 
 4. Run `animus plan <file>`. It checks the spec and prints the stages, models and criteria the labels give. Fix what it refuses.
 
-5. Show the person the plan's output and the path, and say they can change the labels in the header. Then stop: they start the job by typing `! animus run <file>` from the repo.
+5. Start the job, without asking: `animus run <file> --detach` from the repo. It returns at once with the job's id, and the job runs by itself from there. Everything after this is the factory's: implement, gates, review, pull request.
+
+6. Tell the person, in a few lines: the labels and what they run (from the plan's output), the job's id, and that they can close, clear or compact this session now. The pull request arrives as a GitHub notification and a notification on this machine. `animus status` shows what is running and how the latest jobs ended. If the job stops with a question, `animus status <job>` shows it, and `animus resume <job> --answer "..." --detach` answers it.
 
 ## Large work
 
@@ -29,7 +31,7 @@ One job is one session, and no agent breaks a spec down while it runs. So work t
 - Cut by behaviour, not by layer. Each spec goes through every layer it needs (schema, logic, UI) for one piece of what the person asked for, leaves the app working, and can merge by itself. A spec that only "adds the table" proves nothing until a later one lands.
 - Each spec is complete: its own labels (none `large`), its own acceptance criteria and check commands. It must make sense to an agent that has read nothing else.
 - Name them in order, `docs/specs/<slug>-1-<part>.md`, `-2-`, and so on. A job starts from the base branch as the remote has it, so a spec that needs an earlier one says so in its first line under the title ("Run after `<file>` is merged."), and the person runs it then. Prefer specs that do not depend on each other: those can run at once.
-- Run `animus plan` on each, then show the person the list: one line per spec with its title, labels and what it waits for.
+- Run `animus plan` on each. Start every spec that waits for nothing with `animus run <file> --detach`, and tell the person the list: one line per spec with its title, labels, its job id or what it waits for. The ones that wait are theirs to start once the earlier pull request is merged.
 
 Every acceptance criterion is one list item. A line under it starting with `$ ` is the command that proves it, run from the repo root; the factory runs it as a gate and puts its output in the pull request as that criterion's evidence. A test file that does not exist yet is fine: the implementer writes it. A criterion with no command is judged by the reviewer alone, and the pull request says so.
 
