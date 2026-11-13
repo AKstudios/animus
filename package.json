@@ -1,0 +1,14 @@
+{
+  "name": "animus",
+  "version": "0.1.0",
+  "private": true,
+  "description": "A software factory on Claude Code: a spec goes in, a pull request with proof comes out.",
+  "type": "module",
+  "engines": { "node": ">=24" },
+  "scripts": {
+    "test": "sh scripts/with-tmp.sh node --disable-warning=ExperimentalWarning --test 'plugin/test/**/*.test.ts'",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": { "yaml": "2.9.1" },
+  "devDependencies": { "@types/node": "^24.0.0", "typescript": "^5.9.0" }
+}

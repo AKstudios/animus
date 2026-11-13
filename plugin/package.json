@@ -1,0 +1,13 @@
+{
+  "name": "animus-plugin",
+  "version": "0.2.0",
+  "private": true,
+  "description": "Animus's CLI as the plugin ships it. Claude Code installs these dependencies when it installs the plugin.",
+  "type": "module",
+  "engines": {
+    "node": ">=24"
+  },
+  "dependencies": {
+    "yaml": "2.9.1"
+  }
+}

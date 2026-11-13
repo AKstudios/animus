@@ -1,0 +1,82 @@
+# Task profiles: the one file that decides what a job runs (docs/factory.md,
+# "Task profiles"). Size picks the stages, difficulty picks the model tier and
+# effort, type adds a gate, a reviewer or a kind of evidence. Profiles name a
+# tier, never a model; `providers` maps tiers to models.
+
+provider: claude
+
+providers:
+  claude:
+    fast: haiku
+    standard: sonnet
+    deep: opus
+
+# Both loops are bounded: the gates send work back at most gate_rounds times
+# in a job, the review review_rounds times.
+limits:
+  gate_rounds: 2
+  review_rounds: 1
+
+sizes:
+  trivial:
+    looks_like: Typo, copy, config value, one or two files
+    setup: deps        # clone and dependencies only
+    gates: affected    # a command's `affected` form where the project's profile has one
+    review: none
+  small:
+    looks_like: A few files, follows a known pattern
+    setup: services    # services only if the tests need them
+    gates: full
+    review: fast
+  medium:
+    looks_like: A feature across layers, roughly 5 to 20 files
+    setup: full
+    gates: full
+    review: standard
+  large:
+    looks_like: Multi-module work or schema changes
+    reject: a large spec is not run as one job. Split it into medium specs with /animus:to-issues
+
+difficulties:
+  routine:
+    signals: Follows an existing pattern in the repo
+    tier: standard
+    effort: medium
+    sizes:
+      trivial: { tier: fast, effort: low }
+  hard:
+    signals: Unfamiliar area, cross-cutting change, unclear root cause
+    tier: standard
+    effort: high
+    sizes:
+      medium: { tier: deep }
+  risky:
+    signals: Auth, payments, migrations, data deletion
+    tier: deep
+    effort: high
+    review: deep       # always reviewed, whatever the size
+
+# A type with `later` is defined but not built: its spec is rejected with that reason.
+types:
+  feature: {}
+  backend: {}
+  ui:
+    setup: full
+    reviewer: ui-reviewer
+    evidence: [screenshots]
+  bug:
+    later: the gate that proves the new test fails on the base branch is not built yet
+  refactor:
+    later: the gate that flags edited test files is not built yet
+  upgrade:
+    later: the upgrade script is not built yet
+  migration:
+    later: migrations need the database template, which arrives with containers
+  performance:
+    later: the before-and-after benchmark evidence is not built yet
+  docs:
+    later: the docs path that skips the test gates is not built yet
+  tests:
+    later: the tests-only path is not built yet
+  investigation:
+    later: a job whose output is a findings report is not built yet

@@ -1,0 +1,12 @@
+{
+  "name": "animus",
+  "owner": { "name": "Ajmal Ali" },
+  "description": "Animus, a software factory on Claude Code.",
+  "plugins": [
+    {
+      "name": "animus",
+      "source": "./plugin",
+      "description": "A spec goes in, a pull request with proof comes out: shape the spec in conversation, then one implementing agent, scripted gates, one fresh reviewing agent, and a PR."
+    }
+  ]
+}

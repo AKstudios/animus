@@ -1,0 +1,25 @@
+#!/usr/bin/env bash
+# Runs Animus's CLI from the plugin it ships in. Claude Code puts this
+# directory on the Bash tool's PATH while the plugin is enabled.
+set -euo pipefail
+src="${BASH_SOURCE[0]}"
+while [ -L "$src" ]; do
+  dir="$(cd -P "$(dirname "$src")" && pwd)"
+  src="$(readlink "$src")"
+  [[ $src != /* ]] && src="$dir/$src"
+done
+root="$(cd -P "$(dirname "$src")/.." && pwd)"
+v="$(node --version 2>/dev/null || true)"
+major="${v#v}"; major="${major%%.*}"
+if [[ -z $v ]] || (( major < 24 )); then
+  echo "animus: needs Node 24 or later${v:+; $(command -v node) is $v}" >&2
+  exit 1
+fi
+# Claude Code installs the dependencies of a plugin from a git marketplace;
+# one loaded in place from a local path has to be installed by hand.
+if [[ ! -d $root/node_modules/yaml ]]; then
+  echo "animus: its dependencies are not installed; run: npm ci --prefix \"$root\"" >&2
+  exit 1
+fi
+export ANIMUS_BIN="$root/bin/animus"
+exec node --disable-warning=ExperimentalWarning "$root/src/cli.ts" "$@"

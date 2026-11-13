@@ -1,0 +1,131 @@
+// The animus command.
+import { resolve } from 'node:path';
+import { parseArgs } from 'node:util';
+import { claudeAgent } from './agent.ts';
+import { describe, jobChecks, runChecks } from './gates.ts';
+import { touchedFiles } from './git.ts';
+import { describeRuns, jobDir, loadState, readRuns } from './log.ts';
+import { factoryVersion, jobOf, onPath, runJob, uiJobOf } from './pipeline.ts';
+import { publish } from './pr.ts';
+import { loadProfile } from './profile.ts';
+import { describePlan, loadFactory, resolvePlan } from './profiles.ts';
+import { git, AnimusError, GitError } from './proc.ts';
+import { loadSpec } from './spec.ts';
+import { describeShots, takeShots, uiDown, uiTarget, uiUp } from './ui.ts';
+import { join } from 'node:path';
+
+const USAGE = `animus: a spec goes in, a pull request with proof comes out
+
+  animus run <spec.md> [--repo <dir>] [--dry-run] [--keep]
+        Run one job: set up a worktree, implement, gates, review, open the PR.
+        --dry-run stops before the push; --keep leaves the worktree.
+  animus plan <spec.md>
+        Check a spec and print what its labels would run. Starts nothing.
+  animus resume <job> [--answer <text>] [--dry-run] [--keep]
+        Pick up a job that asked a question or was interrupted.
+  animus runs [-n <count>] [--json]
+        The run log, newest last.
+
+Inside a job's worktree (the implementer runs these):
+  animus check              Run the job's gates now.
+  animus shots [--again]    Screenshot a UI job's pages.
+  animus ui up | down       Start or stop a UI job's app.
+
+  animus version`;
+
+const say = (line: string) => console.error(line);
+
+async function main(argv: string[]): Promise<number> {
+  const [command, ...rest] = argv;
+  const { values, positionals } = parseArgs({
+    args: rest, allowPositionals: true,
+    options: {
+      repo: { type: 'string' }, 'dry-run': { type: 'boolean' }, keep: { type: 'boolean' }, answer: { type: 'string' },
+      json: { type: 'boolean' }, n: { type: 'string', short: 'n' }, again: { type: 'boolean' },
+    },
+  });
+  const cwd = process.cwd();
+  const flags = { ...(values['dry-run'] ? { dryRun: true } : {}), ...(values.keep ? { keep: true } : {}) };
+  const deps = () => {
+    const factory = loadFactory();
+    return { factory, agent: claudeAgent(factory), publish, log: say };
+  };
+
+  switch (command) {
+    case 'run': {
+      if (!positionals[0]) throw new AnimusError('usage: animus run <spec.md>');
+      if (!values['dry-run'] && !onPath('gh')) throw new AnimusError('gh is not installed, so no pull request can be opened; install it or use --dry-run');
+      const run = await runJob({ repo: resolve(values.repo ?? cwd), specFile: resolve(positionals[0]), ...flags }, deps());
+      console.log(JSON.stringify({ job: run.job, outcome: run.outcome, pr: run.pr, reason: run.reason, question: run.question, branch: run.branch, cost_usd: run.cost_usd, dir: run.dir }, null, 2));
+      return run.outcome === 'pr' || run.outcome === 'dry-run' ? 0 : 1;
+    }
+    case 'plan': {
+      if (!positionals[0]) throw new AnimusError('usage: animus plan <spec.md>');
+      const spec = loadSpec(resolve(positionals[0]));
+      const factory = loadFactory();
+      console.log(`${spec.title}\n${describePlan(factory, resolvePlan(factory, spec))}`);
+      if (spec.defaulted.length) console.log(`  (no ${spec.defaulted.join(', ')} in the header: the default)`);
+      spec.criteria.forEach((c, i) => console.log(`  ${i + 1}. ${c.text}${c.commands.map((x) => `\n       $ ${x}`).join('') || '\n       (no check command: only the reviewer judges it)'}`));
+      return 0;
+    }
+    case 'resume': {
+      const state = positionals[0] ? loadState(positionals[0]) : undefined;
+      if (!state) throw new AnimusError(positionals[0] ? `no job ${positionals[0]} under ${jobDir('')}` : 'usage: animus resume <job> [--answer <text>]');
+      const run = await runJob({ repo: state.repo, resume: { state, ...(values.answer ? { answer: values.answer } : {}) }, ...flags }, deps());
+      console.log(JSON.stringify({ job: run.job, outcome: run.outcome, pr: run.pr, reason: run.reason, question: run.question, branch: run.branch, cost_usd: run.cost_usd, dir: run.dir }, null, 2));
+      return run.outcome === 'pr' || run.outcome === 'dry-run' ? 0 : 1;
+    }
+    case 'runs': {
+      const runs = readRuns().slice(-Number(values.n ?? 20));
+      console.log(values.json ? JSON.stringify(runs, null, 2) : describeRuns(runs));
+      return 0;
+    }
+    case 'check': case 'shots': case 'ui': {
+      const root = git(cwd, ['rev-parse', '--show-toplevel']);
+      const job = jobOf(root);
+      const state = job ? loadState(job) : undefined;
+      if (!state) throw new AnimusError(`animus ${command} runs inside a job's worktree, and this is not one`);
+      const spec = loadSpec(state.spec);
+      const profile = loadProfile(state.repo);
+      if (command === 'check') {
+        const files = [...new Set([...touchedFiles(root, state.workspace.base, 'HEAD'), ...git(root, ['ls-files', '--others', '--modified', '--exclude-standard']).split('\n').filter(Boolean)])];
+        const results = runChecks(root, jobChecks(profile, state.plan, spec, { base: state.workspace.base, files }), state.job);
+        console.log(describe(results));
+        return results.every((r) => r.ok) ? 0 : 1;
+      }
+      if (state.plan.type !== 'ui') throw new AnimusError('this job is not a ui job');
+      const ui = uiJobOf(state.job, spec);
+      if (command === 'shots') {
+        const r = await takeShots(root, ui, profile, join(jobDir(state.job), 'shots'), values.again ? { again: true } : {});
+        console.log(describeShots(r.dir, r.shots, r.reused));
+        return 0;
+      }
+      if (positionals[0] === 'up') {
+        const up = await uiUp(root, uiTarget(profile, ui)!);
+        console.log(up.url ? `running at ${up.url}` : `running (port ${up.port})`);
+        return 0;
+      }
+      if (positionals[0] === 'down') {
+        console.log(uiDown(root) ? 'stopped' : 'nothing was running');
+        return 0;
+      }
+      throw new AnimusError('usage: animus ui up | down');
+    }
+    case 'version':
+      console.log(factoryVersion());
+      return 0;
+    case undefined: case 'help': case '--help': case '-h':
+      console.log(USAGE);
+      return 0;
+    default:
+      throw new AnimusError(`unknown command ${command}\n\n${USAGE}`);
+  }
+}
+
+main(process.argv.slice(2)).then((code) => process.exit(code), (err: unknown) => {
+  if (err instanceof AnimusError || err instanceof GitError) {
+    console.error(`animus: ${err.message}`);
+    process.exit(2);
+  }
+  throw err;
+});
