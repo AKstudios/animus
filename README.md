@@ -14,7 +14,7 @@ plugin/bin/animus run path/to/spec.md      # from inside the target repo
 
 `run` prints progress on stderr and a JSON result on stdout. It needs `claude`, `git` and `gh` on PATH, Node 24, and a `.animus/animus.yaml` in the target repo.
 
-From a Claude Code session with the plugin installed, `/animus:grilling` interviews you, `/animus:to-spec` writes the spec, and `/animus:run <spec>` starts the job.
+From a Claude Code session with the plugin installed, `/animus:grilling` interviews you, `/animus:to-spec` writes the spec, and `! animus run <spec>` starts the job. A design too large for one job becomes several specs, each its own job and PR. No agent breaks a spec down mid-run.
 
 | Command | What it does |
 | --- | --- |
@@ -65,6 +65,7 @@ An agent has the skills its role is granted and no others. A skill reaches a rol
 | Skill | Given to | What it gets |
 | --- | --- | --- |
 | [ponytail](https://github.com/dietrichgebert/ponytail) | implementer, every job | The whole skill: the smallest change that fully solves the task |
+| useful-tests (yours, from orbit) | implementer, every job | The whole skill: fewer tests, each one justified |
 | [impeccable](https://github.com/pbakaus/impeccable) | implementer, UI jobs | The skill, with its reference files to read on demand |
 | impeccable | ui-reviewer, UI jobs | Only its quality floor, as a checklist |
 | none | reviewer | |

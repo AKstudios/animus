@@ -1,6 +1,6 @@
 ---
 name: to-spec
-description: Turn the design agreed in the conversation into an Animus spec file, with the size, difficulty and type labels in its header and a check command under each acceptance criterion. No interview, just synthesis. Use after grilling, once the person has confirmed the design.
+description: Turn the design agreed in the conversation into an Animus spec file, with the size, difficulty and type labels in its header and a check command under each acceptance criterion, or into several spec files when the work is too large for one job. No interview, just synthesis. Use after grilling, once the person has confirmed the design.
 ---
 <!-- From mattpocock/skills, skills/engineering/to-spec at 49dd158 (MIT, see ../NOTICE.md), adapted for Animus. -->
 
@@ -12,7 +12,7 @@ Take the conversation and your understanding of the codebase and write the spec.
 
 2. Propose the three labels. They decide what the factory runs, so pick them from what the work is, not from how important it feels:
 
-   - **size**: `trivial` (a typo, copy, a config value, one or two files), `small` (a few files, follows a known pattern), `medium` (a feature across layers, roughly 5 to 20 files), `large` (multi-module work or a schema change). The factory refuses `large`: split it with `to-issues` instead of writing one spec.
+   - **size**: `trivial` (a typo, copy, a config value, one or two files), `small` (a few files, follows a known pattern), `medium` (a feature across layers, roughly 5 to 20 files), `large` (multi-module work or a schema change). The factory refuses `large`: write several specs instead of one, as "Large work" below says.
    - **difficulty**: `routine` (follows an existing pattern in the repo), `hard` (unfamiliar area, cross-cutting change, unclear root cause), `risky` (auth, payments, migrations, data deletion). They are separate from size: a ten-line concurrency bug is small but hard.
    - **type**: `feature`, `backend` or `ui` run today. `bug`, `refactor`, `upgrade`, `migration`, `performance`, `docs`, `tests` and `investigation` are defined but not built; `animus plan` says so. A `ui` spec may name the profile's target and pages (`ui: { target: app, pages: [home] }`) and design files (`design: [design/shop.png]`).
 
@@ -20,7 +20,16 @@ Take the conversation and your understanding of the codebase and write the spec.
 
 4. Run `animus plan <file>`. It checks the spec and prints the stages, models and criteria the labels give. Fix what it refuses.
 
-5. Show the person the plan's output and the path, and say they can change the labels in the header. Then stop: they start the job with `/animus:run <file>`.
+5. Show the person the plan's output and the path, and say they can change the labels in the header. Then stop: they start the job by typing `! animus run <file>` from the repo.
+
+## Large work
+
+One job is one session, and no agent breaks a spec down while it runs. So work that is multi-module or changes a schema is split here, with the person, into several medium specs, each run as its own job with its own pull request.
+
+- Cut by behaviour, not by layer. Each spec goes through every layer it needs (schema, logic, UI) for one piece of what the person asked for, leaves the app working, and can merge by itself. A spec that only "adds the table" proves nothing until a later one lands.
+- Each spec is complete: its own labels (none `large`), its own acceptance criteria and check commands. It must make sense to an agent that has read nothing else.
+- Name them in order, `docs/specs/<slug>-1-<part>.md`, `-2-`, and so on. A job starts from the base branch as the remote has it, so a spec that needs an earlier one says so in its first line under the title ("Run after `<file>` is merged."), and the person runs it then. Prefer specs that do not depend on each other: those can run at once.
+- Run `animus plan` on each, then show the person the list: one line per spec with its title, labels and what it waits for.
 
 Every acceptance criterion is one list item. A line under it starting with `$ ` is the command that proves it, run from the repo root; the factory runs it as a gate and puts its output in the pull request as that criterion's evidence. A test file that does not exist yet is fine: the implementer writes it. A criterion with no command is judged by the reviewer alone, and the pull request says so.
 

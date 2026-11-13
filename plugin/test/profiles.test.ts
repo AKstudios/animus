@@ -33,7 +33,7 @@ test('a ui job gets the full stack, the ui reviewer and screenshots', () => {
 });
 
 test('a large spec and a type not built yet are refused with the reason', () => {
-  assert.throws(() => plan('large', 'routine'), /to-issues/);
+  assert.throws(() => plan('large', 'routine'), /Split it into medium specs/);
   assert.throws(() => plan('small', 'routine', 'bug'), /does not run yet.*Types that run: feature, backend, ui/s);
   assert.throws(() => plan('small', 'routine', 'poetry'), /not one of/);
 });

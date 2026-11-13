@@ -10,8 +10,8 @@ const factory = loadFactory();
 const names = (role: string, type: string) => grantsFor(factory, role, type).map((g) => g.name);
 
 test('each role gets only the skills it is granted, and impeccable only on ui jobs', () => {
-  assert.deepEqual(names('implementer', 'feature'), ['ponytail']);
-  assert.deepEqual(names('implementer', 'ui'), ['ponytail', 'impeccable']);
+  assert.deepEqual(names('implementer', 'feature'), ['ponytail', 'useful-tests']);
+  assert.deepEqual(names('implementer', 'ui'), ['ponytail', 'useful-tests', 'impeccable']);
   assert.deepEqual(names('reviewer', 'feature'), []);
   assert.deepEqual(names('reviewer', 'ui'), []);
   assert.deepEqual(names('ui-reviewer', 'ui'), ['impeccable']);
@@ -19,11 +19,11 @@ test('each role gets only the skills it is granted, and impeccable only on ui jo
 
 test('a granted skill arrives as text with Animus\'s note first, and its folder to read from', () => {
   const s = roleSkills(factory, 'implementer', 'ui');
-  assert.deepEqual(s.names, ['ponytail', 'impeccable']);
+  assert.deepEqual(s.names, ['ponytail', 'useful-tests', 'impeccable']);
   assert.match(s.system, /# Skill: ponytail\n\nHow this skill applies inside Animus:[\s\S]*You are a lazy senior developer/);
   assert.match(s.system, /The launcher is not installed/);
   assert.doesNotMatch(s.system, /^name: ponytail/m);
-  assert.equal(s.dirs.length, 2);
+  assert.equal(s.dirs.length, 3);
   // The ui reviewer gets the quality floor, not the designer's whole skill.
   const r = roleSkills(factory, 'ui-reviewer', 'ui');
   assert.match(r.system, /# Craft floor/);
@@ -48,8 +48,8 @@ test('a job gives the implementer its skills, the reviewer none, and logs which 
   ]);
   const run = await runJob({ repo, specFile: writeSpec('size: small\ndifficulty: routine\ntype: feature') }, deps(agent));
   assert.match(calls[0]!.system!, /# Skill: ponytail/);
-  assert.equal(calls[0]!.addDirs?.length, 1);
+  assert.equal(calls[0]!.addDirs?.length, 2);
   assert.doesNotMatch(calls[1]!.system!, /# Skill:/);
   assert.equal(calls[1]!.addDirs, undefined);
-  assert.deepEqual(run.skills, ['ponytail']);
+  assert.deepEqual(run.skills, ['ponytail', 'useful-tests']);
 });

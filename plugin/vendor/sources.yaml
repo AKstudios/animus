@@ -22,3 +22,9 @@ impeccable:
   strip: .claude/skills/impeccable/
   paths: [.claude/skills/impeccable/SKILL.md, .claude/skills/impeccable/reference, LICENSE, NOTICE.md]
   left_out: scripts/ (the launcher downloads a prebuilt engine binary on first run, which nobody here can read; the skill's own "launcher unavailable" path is used instead)
+
+# The person's own skill, written for orbit; not from a public repo.
+useful-tests:
+  repo: ../orbit (plugin/skills/useful-tests)
+  commit: 3b5c491
+  license: own

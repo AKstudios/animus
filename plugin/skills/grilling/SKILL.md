@@ -34,7 +34,7 @@ The factory asks no questions mid-run, so the interview is the only time to sett
 
 - **The acceptance criteria.** Each one a statement someone could check, in the person's words.
 - **The check for each criterion.** A command that proves it, usually one test file run alone. Agree the seam the test sits at: prefer one the code already has, and the highest one possible. A criterion no command can prove (a look, a feel) is settled as "the reviewer judges it".
-- **The size.** If the work is multi-module or changes a schema, it is large, and the factory does not run large specs: say so now and plan to split it with `to-issues`.
+- **The size.** If the work is multi-module or changes a schema, it is large, and the factory does not run large specs: say so now and agree where to cut it into medium pieces that each merge by themselves. `to-spec` writes one spec per piece.
 
 **The last round is a critique.** When the frontier is empty, review the design you agreed as a skeptical senior engineer would: what breaks first, what is over-built, what was assumed and never said. Put each point as a question in the same format. Then ask whether you have reached a shared understanding.
 

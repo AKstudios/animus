@@ -1,0 +1,1 @@
+How this skill applies inside Animus: it governs how you write tests, and the project's own test rules win where they differ. It does not lower the bar your instructions set: each acceptance criterion with behavior still gets a test that would fail without your change.

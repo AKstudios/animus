@@ -35,7 +35,7 @@ sizes:
     review: standard
   large:
     looks_like: Multi-module work or schema changes
-    reject: a large spec is not run as one job. Split it into medium specs with /animus:to-issues
+    reject: a large spec is not run as one job. Split it into medium specs, each run as its own job (/animus:to-spec, "Large work")
 
 difficulties:
   routine:
@@ -87,6 +87,9 @@ types:
 # not the person's own, not Claude Code's built-in ones.
 skills:
   ponytail:
+    roles:
+      implementer: SKILL.md
+  useful-tests:
     roles:
       implementer: SKILL.md
   impeccable:
