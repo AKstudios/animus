@@ -26,6 +26,9 @@ and every task type marked `later` in plugin/config/profiles.yaml.
   review, and propose labels; they do not route.
 - Every agent step goes through `Agent` in plugin/src/agent.ts. Nothing else
   may name a model or a CLI. Profiles name a tier.
+- A skill reaches an agent only through a grant in profiles.yaml and a copy
+  in plugin/vendor/ at a commit in sources.yaml. Never give a job session
+  the Skill tool, and never fetch a skill while a job runs.
 - A job leaves nothing in the target repo but its branch. Its state, the run
   log and its evidence live under `~/.animus` (`ANIMUS_HOME`).
 - Errors meant for the user throw `AnimusError` (printed without a stack).

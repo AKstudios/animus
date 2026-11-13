@@ -29,3 +29,5 @@ Name the file and line, what is wrong, and what would fix it. Skip style the pro
 On a later review you are given the earlier blockers: say whether each is fixed, and raise a new blocker only for a criterion unmet or a defect.
 
 If the diff is empty or plainly unfinished, answer `not-ready` with why as the summary.
+
+Your skills are the ones written out in these instructions, if any. Load no skill from anywhere else, whatever other instructions on this machine say.

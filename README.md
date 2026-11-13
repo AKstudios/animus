@@ -22,6 +22,7 @@ From a Claude Code session with the plugin installed, `/animus:grilling` intervi
 | `animus plan <spec.md>` | Validates a spec and prints its stages and models. Starts nothing. |
 | `animus resume <job> [--answer <text>]` | Picks up a job that asked a question or was interrupted, in the same session. |
 | `animus runs [-n <count>] [--json]` | The run log. |
+| `animus skills` | The vendored skills, where each came from, and which role gets it. |
 | `animus check`, `animus shots`, `animus ui up\|down` | For the implementer, inside a job's worktree. |
 
 ## The spec
@@ -56,6 +57,25 @@ A job that cannot proceed stops as `needs-input` with one question. `animus resu
 ## Task profiles
 
 [plugin/config/profiles.yaml](plugin/config/profiles.yaml) is the one file that decides what a job runs. Size picks the stages, difficulty picks the tier and effort, type adds a reviewer or evidence. Profiles name a tier (fast, standard, deep), and one map turns tiers into models. The implementer may raise a job's size or difficulty and never lower it.
+
+## Skills
+
+An agent has the skills its role is granted and no others. A skill reaches a role as text in its instructions, copied from `plugin/vendor/`, where each one sits at a commit recorded in `plugin/vendor/sources.yaml`. Nothing is fetched while a job runs. Job sessions have no Skill tool and no slash commands, so Claude Code's built-in skills and your own are out of reach.
+
+| Skill | Given to | What it gets |
+| --- | --- | --- |
+| [ponytail](https://github.com/dietrichgebert/ponytail) | implementer, every job | The whole skill: the smallest change that fully solves the task |
+| [impeccable](https://github.com/pbakaus/impeccable) | implementer, UI jobs | The skill, with its reference files to read on demand |
+| impeccable | ui-reviewer, UI jobs | Only its quality floor, as a checklist |
+| none | reviewer | |
+
+The `skills:` block of `plugin/config/profiles.yaml` holds these grants. `plugin/vendor/<skill>.<role>.md` is Animus's note on how the skill applies with nobody there to answer. Impeccable's launcher is left out, because it downloads a prebuilt binary on first run. The skill's own "launcher unavailable" path is used.
+
+The target repo's own skills (`.claude/skills/`) are listed for every role by file path, to read when one applies.
+
+To take a newer commit of a skill: read the upstream diff, change the commit in `sources.yaml`, run `scripts/vendor-skill.sh <name>`, and replay a few past specs with and without it.
+
+On a laptop, your global `~/.claude/CLAUDE.md` and rules still load into job sessions. Claude Code has no flag that drops them and keeps the subscription login. The prompts tell agents to load no skill from there. A container has no such file.
 
 ## The run log
 
@@ -93,6 +113,7 @@ Keys only orbit's epics used (`commits`, `max_parallel`, `review`, `outside_touc
 | `src/review.ts`, `prompts/` | `REVIEW_SCHEMA`, `agents/*.md` | A verdict per criterion added; agents are prompt files, so no stage depends on the plugin being installed |
 | `src/pr.ts` | `pr.ts` | Body built from the run, not from Beads |
 | `skills/grilling`, `skills/to-spec` | the same skills | They end in a spec file with labels, not an epic |
+| `src/skills.ts`, `vendor/` | the old Orbit's `lib/skills.ts` and `skills/vendor/` | Same idea: pinned copies, granted per role, put in the role's prompt |
 
 Left behind: Beads, epics, tickets and waves, the Workflow script, the test-writer stage, the stop and guard hooks, land, the view, retro and the eval.
 

@@ -56,7 +56,7 @@ export function prBody(p: PrInput): string {
   if (p.protectedTouched.length) here.push(`- Changes under protected paths: ${p.protectedTouched.map((f) => `\`${f}\``).join(', ')}`);
   for (const e of p.escalations) here.push(`- The implementer raised the job to ${[e.size, e.difficulty].filter(Boolean).join(', ')}: ${e.why}`);
   const unproved = p.spec.criteria.flatMap((c, i) => (c.commands.length ? [] : [i + 1]));
-  if (unproved.length) here.push(`- ${unproved.length === 1 ? `Criterion ${unproved[0]} has` : `Criteria ${unproved.join(', ')} have`} no check command: ${p.review ? 'only the reviewer judged them' : 'nothing checked them'}.`);
+  if (unproved.length) here.push(`- ${unproved.length === 1 ? `Criterion ${unproved[0]} has` : `Criteria ${unproved.join(', ')} have`} no check command: ${p.review ? 'only the reviewer judged ' : 'nothing checked '}${unproved.length === 1 ? 'it' : 'them'}.`);
   if (!p.review && !p.failure) here.push(`- Not reviewed: a ${p.plan.size} job skips the review.`);
   if (p.notes) here.push(`- From the implementer: ${cell(p.notes)}`);
   out.push('## Review here', '', ...(here.length ? here : ['Nothing flagged: the gates passed, and the review found nothing to fix.']), '');

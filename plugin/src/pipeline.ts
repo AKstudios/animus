@@ -18,6 +18,7 @@ import { loadProfile } from './profile.ts';
 import { describePlan, escalate, modelFor, PLUGIN_ROOT, raise, resolvePlan, type Factory, type Tier } from './profiles.ts';
 import { animusCommand, git, AnimusError, tryGit } from './proc.ts';
 import { asReport, asReview, blockers, criteriaList, listFindings, REPORT_SCHEMA, REVIEW_SCHEMA, type Finding, type Report, type Review } from './review.ts';
+import { roleSkills } from './skills.ts';
 import { loadSpec, type Spec } from './spec.ts';
 import { describeShots, designOf, takeShots, uiProblem, uiTarget, type UiJob } from './ui.ts';
 import { createWorkspace, ensureSetup, removeWorkspace, reopenWorkspace, type Workspace } from './workspace.ts';
@@ -166,11 +167,18 @@ export async function runJob(opts: RunOptions, deps: Deps): Promise<Run> {
     }
   };
 
+  /** A role's standing instructions with the skills it is granted, and the folders those skills' files are in. */
+  const instructions = (role: string) => {
+    const s = roleSkills(factory, role, plan.type, wt);
+    for (const name of s.names) if (!run.skills.includes(name)) run.skills.push(name);
+    return { system: [readPrompt(role), s.system].filter(Boolean).join('\n\n'), ...(s.dirs.length ? { addDirs: s.dirs } : {}) };
+  };
+
   /** One turn of the implementer's session: the first starts it, later ones resume it. */
   const implementer = async (stage: string, prompt: string, tier: Tier): Promise<Report> => {
     const effort = plan.implement.effort;
     log(`${stage}: ${modelFor(factory, tier)}, ${effort} effort`);
-    const r = await timed('implement', () => deps.agent({ role: 'implementer', tier, effort, prompt, cwd: wt, system: readPrompt('implementer'), schema: REPORT_SCHEMA, ...(state.session ? { resume: state.session } : {}) }));
+    const r = await timed('implement', () => deps.agent({ role: 'implementer', tier, effort, prompt, cwd: wt, ...instructions('implementer'), schema: REPORT_SCHEMA, ...(state.session ? { resume: state.session } : {}) }));
     record(stage, 'implementer', tier, effort, r);
     if (r.session) state.session = r.session;
     saveState(state);
@@ -249,7 +257,7 @@ export async function runJob(opts: RunOptions, deps: Deps): Promise<Run> {
         const prompt = reviewPrompt({ spec, ws, round, earlier: open, shots: seen });
         let said: Review | undefined;
         for (let tries = 0; tries < 2 && !said; tries++) {
-          const r = await timed('review', () => deps.agent({ role, tier, effort, prompt, cwd: wt, system: readPrompt(role), schema: REVIEW_SCHEMA, readOnly: true, timeoutMs: REVIEW_TIMEOUT_MS }));
+          const r = await timed('review', () => deps.agent({ role, tier, effort, prompt, cwd: wt, ...instructions(role), schema: REVIEW_SCHEMA, readOnly: true, timeoutMs: REVIEW_TIMEOUT_MS }));
           record(`review-${round}${tries ? '-retry' : ''}`, role, tier, effort, r);
           restore(wt);
           said = asReview(r.output);

@@ -1,0 +1,24 @@
+# Skills from outside, copied in at a commit someone read. Nothing here is
+# fetched while a job runs. plugin/config/profiles.yaml says which role gets
+# which skill; <name>.<role>.md beside each folder is Animus's note on how the
+# skill applies to an unattended job.
+#
+# To take a newer commit: read the upstream diff, run
+#   scripts/vendor-skill.sh <name>
+# and replay a few past specs with and without the skill before committing.
+
+ponytail:
+  repo: https://github.com/dietrichgebert/ponytail
+  commit: 96608e078b2d5ea607c5c3b8b5a54d1c1fba6846
+  license: MIT
+  strip: skills/ponytail/
+  paths: [skills/ponytail/SKILL.md, LICENSE]
+  left_out: the hooks, status line and the audit, debt, gain, help and review skills
+
+impeccable:
+  repo: https://github.com/pbakaus/impeccable
+  commit: c4cd1924c389f68d37c687d9c2bbf13f12547c41
+  license: Apache-2.0
+  strip: .claude/skills/impeccable/
+  paths: [.claude/skills/impeccable/SKILL.md, .claude/skills/impeccable/reference, LICENSE, NOTICE.md]
+  left_out: scripts/ (the launcher downloads a prebuilt engine binary on first run, which nobody here can read; the skill's own "launcher unavailable" path is used instead)

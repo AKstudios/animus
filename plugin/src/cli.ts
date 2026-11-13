@@ -10,6 +10,7 @@ import { publish } from './pr.ts';
 import { loadProfile } from './profile.ts';
 import { describePlan, loadFactory, resolvePlan } from './profiles.ts';
 import { git, AnimusError, GitError } from './proc.ts';
+import { describeSkills, grantsFor } from './skills.ts';
 import { loadSpec } from './spec.ts';
 import { describeShots, takeShots, uiDown, uiTarget, uiUp } from './ui.ts';
 import { join } from 'node:path';
@@ -26,6 +27,8 @@ const USAGE = `animus: a spec goes in, a pull request with proof comes out
         Pick up a job that asked a question or was interrupted.
   animus runs [-n <count>] [--json]
         The run log, newest last.
+  animus skills
+        The vendored skills, where each came from, and which role gets it.
 
 Inside a job's worktree (the implementer runs these):
   animus check              Run the job's gates now.
@@ -64,7 +67,9 @@ async function main(argv: string[]): Promise<number> {
       if (!positionals[0]) throw new AnimusError('usage: animus plan <spec.md>');
       const spec = loadSpec(resolve(positionals[0]));
       const factory = loadFactory();
-      console.log(`${spec.title}\n${describePlan(factory, resolvePlan(factory, spec))}`);
+      const plan = resolvePlan(factory, spec);
+      console.log(`${spec.title}\n${describePlan(factory, plan)}`);
+      for (const role of ['implementer', ...(plan.review ? [plan.review.role] : [])]) console.log(`  skills     ${role}: ${grantsFor(factory, role, plan.type).map((g) => g.name).join(', ') || 'none'}`);
       if (spec.defaulted.length) console.log(`  (no ${spec.defaulted.join(', ')} in the header: the default)`);
       spec.criteria.forEach((c, i) => console.log(`  ${i + 1}. ${c.text}${c.commands.map((x) => `\n       $ ${x}`).join('') || '\n       (no check command: only the reviewer judges it)'}`));
       return 0;
@@ -112,6 +117,9 @@ async function main(argv: string[]): Promise<number> {
       }
       throw new AnimusError('usage: animus ui up | down');
     }
+    case 'skills':
+      console.log(describeSkills(loadFactory()));
+      return 0;
     case 'version':
       console.log(factoryVersion());
       return 0;

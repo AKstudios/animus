@@ -28,6 +28,8 @@ export type Factory = {
   sizes: Record<string, SizeProfile>;
   difficulties: Record<string, DifficultyProfile>;
   types: Record<string, TypeProfile>;
+  /** Vendored skills: the roles that get each, with the file each role is given, and the job types it is limited to. */
+  skills?: Record<string, { types?: string[]; roles: Record<string, string> }>;
 };
 
 export type Labels = { size: Size; difficulty: Difficulty; type: string };

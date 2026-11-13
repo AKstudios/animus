@@ -22,6 +22,8 @@ export type AgentRequest = {
   schema?: object;
   /** Continue this earlier session instead of starting one. */
   resume?: string;
+  /** Folders outside cwd the session may read: a vendored skill's files. */
+  addDirs?: string[];
   /** No file edits: the reviewer's sessions. */
   readOnly?: boolean;
   timeoutMs?: number;
@@ -59,20 +61,23 @@ type ClaudeJson = {
 };
 
 /**
- * Claude Code, headless. Sessions load the project's own settings, rules and
- * skills only (--setting-sources project), so a job runs the same on a laptop
- * and in a container that has none of the person's own.
+ * Claude Code, headless. Sessions load the project's own settings and rules
+ * only (--setting-sources project), so a job runs the same on a laptop and in
+ * a container that has none of the person's own. They get no Skill tool and no
+ * slash commands: a skill reaches a role as text in its instructions
+ * (skills.ts), so each role has exactly the skills it was granted.
  */
 export function claudeAgent(factory: Factory, command = process.env.ANIMUS_CLAUDE ?? 'claude'): Agent {
   return (req) => {
     const model = modelFor(factory, req.tier);
-    const args = ['-p', req.prompt, '--model', model, '--effort', req.effort, '--output-format', 'json', '--permission-mode', 'dontAsk', '--setting-sources', 'project'];
+    const args = ['-p', req.prompt, '--model', model, '--effort', req.effort, '--output-format', 'json', '--permission-mode', 'dontAsk', '--setting-sources', 'project', '--disable-slash-commands'];
+    for (const dir of req.addDirs ?? []) args.push('--add-dir', dir);
     if (req.resume) args.push('--resume', req.resume);
     if (req.system) args.push('--append-system-prompt', req.system);
     if (req.schema) args.push('--json-schema', JSON.stringify(req.schema));
     const noGit = ['Bash(git push:*)', 'Bash(git checkout:*)', 'Bash(git switch:*)', 'Bash(git worktree:*)', 'Bash(gh:*)'];
     if (req.readOnly) args.push('--allowedTools', 'Bash', 'Read', 'Glob', 'Grep', '--disallowedTools', 'Edit', 'Write', 'NotebookEdit', 'Bash(git commit:*)', ...noGit);
-    else args.push('--allowedTools', 'Bash', 'Read', 'Write', 'Edit', 'Glob', 'Grep', 'Skill', '--disallowedTools', ...noGit);
+    else args.push('--allowedTools', 'Bash', 'Read', 'Write', 'Edit', 'Glob', 'Grep', '--disallowedTools', ...noGit);
 
     const started = Date.now();
     const r = spawnSync(command, args, { cwd: req.cwd, encoding: 'utf8', timeout: req.timeoutMs ?? DEFAULT_TIMEOUT_MS, maxBuffer: 256 * 1024 * 1024 });

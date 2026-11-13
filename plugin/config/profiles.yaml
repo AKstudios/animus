@@ -80,3 +80,17 @@ types:
     later: the tests-only path is not built yet
   investigation:
     later: a job whose output is a findings report is not built yet
+
+# Which role gets which vendored skill (plugin/vendor/), and which of its files
+# is put in that role's instructions. A role not named here gets none. `types`
+# limits a skill to jobs of those types. Sessions cannot reach any other skill:
+# not the person's own, not Claude Code's built-in ones.
+skills:
+  ponytail:
+    roles:
+      implementer: SKILL.md
+  impeccable:
+    types: [ui]
+    roles:
+      implementer: SKILL.md
+      ui-reviewer: reference/craft-floor.md
