@@ -1,13 +1,11 @@
 // The animus command.
-import { spawn } from 'node:child_process';
-import { mkdirSync, openSync, rmSync, writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { parseArgs } from 'node:util';
 import { claudeAgent } from './agent.ts';
 import { describe, jobChecks, runChecks } from './gates.ts';
 import { touchedFiles } from './git.ts';
-import { describeJob, describeRuns, describeStatus, jobDir, loadState, readRuns, running, type Run } from './log.ts';
-import { factoryVersion, jobOf, newJobId, onPath, runJob, uiJobOf } from './pipeline.ts';
+import { describeRuns, jobDir, loadState, readRuns, type Run } from './log.ts';
+import { factoryVersion, jobOf, onPath, runJob, uiJobOf } from './pipeline.ts';
 import { publish, pushEvidence } from './pr.ts';
 import { loadProfile } from './profile.ts';
 import { describePlan, loadFactory, resolvePlan } from './profiles.ts';
@@ -19,16 +17,13 @@ import { join } from 'node:path';
 
 const USAGE = `animus: a spec goes in, a pull request with proof comes out
 
-  animus run <spec.md> [--repo <dir>] [--detach] [--dry-run] [--draft] [--keep]
+  animus run <spec.md> [--repo <dir>] [--dry-run] [--draft] [--keep]
         Run one job: set up a worktree, implement, gates, review, open the PR.
-        --detach returns at once and the job runs by itself: the session that
-        started it can be closed. --dry-run stops before the push; --draft
-        opens the PR as a draft; --keep leaves the worktree.
-  animus status [<job>]
-        What is running and how the latest jobs ended; one job in detail.
+        --dry-run stops before the push; --draft opens the PR as a draft;
+        --keep leaves the worktree.
   animus plan <spec.md>
         Check a spec and print what its labels would run. Starts nothing.
-  animus resume <job> [--answer <text>] [--detach] [--dry-run] [--keep]
+  animus resume <job> [--answer <text>] [--dry-run] [--keep]
         Pick up a job that asked a question or was interrupted.
   animus runs [-n <count>] [--json]
         The run log, newest last.
@@ -44,32 +39,10 @@ Inside a job's worktree (the implementer runs these):
 
 const say = (line: string) => console.error(line);
 
-/**
- * Starts the same command as a process of its own and returns at once, so the
- * session that started the job can be closed, cleared or compacted. Its
- * output goes to the job's run.log. On a Mac it runs under caffeinate, which
- * keeps the machine from idle sleep until the job ends.
- */
-function detach(job: string, args: string[], flags: { dryRun?: boolean; draft?: boolean; keep?: boolean }): number {
-  const dir = jobDir(job);
-  mkdirSync(dir, { recursive: true });
-  const log = join(dir, 'run.log');
-  const node = [process.execPath, ...process.execArgv, process.argv[1]!, ...args, '--job', job,
-    ...(flags.dryRun ? ['--dry-run'] : []), ...(flags.draft ? ['--draft'] : []), ...(flags.keep ? ['--keep'] : [])];
-  const command = process.platform === 'darwin' && onPath('caffeinate') ? ['caffeinate', '-i', ...node] : node;
-  const out = openSync(log, 'a');
-  const child = spawn(command[0]!, command.slice(1), { detached: true, stdio: ['ignore', out, out], env: { ...process.env, ANIMUS_DETACHED: '1' } });
-  child.unref();
-  if (!child.pid) throw new AnimusError('could not start the job');
-  writeFileSync(join(dir, 'pid'), String(child.pid));
-  console.log(JSON.stringify({ job, started: true, log, status: `animus status ${job}` }, null, 2));
-  return 0;
-}
 
-/** Prints a run's result. A detached run's goes to its run.log; `animus status` and the PR's own notification are how the person hears. */
+/** Prints a run's result as JSON; the exit code says whether it ended in a pull request. */
 function finish(run: Run): number {
   console.log(JSON.stringify({ job: run.job, outcome: run.outcome, pr: run.pr, reason: run.reason, question: run.question, branch: run.branch, cost_usd: run.cost_usd, dir: run.dir }, null, 2));
-  if (process.env.ANIMUS_DETACHED) rmSync(join(run.dir, 'pid'), { force: true });
   return run.outcome === 'pr' || run.outcome === 'dry-run' ? 0 : 1;
 }
 
@@ -78,7 +51,7 @@ async function main(argv: string[]): Promise<number> {
   const { values, positionals } = parseArgs({
     args: rest, allowPositionals: true,
     options: {
-      repo: { type: 'string' }, 'dry-run': { type: 'boolean' }, keep: { type: 'boolean' }, draft: { type: 'boolean' }, detach: { type: 'boolean' }, job: { type: 'string' }, answer: { type: 'string' },
+      repo: { type: 'string' }, 'dry-run': { type: 'boolean' }, keep: { type: 'boolean' }, draft: { type: 'boolean' }, answer: { type: 'string' },
       json: { type: 'boolean' }, n: { type: 'string', short: 'n' }, again: { type: 'boolean' },
     },
   });
@@ -95,14 +68,7 @@ async function main(argv: string[]): Promise<number> {
       if (!values['dry-run'] && !onPath('gh')) throw new AnimusError('gh is not installed, so no pull request can be opened; install it or use --dry-run');
       const specFile = resolve(positionals[0]);
       const repo = resolve(values.repo ?? cwd);
-      if (values.detach) {
-        // Refuse a bad spec or a repo without a profile here, where the person still sees it.
-        const spec = loadSpec(specFile);
-        resolvePlan(loadFactory(), spec);
-        loadProfile(git(repo, ['rev-parse', '--show-toplevel']));
-        return detach(newJobId(spec.title), ['run', specFile, '--repo', repo], flags);
-      }
-      return finish(await runJob({ repo, specFile, ...(values.job ? { job: values.job } : {}), ...flags }, deps()));
+      return finish(await runJob({ repo, specFile, ...flags }, deps()));
     }
     case 'plan': {
       if (!positionals[0]) throw new AnimusError('usage: animus plan <spec.md>');
@@ -118,13 +84,8 @@ async function main(argv: string[]): Promise<number> {
     case 'resume': {
       const state = positionals[0] ? loadState(positionals[0]) : undefined;
       if (!state) throw new AnimusError(positionals[0] ? `no job ${positionals[0]} under ${jobDir('')}` : 'usage: animus resume <job> [--answer <text>]');
-      if (running(state.job)) throw new AnimusError(`job ${state.job} is still running`);
-      if (values.detach) return detach(state.job, ['resume', state.job, ...(values.answer ? ['--answer', values.answer] : [])], flags);
       return finish(await runJob({ repo: state.repo, resume: { state, ...(values.answer ? { answer: values.answer } : {}) }, ...flags }, deps()));
     }
-    case 'status':
-      console.log(positionals[0] ? describeJob(positionals[0]) : describeStatus());
-      return 0;
     case 'runs': {
       const runs = readRuns().slice(-Number(values.n ?? 20));
       console.log(values.json ? JSON.stringify(runs, null, 2) : describeRuns(runs));

@@ -12,8 +12,7 @@ taken from orbit.
 
 Built so far: steps 1 and 2 of the build order (local `animus run`, the run
 log), task profiles, the draft PR on failure, skills granted per role from
-plugin/vendor/, screenshots in the PR, and detached runs (`--detach`,
-`animus status`). Two real jobs ran on ../../meal-planner (its PRs 1 and 2).
+plugin/vendor/, and screenshots in the PR. Two real jobs ran on ../../meal-planner (its PRs 1 and 2).
 
 Not built, roughly in the order wanted:
 - A cleanup phase: after a PR merges or closes, remove the job's
@@ -31,8 +30,9 @@ Not yet tried against real sessions: a gate fix round, a review send-back,
 needs-input with resume, a UI spec with a real visual change (impeccable's
 guidance), to-spec starting a job, grill-with-docs, splitting a large design.
 
-Nothing here may depend on one operating system. `caffeinate` under a
-detached run is the one exception, used only when it is on PATH on a Mac.
+Nothing here may depend on one operating system. A job runs in the
+foreground of whoever started it: there is no detached mode (tried and
+removed on 2026-11-13; Helix is where jobs will outlive a session).
 
 ## Conventions
 

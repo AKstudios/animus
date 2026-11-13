@@ -14,14 +14,13 @@ plugin/bin/animus run path/to/spec.md      # from inside the target repo
 
 `run` prints progress on stderr and a JSON result on stdout. It needs `claude`, `git` and `gh` on PATH, Node 24, and a `.animus/animus.yaml` in the target repo.
 
-From a Claude Code session with the plugin installed, you talk and the factory does the rest. `/animus:grill-with-docs` (or `/animus:grilling`) interviews you, `/animus:to-spec` writes the spec, checks it and starts the job detached. You can close, clear or compact the session then: the job is a process of its own and all its state is in files. A design too large for one job becomes several specs, each its own job and PR. No agent breaks a spec down mid-run.
+From a Claude Code session with the plugin installed, you talk and the factory does the rest. `/animus:grill-with-docs` (or `/animus:grilling`) interviews you, `/animus:to-spec` writes the spec, checks it and starts the job in the background. The session has to stay open until the job ends: compacting is fine, closing or clearing it stops the job. All of a job's state is in files, so one that was cut off is picked up with `animus resume <job>`. A design too large for one job becomes several specs, each its own job and PR. No agent breaks a spec down mid-run.
 
 | Command | What it does |
 | --- | --- |
-| `animus run <spec.md> [--detach] [--dry-run] [--draft] [--keep]` | One job, spec to PR. `--detach` returns at once and the job runs by itself, logging to its `run.log`. `--dry-run` stops before the push; `--draft` opens the PR as a draft. |
-| `animus status [<job>]` | What is running and how the latest jobs ended; one job in detail, with its question if it asked one. |
+| `animus run <spec.md> [--dry-run] [--draft] [--keep]` | One job, spec to PR. `--dry-run` stops before the push; `--draft` opens the PR as a draft. |
 | `animus plan <spec.md>` | Validates a spec and prints its stages and models. Starts nothing. |
-| `animus resume <job> [--answer <text>] [--detach]` | Picks up a job that asked a question or was interrupted, in the same session. |
+| `animus resume <job> [--answer <text>]` | Picks up a job that asked a question or was interrupted, in the same session. |
 | `animus runs [-n <count>] [--json]` | The run log. |
 | `animus skills` | The vendored skills, where each came from, and which role gets it. |
 | `animus check`, `animus shots`, `animus ui up\|down` | For the implementer, inside a job's worktree. |
@@ -126,7 +125,7 @@ Left behind: Beads, epics, tickets and waves, the Workflow script, the test-writ
 - Types marked `later` in the profiles file: bug, refactor, upgrade, migration, performance, docs, tests, investigation.
 - Services for a job (database, storage). The plan records the setup level, but a local job only runs the profile's installs and `setup`.
 - A cleanup phase: after a PR merges or closes, remove the job's `animus/<job>` and `animus-evidence/<job>` branches (local and remote), any worktree left behind, and old job folders under `~/.animus/jobs`.
-- Keeping a laptop awake with its lid closed. A detached job runs under `caffeinate`, which stops idle sleep only.
+- Running a job apart from the session that started it. Closing the session stops the job; `animus resume <job>` continues it. Helix is where jobs will outlive a session.
 - `animus init`. A new repo's profile is written by hand.
 - Steps 3 to 7 of the build order: containers, Helix, the issue and Slack triggers, a second submitter.
 

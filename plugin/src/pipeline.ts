@@ -38,8 +38,6 @@ export type RunOptions = {
   repo: string;
   /** The spec file; not needed when resuming. */
   specFile?: string;
-  /** The job's id, when the caller chose it: a detached run is told its id before it starts. */
-  job?: string;
   /** Stop before the push: the PR body is written to the job's folder. */
   dryRun?: boolean;
   /** Open the pull request as a draft even when the job succeeds. */
@@ -98,7 +96,7 @@ export async function runJob(opts: RunOptions, deps: Deps): Promise<Run> {
   const spec = loadSpec(prior ? prior.spec : opts.specFile!);
   let plan = prior?.plan ?? resolvePlan(factory, spec);
   const repoProfile = loadProfile(repo);
-  const job = prior?.job ?? opts.job ?? newJobId(spec.title);
+  const job = prior?.job ?? newJobId(spec.title);
   const ui = plan.type === 'ui' ? uiJobOf(job, spec) : undefined;
   if (ui) {
     const problem = uiProblem(repoProfile, ui);
