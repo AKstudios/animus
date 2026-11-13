@@ -22,7 +22,7 @@ Take the conversation and your understanding of the codebase and write the spec.
 
 5. Start the job, without asking: `animus run <file> --detach` from the repo. It returns at once with the job's id, and the job runs by itself from there. Everything after this is the factory's: implement, gates, review, pull request.
 
-6. Tell the person, in a few lines: the labels and what they run (from the plan's output), the job's id, and that they can close, clear or compact this session now. The pull request arrives as a GitHub notification and a notification on this machine. `animus status` shows what is running and how the latest jobs ended. If the job stops with a question, `animus status <job>` shows it, and `animus resume <job> --answer "..." --detach` answers it.
+6. Tell the person, in a few lines: the labels and what they run (from the plan's output), the job's id, and that they can close, clear or compact this session now. The pull request arrives as a GitHub notification. `animus status` shows what is running and how the latest jobs ended. If the job stops with a question, `animus status <job>` shows it, and `animus resume <job> --answer "..." --detach` answers it.
 
 ## Large work
 

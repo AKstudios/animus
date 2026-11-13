@@ -1,5 +1,5 @@
 // The animus command.
-import { spawn, spawnSync } from 'node:child_process';
+import { spawn } from 'node:child_process';
 import { mkdirSync, openSync, rmSync, writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { parseArgs } from 'node:util';
@@ -66,14 +66,10 @@ function detach(job: string, args: string[], flags: { dryRun?: boolean; draft?: 
   return 0;
 }
 
-/** Prints a run's result; a detached run also tells the person, who may have no session open. */
+/** Prints a run's result. A detached run's goes to its run.log; `animus status` and the PR's own notification are how the person hears. */
 function finish(run: Run): number {
   console.log(JSON.stringify({ job: run.job, outcome: run.outcome, pr: run.pr, reason: run.reason, question: run.question, branch: run.branch, cost_usd: run.cost_usd, dir: run.dir }, null, 2));
-  if (process.env.ANIMUS_DETACHED) {
-    rmSync(join(run.dir, 'pid'), { force: true });
-    const text = run.outcome === 'needs-input' ? `Needs your answer: ${run.question ?? ''}` : run.pr ?? run.reason?.split('\n')[0] ?? run.outcome;
-    if (process.platform === 'darwin') spawnSync('osascript', ['-e', `display notification ${JSON.stringify(text.slice(0, 200))} with title ${JSON.stringify(`Animus: ${run.outcome}`)} subtitle ${JSON.stringify(run.title.slice(0, 80))}`], { stdio: 'ignore' });
-  }
+  if (process.env.ANIMUS_DETACHED) rmSync(join(run.dir, 'pid'), { force: true });
   return run.outcome === 'pr' || run.outcome === 'dry-run' ? 0 : 1;
 }
 

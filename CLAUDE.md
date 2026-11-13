@@ -11,9 +11,28 @@ This one runs one spec as one job with no tracker. README.md lists what was
 taken from orbit.
 
 Built so far: steps 1 and 2 of the build order (local `animus run`, the run
-log) plus task profiles and the draft PR on failure. Not built: containers,
-Helix, the Slack and issue triggers, the outcome fields filled from GitHub,
-and every task type marked `later` in plugin/config/profiles.yaml.
+log), task profiles, the draft PR on failure, skills granted per role from
+plugin/vendor/, screenshots in the PR, and detached runs (`--detach`,
+`animus status`). Two real jobs ran on ../../meal-planner (its PRs 1 and 2).
+
+Not built, roughly in the order wanted:
+- A cleanup phase: after a PR merges or closes, remove the job's
+  `animus/<job>` and `animus-evidence/<job>` branches (local and remote),
+  leftover worktrees, and old job folders under `~/.animus/jobs`.
+- The outcome fields filled from GitHub (merged, time to merge, human
+  commits, reverts), and the five numbers split by task class.
+- The task types marked `later` in plugin/config/profiles.yaml, bug first
+  (with the `tdd` skill for the implementer on bug jobs only).
+- `animus init`, and an `after:` header field so a split spec waits for the
+  one before it.
+- Containers, Helix, the issue and Slack triggers (build order steps 3 to 7).
+
+Not yet tried against real sessions: a gate fix round, a review send-back,
+needs-input with resume, a UI spec with a real visual change (impeccable's
+guidance), to-spec starting a job, grill-with-docs, splitting a large design.
+
+Nothing here may depend on one operating system. `caffeinate` under a
+detached run is the one exception, used only when it is on PATH on a Mac.
 
 ## Conventions
 

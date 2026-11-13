@@ -18,7 +18,7 @@ From a Claude Code session with the plugin installed, you talk and the factory d
 
 | Command | What it does |
 | --- | --- |
-| `animus run <spec.md> [--detach] [--dry-run] [--draft] [--keep]` | One job, spec to PR. `--detach` returns at once and the job runs by itself, logging to its `run.log` and notifying you when it ends. `--dry-run` stops before the push; `--draft` opens the PR as a draft. |
+| `animus run <spec.md> [--detach] [--dry-run] [--draft] [--keep]` | One job, spec to PR. `--detach` returns at once and the job runs by itself, logging to its `run.log`. `--dry-run` stops before the push; `--draft` opens the PR as a draft. |
 | `animus status [<job>]` | What is running and how the latest jobs ended; one job in detail, with its question if it asked one. |
 | `animus plan <spec.md>` | Validates a spec and prints its stages and models. Starts nothing. |
 | `animus resume <job> [--answer <text>] [--detach]` | Picks up a job that asked a question or was interrupted, in the same session. |
@@ -125,7 +125,7 @@ Left behind: Beads, epics, tickets and waves, the Workflow script, the test-writ
 - The outcome fields filled later from GitHub (merged, time to merge, human commits, reverts).
 - Types marked `later` in the profiles file: bug, refactor, upgrade, migration, performance, docs, tests, investigation.
 - Services for a job (database, storage). The plan records the setup level, but a local job only runs the profile's installs and `setup`.
-- Cleaning up `animus-evidence/<job>` branches after a PR merges.
+- A cleanup phase: after a PR merges or closes, remove the job's `animus/<job>` and `animus-evidence/<job>` branches (local and remote), any worktree left behind, and old job folders under `~/.animus/jobs`.
 - Keeping a laptop awake with its lid closed. A detached job runs under `caffeinate`, which stops idle sleep only.
 - `animus init`. A new repo's profile is written by hand.
 - Steps 3 to 7 of the build order: containers, Helix, the issue and Slack triggers, a second submitter.
