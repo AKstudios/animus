@@ -37,6 +37,8 @@ export type RunOptions = {
   specFile?: string;
   /** Stop before the push: the PR body is written to the job's folder. */
   dryRun?: boolean;
+  /** Open the pull request as a draft even when the job succeeds. */
+  draft?: boolean;
   /** Leave the worktree in place when the job ends. */
   keep?: boolean;
   trigger?: string;
@@ -295,7 +297,7 @@ export async function runJob(opts: RunOptions, deps: Deps): Promise<Run> {
     writeFileSync(join(dir, 'pr-body.md'), `${body}\n`);
     if (!opts.dryRun) {
       try {
-        run.pr = await timed('pr', () => deps.publish({ cwd: wt, branch: ws.branch, baseBranch: ws.baseBranch, title: spec.title, body, draft: failed }));
+        run.pr = await timed('pr', () => deps.publish({ cwd: wt, branch: ws.branch, baseBranch: ws.baseBranch, title: spec.title, body, draft: failed || Boolean(opts.draft) }));
         if (failed) outcome = 'draft-pr';
         log(`${failed ? 'draft pull request with the failure report' : 'pull request'}: ${run.pr}`);
       } catch (err) {

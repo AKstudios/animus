@@ -18,7 +18,7 @@ From a Claude Code session with the plugin installed, `/animus:grilling` intervi
 
 | Command | What it does |
 | --- | --- |
-| `animus run <spec.md> [--dry-run] [--keep]` | One job, spec to PR. `--dry-run` stops before the push. |
+| `animus run <spec.md> [--dry-run] [--draft] [--keep]` | One job, spec to PR. `--dry-run` stops before the push; `--draft` opens the PR as a draft. |
 | `animus plan <spec.md>` | Validates a spec and prints its stages and models. Starts nothing. |
 | `animus resume <job> [--answer <text>]` | Picks up a job that asked a question or was interrupted, in the same session. |
 | `animus runs [-n <count>] [--json]` | The run log. |

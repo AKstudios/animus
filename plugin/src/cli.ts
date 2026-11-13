@@ -16,9 +16,10 @@ import { join } from 'node:path';
 
 const USAGE = `animus: a spec goes in, a pull request with proof comes out
 
-  animus run <spec.md> [--repo <dir>] [--dry-run] [--keep]
+  animus run <spec.md> [--repo <dir>] [--dry-run] [--draft] [--keep]
         Run one job: set up a worktree, implement, gates, review, open the PR.
-        --dry-run stops before the push; --keep leaves the worktree.
+        --dry-run stops before the push; --draft opens the PR as a draft;
+        --keep leaves the worktree.
   animus plan <spec.md>
         Check a spec and print what its labels would run. Starts nothing.
   animus resume <job> [--answer <text>] [--dry-run] [--keep]
@@ -40,12 +41,12 @@ async function main(argv: string[]): Promise<number> {
   const { values, positionals } = parseArgs({
     args: rest, allowPositionals: true,
     options: {
-      repo: { type: 'string' }, 'dry-run': { type: 'boolean' }, keep: { type: 'boolean' }, answer: { type: 'string' },
+      repo: { type: 'string' }, 'dry-run': { type: 'boolean' }, keep: { type: 'boolean' }, draft: { type: 'boolean' }, answer: { type: 'string' },
       json: { type: 'boolean' }, n: { type: 'string', short: 'n' }, again: { type: 'boolean' },
     },
   });
   const cwd = process.cwd();
-  const flags = { ...(values['dry-run'] ? { dryRun: true } : {}), ...(values.keep ? { keep: true } : {}) };
+  const flags = { ...(values.draft ? { draft: true } : {}), ...(values['dry-run'] ? { dryRun: true } : {}), ...(values.keep ? { keep: true } : {}) };
   const deps = () => {
     const factory = loadFactory();
     return { factory, agent: claudeAgent(factory), publish, log: say };
