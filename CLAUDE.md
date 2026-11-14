@@ -12,12 +12,11 @@ taken from orbit.
 
 Built so far: steps 1 and 2 of the build order (local `animus run`, the run
 log), task profiles, the draft PR on failure, skills granted per role from
-plugin/vendor/, and screenshots in the PR. Two real jobs ran on ../../meal-planner (its PRs 1 and 2).
+plugin/vendor/, screenshots in the PR, and `animus cleanup` (branches,
+worktree and job folder of a finished job). Two real jobs ran on
+../../meal-planner (its PRs 1 and 2, closed unmerged and cleaned up).
 
 Not built, roughly in the order wanted:
-- A cleanup phase: after a PR merges or closes, remove the job's
-  `animus/<job>` and `animus-evidence/<job>` branches (local and remote),
-  leftover worktrees, and old job folders under `~/.animus/jobs`.
 - The outcome fields filled from GitHub (merged, time to merge, human
   commits, reverts), and the five numbers split by task class.
 - The task types marked `later` in plugin/config/profiles.yaml, bug first

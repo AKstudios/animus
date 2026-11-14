@@ -2,11 +2,12 @@
 import { resolve } from 'node:path';
 import { parseArgs } from 'node:util';
 import { claudeAgent } from './agent.ts';
+import { cleanup, describeCleanup, KEEP_DAYS } from './cleanup.ts';
 import { describe, jobChecks, runChecks } from './gates.ts';
 import { touchedFiles } from './git.ts';
 import { describeRuns, jobDir, loadState, readRuns, type Run } from './log.ts';
 import { factoryVersion, jobOf, onPath, runJob, uiJobOf } from './pipeline.ts';
-import { publish, pushEvidence } from './pr.ts';
+import { prState, publish, pushEvidence } from './pr.ts';
 import { loadProfile } from './profile.ts';
 import { describePlan, loadFactory, resolvePlan } from './profiles.ts';
 import { git, AnimusError, GitError } from './proc.ts';
@@ -27,6 +28,12 @@ const USAGE = `animus: a spec goes in, a pull request with proof comes out
         Pick up a job that asked a question or was interrupted.
   animus runs [-n <count>] [--json]
         The run log, newest last.
+  animus cleanup [<job>...] [--days <n>] [--dry-run]
+        Remove what finished jobs left: the branches (here and on origin) and
+        worktree of a job whose pull request merged or closed, and the folder
+        of a job that last ran over --days ago (default ${KEEP_DAYS}). A job with an
+        open pull request is kept. A named job does not wait for --days.
+        --dry-run only says what would go.
   animus skills
         The vendored skills, where each came from, and which role gets it.
 
@@ -52,7 +59,7 @@ async function main(argv: string[]): Promise<number> {
     args: rest, allowPositionals: true,
     options: {
       repo: { type: 'string' }, 'dry-run': { type: 'boolean' }, keep: { type: 'boolean' }, draft: { type: 'boolean' }, answer: { type: 'string' },
-      json: { type: 'boolean' }, n: { type: 'string', short: 'n' }, again: { type: 'boolean' },
+      json: { type: 'boolean' }, n: { type: 'string', short: 'n' }, again: { type: 'boolean' }, days: { type: 'string' },
     },
   });
   const cwd = process.cwd();
@@ -89,6 +96,14 @@ async function main(argv: string[]): Promise<number> {
     case 'runs': {
       const runs = readRuns().slice(-Number(values.n ?? 20));
       console.log(values.json ? JSON.stringify(runs, null, 2) : describeRuns(runs));
+      return 0;
+    }
+    case 'cleanup': {
+      const days = values.days === undefined ? KEEP_DAYS : Number(values.days);
+      if (!Number.isFinite(days) || days < 0) throw new AnimusError(`--days takes a number of days, not ${values.days}`);
+      if (!onPath('gh')) throw new AnimusError('gh is not installed, so cleanup cannot tell which pull requests are finished');
+      const dryRun = Boolean(values['dry-run']);
+      console.log(describeCleanup(cleanup({ jobs: positionals, days, dryRun }, prState), dryRun));
       return 0;
     }
     case 'check': case 'shots': case 'ui': {

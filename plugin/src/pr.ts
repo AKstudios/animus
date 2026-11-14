@@ -128,6 +128,16 @@ function gh(cwd: string, args: string[], input?: string, quiet = false): string 
   return r.stdout.trim().split('\n').pop();
 }
 
+export type PrState = 'OPEN' | 'MERGED' | 'CLOSED';
+
+export type PrLookup = (url: string, cwd: string) => PrState | undefined;
+
+/** Whether a pull request is open, merged or closed; undefined when GitHub cannot say. */
+export const prState: PrLookup = (url, cwd) => {
+  const state = gh(cwd, ['pr', 'view', url, '--json', 'state', '--jq', '.state'], undefined, true);
+  return state === 'OPEN' || state === 'MERGED' || state === 'CLOSED' ? state : undefined;
+};
+
 export const evidenceBranch = (job: string) => `animus-evidence/${job}`;
 
 export type Evidence = (p: { cwd: string; job: string; dir: string; files: readonly string[] }) => Record<string, string>;
