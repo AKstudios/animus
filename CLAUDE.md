@@ -12,13 +12,12 @@ taken from orbit.
 
 Built so far: steps 1 and 2 of the build order (local `animus run`, the run
 log), task profiles, the draft PR on failure, skills granted per role from
-plugin/vendor/, screenshots in the PR, and `animus cleanup` (branches,
-worktree and job folder of a finished job). Two real jobs ran on
-../../meal-planner (its PRs 1 and 2, closed unmerged and cleaned up).
+plugin/vendor/, screenshots in the PR, `animus cleanup` (branches,
+worktree and job folder of a finished job), and `animus outcomes` (each
+PR's outcome read from GitHub, and the five numbers by task class). Two
+real jobs ran on ../../meal-planner (its PRs 1 and 2, closed unmerged and cleaned up).
 
 Not built, roughly in the order wanted:
-- The outcome fields filled from GitHub (merged, time to merge, human
-  commits, reverts), and the five numbers split by task class.
 - The task types marked `later` in plugin/config/profiles.yaml, bug first
   (with the `tdd` skill for the implementer on bug jobs only).
 - `animus init`, and an `after:` header field so a split spec waits for the

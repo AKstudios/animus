@@ -22,6 +22,7 @@ From a Claude Code session with the plugin installed, you talk and the factory d
 | `animus plan <spec.md>` | Validates a spec and prints its stages and models. Starts nothing. |
 | `animus resume <job> [--answer <text>]` | Picks up a job that asked a question or was interrupted, in the same session. |
 | `animus runs [-n <count>] [--json]` | The run log. |
+| `animus outcomes [--json]` | What became of each PR, read from GitHub and kept in `~/.animus/outcomes.json`: merged or closed, time to merge, human commits, reverted or reworked within 30 days. Prints the five numbers split by task class. |
 | `animus cleanup [<job>...] [--days <n>] [--dry-run]` | Removes what finished jobs left behind: the branches (local and on origin) and worktree of a job whose PR merged or closed, and a job's folder 14 days after its last run. A job with an open PR is kept. A named job does not wait. |
 | `animus skills` | The vendored skills, where each came from, and which role gets it. |
 | `animus check`, `animus shots`, `animus ui up\|down` | For the implementer, inside a job's worktree. |
@@ -122,7 +123,6 @@ Left behind: Beads, epics, tickets and waves, the Workflow script, the test-writ
 
 ## Not built yet
 
-- The outcome fields filled later from GitHub (merged, time to merge, human commits, reverts).
 - Types marked `later` in the profiles file: bug, refactor, upgrade, migration, performance, docs, tests, investigation.
 - Services for a job (database, storage). The plan records the setup level, but a local job only runs the profile's installs and `setup`.
 - Running a job apart from the session that started it. Closing the session stops the job; `animus resume <job>` continues it. Helix is where jobs will outlive a session.

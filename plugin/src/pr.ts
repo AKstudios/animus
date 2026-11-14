@@ -138,6 +138,19 @@ export const prState: PrLookup = (url, cwd) => {
   return state === 'OPEN' || state === 'MERGED' || state === 'CLOSED' ? state : undefined;
 };
 
+/** What GitHub records about a pull request. commits holds each commit's committer date. */
+export type PrFacts = { state: PrState; createdAt: string; closedAt?: string; mergedAt?: string; mergeCommit?: string; baseRefName: string; commits: string[] };
+
+export const prFacts = (url: string, cwd: string): PrFacts | undefined => {
+  const out = gh(cwd, ['pr', 'view', url, '--json', 'state,createdAt,closedAt,mergedAt,mergeCommit,baseRefName,commits'], undefined, true);
+  if (!out) return undefined;
+  const j = JSON.parse(out) as { state: PrState; createdAt: string; closedAt: string | null; mergedAt: string | null; mergeCommit: { oid: string } | null; baseRefName: string; commits: { committedDate: string }[] };
+  return {
+    state: j.state, createdAt: j.createdAt, baseRefName: j.baseRefName, commits: j.commits.map((c) => c.committedDate),
+    ...(j.closedAt ? { closedAt: j.closedAt } : {}), ...(j.mergedAt ? { mergedAt: j.mergedAt } : {}), ...(j.mergeCommit ? { mergeCommit: j.mergeCommit.oid } : {}),
+  };
+};
+
 export const evidenceBranch = (job: string) => `animus-evidence/${job}`;
 
 export type Evidence = (p: { cwd: string; job: string; dir: string; files: readonly string[] }) => Record<string, string>;

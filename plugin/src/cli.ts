@@ -7,7 +7,8 @@ import { describe, jobChecks, runChecks } from './gates.ts';
 import { touchedFiles } from './git.ts';
 import { describeRuns, jobDir, loadState, readRuns, type Run } from './log.ts';
 import { factoryVersion, jobOf, onPath, runJob, uiJobOf } from './pipeline.ts';
-import { prState, publish, pushEvidence } from './pr.ts';
+import { describeNumbers, numbers, refreshOutcomes } from './outcomes.ts';
+import { prFacts, prState, publish, pushEvidence } from './pr.ts';
 import { loadProfile } from './profile.ts';
 import { describePlan, loadFactory, resolvePlan } from './profiles.ts';
 import { git, AnimusError, GitError } from './proc.ts';
@@ -28,6 +29,10 @@ const USAGE = `animus: a spec goes in, a pull request with proof comes out
         Pick up a job that asked a question or was interrupted.
   animus runs [-n <count>] [--json]
         The run log, newest last.
+  animus outcomes [--json]
+        What became of each pull request, read from GitHub (merged or closed,
+        time to merge, human commits, reverted or reworked within 30 days),
+        and the five numbers split by task class.
   animus cleanup [<job>...] [--days <n>] [--dry-run]
         Remove what finished jobs left: the branches (here and on origin) and
         worktree of a job whose pull request merged or closed, and the folder
@@ -96,6 +101,13 @@ async function main(argv: string[]): Promise<number> {
     case 'runs': {
       const runs = readRuns().slice(-Number(values.n ?? 20));
       console.log(values.json ? JSON.stringify(runs, null, 2) : describeRuns(runs));
+      return 0;
+    }
+    case 'outcomes': {
+      if (!onPath('gh')) say('gh is not installed: showing the outcomes as last read');
+      const outcomes = refreshOutcomes(onPath('gh') ? prFacts : () => undefined);
+      const rows = numbers(readRuns(), outcomes);
+      console.log(values.json ? JSON.stringify({ numbers: rows, pull_requests: Object.values(outcomes) }, null, 2) : describeNumbers(rows));
       return 0;
     }
     case 'cleanup': {
