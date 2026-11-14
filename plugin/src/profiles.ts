@@ -19,7 +19,7 @@ export type Difficulty = (typeof DIFFICULTIES)[number];
 type Run = { tier: Tier; effort: string };
 type SizeProfile = { setup?: string; gates?: string; review?: string; reject?: string };
 type DifficultyProfile = Run & { review?: Tier; sizes?: Record<string, Partial<Run>> };
-type TypeProfile = { setup?: string; reviewer?: string; evidence?: string[]; later?: string };
+type TypeProfile = { setup?: string; reviewer?: string; evidence?: string[]; prove?: string; later?: string };
 
 export type Factory = {
   provider: string;
@@ -42,6 +42,8 @@ export type Plan = Labels & {
   /** Absent: the job is not reviewed. */
   review?: Run & { role: string };
   evidence: string[];
+  /** fails-on-base: a gate proves the job's tests fail without its change (gates.ts). */
+  prove?: 'fails-on-base';
 };
 
 export const PLUGIN_ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
@@ -67,7 +69,7 @@ export function modelFor(factory: Factory, tier: Tier): string {
 }
 
 /** The plan for these labels. Throws for a size or type the factory does not run. */
-export function resolvePlan(factory: Factory, labels: Labels): Plan {
+export function resolvePlan(factory: Factory, labels: Labels & { criteria?: readonly { commands: readonly string[] }[] }): Plan {
   const size = factory.sizes[labels.size];
   const difficulty = factory.difficulties[labels.difficulty];
   const type = factory.types[labels.type];
@@ -79,15 +81,20 @@ export function resolvePlan(factory: Factory, labels: Labels): Plan {
     const built = Object.entries(factory.types).filter(([, t]) => !t.later).map(([name]) => name);
     throw new AnimusError(`type ${labels.type} does not run yet: ${type.later}. Types that run: ${built.join(', ')}`);
   }
+  if (type.prove !== undefined && type.prove !== 'fails-on-base') throw new AnimusError(`profiles.yaml: types.${labels.type}.prove must be fails-on-base`);
+  if (type.prove && labels.criteria && !labels.criteria.some((c) => c.commands.length)) {
+    throw new AnimusError(`a ${labels.type} spec needs a \`$ command\` under at least one acceptance criterion: the test that fails before the fix and passes after it`);
+  }
   const implement: Run = { tier: difficulty.tier, effort: difficulty.effort, ...difficulty.sizes?.[labels.size] };
   const reviewTier = difficulty.review ?? (size.review && size.review !== 'none' ? (size.review as Tier) : undefined);
   const plan: Plan = {
-    ...labels,
+    size: labels.size, difficulty: labels.difficulty, type: labels.type,
     setup: type.setup ?? size.setup ?? 'full',
     gates: size.gates === 'affected' ? 'affected' : 'full',
     implement,
     evidence: ['commands', ...(type.evidence ?? [])],
   };
+  if (type.prove) plan.prove = type.prove;
   if (reviewTier) plan.review = { tier: reviewTier, effort: labels.difficulty === 'routine' ? 'medium' : 'high', role: type.reviewer ?? 'reviewer' };
   return plan;
 }
@@ -115,7 +122,7 @@ export function describePlan(factory: Factory, plan: Plan): string {
     `${plan.size}, ${plan.difficulty}, ${plan.type}`,
     `  setup      ${plan.setup}`,
     `  implement  ${run(plan.implement)}`,
-    `  gates      ${plan.gates}, sent back at most ${factory.limits.gate_rounds} times`,
+    `  gates      ${plan.gates}${plan.prove ? ', and the job\'s tests must fail on the base commit' : ''}, sent back at most ${factory.limits.gate_rounds} times`,
     `  review     ${plan.review ? `${plan.review.role}, ${run(plan.review)}, sent back at most ${factory.limits.review_rounds} time(s)` : 'skipped'}`,
     `  evidence   ${plan.evidence.join(', ')}`,
   ].join('\n');

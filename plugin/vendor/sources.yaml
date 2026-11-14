@@ -23,6 +23,14 @@ impeccable:
   paths: [.claude/skills/impeccable/SKILL.md, .claude/skills/impeccable/reference, LICENSE, NOTICE.md]
   left_out: scripts/ (the launcher downloads a prebuilt engine binary on first run, which nobody here can read; the skill's own "launcher unavailable" path is used instead)
 
+tdd:
+  repo: https://github.com/mattpocock/skills
+  commit: 49dd158d1076134a641b33efb035946536778336
+  license: MIT
+  strip: skills/engineering/tdd/
+  paths: [skills/engineering/tdd/SKILL.md, skills/engineering/tdd/tests.md, skills/engineering/tdd/mocking.md, LICENSE]
+  left_out: agents/ (settings for another vendor's CLI)
+
 # The person's own skill, written for orbit; not from a public repo.
 useful-tests:
   repo: ../orbit (plugin/skills/useful-tests)

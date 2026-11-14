@@ -65,7 +65,7 @@ types:
     reviewer: ui-reviewer
     evidence: [screenshots]
   bug:
-    later: the gate that proves the new test fails on the base branch is not built yet
+    prove: fails-on-base   # a gate: an acceptance command must fail on the base commit with only the job's test files added
   refactor:
     later: the gate that flags edited test files is not built yet
   upgrade:
@@ -90,6 +90,10 @@ skills:
     roles:
       implementer: SKILL.md
   useful-tests:
+    roles:
+      implementer: SKILL.md
+  tdd:
+    types: [bug]
     roles:
       implementer: SKILL.md
   impeccable:

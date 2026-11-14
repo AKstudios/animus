@@ -12,21 +12,23 @@ taken from orbit.
 
 Built so far: steps 1 and 2 of the build order (local `animus run`, the run
 log), task profiles, the draft PR on failure, skills granted per role from
-plugin/vendor/, screenshots in the PR, `animus cleanup` (branches,
-worktree and job folder of a finished job), and `animus outcomes` (each
-PR's outcome read from GitHub, and the five numbers by task class). Two
-real jobs ran on ../../meal-planner (its PRs 1 and 2, closed unmerged and cleaned up).
+plugin/vendor/, screenshots in the PR, `animus cleanup` (branches, worktree
+and job folder of a finished job), `animus outcomes` (each PR's outcome read
+from GitHub, and the five numbers by task class), and the bug task type (the
+`tdd` skill, and a gate that the job's test fails on the base commit). Two
+real jobs ran on ../../meal-planner (its PRs 1 and 2, closed unmerged and
+cleaned up).
 
 Not built, roughly in the order wanted:
-- The task types marked `later` in plugin/config/profiles.yaml, bug first
-  (with the `tdd` skill for the implementer on bug jobs only).
+- The other task types marked `later` in plugin/config/profiles.yaml.
 - `animus init`, and an `after:` header field so a split spec waits for the
   one before it.
 - Containers, Helix, the issue and Slack triggers (build order steps 3 to 7).
 
-Not yet tried against real sessions: a gate fix round, a review send-back,
-needs-input with resume, a UI spec with a real visual change (impeccable's
-guidance), to-spec starting a job, grill-with-docs, splitting a large design.
+Not yet tried against real sessions: a bug job, a gate fix round, a review
+send-back, needs-input with resume, a UI spec with a real visual change
+(impeccable's guidance), to-spec starting a job, grill-with-docs, splitting
+a large design.
 
 Nothing here may depend on one operating system. A job runs in the
 foreground of whoever started it: there is no detached mode (tried and

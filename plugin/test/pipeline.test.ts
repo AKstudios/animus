@@ -246,3 +246,44 @@ test('a job of another type that changes a ui target\'s files gets screenshots t
   assert.equal(calls[1]!.role, 'reviewer');
   assert.match(d.published[0]!.body, /## Screenshots/);
 });
+
+const BUG = 'size: small\ndifficulty: routine\ntype: bug';
+const BUG_CRITERIA = '1. The feature says done.\n   $ sh test/feature.test.sh\n';
+/** The implementer's turn on a bug job: a test file with this script, and the fix. */
+const fix = (testScript: string | undefined): Step => (req) => {
+  if (testScript) write(req.cwd, 'test/feature.test.sh', `${testScript}\n`);
+  return say('done', false)(req);
+};
+
+test('a bug job passes when its test fails on the base commit with only the test laid over it, and the PR shows that', async () => {
+  const repo = makeRepo();
+  const { agent, calls } = fakeAgent([fix('grep -q done src/feature.txt'), () => clean()]);
+  const d = deps(agent);
+  const run = await runJob({ repo, specFile: writeSpec(BUG, BUG_CRITERIA) }, d);
+  assert.equal(run.outcome, 'pr');
+  assert.deepEqual(run.gates[0]!.checks.map((c) => [c.name, c.ok]), [['test', true], ['acceptance-1', true], ['fails-on-base', true]]);
+  assert.match(d.published[0]!.body, /\*\*fails-on-base\*\* passed in [\d.]+s: `sh test\/feature\.test\.sh`/);
+  assert.match(calls[0]!.prompt, /This job must prove its test/);
+  assert.match(calls[0]!.system!, /# Skill: tdd/);
+  assert.equal(git(repo, ['worktree', 'list']).split('\n').length, 1);
+});
+
+test('a bug job whose test passes without the fix, or that has no test, is sent back', async () => {
+  const repo = makeRepo();
+  const { agent, calls } = fakeAgent([fix('true'), fix('grep -q done src/feature.txt'), () => clean()]);
+  const run = await runJob({ repo, specFile: writeSpec(BUG, BUG_CRITERIA) }, deps(agent));
+  assert.equal(run.outcome, 'pr');
+  assert.deepEqual(run.gates.map((g) => g.ok), [false, true]);
+  assert.match(calls[1]!.prompt, /FAIL fails-on-base[\s\S]*no test fails without the fix/);
+
+  const none = fakeAgent([fix(undefined), fix(undefined), fix(undefined)]);
+  const failed = await runJob({ repo, specFile: writeSpec(BUG) }, deps(none.agent));
+  assert.equal(failed.outcome, 'draft-pr');
+  assert.match(none.calls[1]!.prompt, /FAIL fails-on-base[\s\S]*changed no test file/);
+});
+
+test('a bug spec with no acceptance command is refused before anything starts', async () => {
+  const { agent, calls } = fakeAgent([]);
+  await assert.rejects(runJob({ repo: makeRepo(), specFile: writeSpec(BUG, '1. The feature says done.\n') }, deps(agent)), /needs a `\$ command`/);
+  assert.equal(calls.length, 0);
+});

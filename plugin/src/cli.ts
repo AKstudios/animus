@@ -3,7 +3,7 @@ import { resolve } from 'node:path';
 import { parseArgs } from 'node:util';
 import { claudeAgent } from './agent.ts';
 import { cleanup, describeCleanup, KEEP_DAYS } from './cleanup.ts';
-import { describe, jobChecks, runChecks } from './gates.ts';
+import { describe, failsOnBase, jobChecks, runChecks } from './gates.ts';
 import { touchedFiles } from './git.ts';
 import { describeRuns, jobDir, loadState, readRuns, type Run } from './log.ts';
 import { factoryVersion, jobOf, onPath, runJob, uiJobOf } from './pipeline.ts';
@@ -128,6 +128,11 @@ async function main(argv: string[]): Promise<number> {
       if (command === 'check') {
         const files = [...new Set([...touchedFiles(root, state.workspace.base, 'HEAD'), ...git(root, ['ls-files', '--others', '--modified', '--exclude-standard']).split('\n').filter(Boolean)])];
         const results = runChecks(root, jobChecks(profile, state.plan, spec, { base: state.workspace.base, files }), state.job);
+        if (state.plan.prove) {
+          // The proof reads the test files from a commit, so it sees only what is committed.
+          const head = git(root, ['rev-parse', 'HEAD']);
+          results.push(failsOnBase({ repo: state.repo, profile, spec, base: state.workspace.base, head, files: touchedFiles(root, state.workspace.base, head), job: state.job, green: results.every((r) => r.ok) }));
+        }
         console.log(describe(results));
         return results.every((r) => r.ok) ? 0 : 1;
       }

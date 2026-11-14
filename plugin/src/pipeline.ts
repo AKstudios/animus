@@ -10,7 +10,7 @@ import { copyFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from
 import { userInfo } from 'node:os';
 import { basename, join } from 'node:path';
 import type { Agent, AgentResult } from './agent.ts';
-import { describe, jobChecks, runChecks, type CheckResult } from './gates.ts';
+import { describe, failsOnBase, jobChecks, runChecks, type CheckResult } from './gates.ts';
 import { commitAll, mainCheckout, matchesAny, touchedFiles } from './git.ts';
 import { appendRun, jobDir, saveState, writeJson, type JobState, type Outcome, type Run } from './log.ts';
 import { evidenceBranch, prBody, type Evidence, type Publish } from './pr.ts';
@@ -213,7 +213,11 @@ export async function runJob(opts: RunOptions, deps: Deps): Promise<Run> {
       const checks = jobChecks(repoProfile, plan, spec, { base: ws.base, files: touchedFiles(wt, ws.base, head) });
       log(`gates, run ${attempt}: ${checks.filter((c) => !c.skip).map((c) => c.name).join(', ') || 'nothing to run'}`);
       const t = Date.now();
-      lastGates = await timed('gates', () => runChecks(wt, checks, job));
+      lastGates = await timed('gates', () => {
+        const results = runChecks(wt, checks, job);
+        if (!plan.prove) return results;
+        return [...results, failsOnBase({ repo, profile: repoProfile, spec, base: ws.base, head, files: touchedFiles(wt, ws.base, head), job, green: results.every((r) => r.ok) })];
+      });
       restore(wt);
       const ok = lastGates.every((r) => r.ok);
       run.gates.push({ attempt, ok, ms: Date.now() - t, checks: lastGates.map((r) => ({ name: r.name, ok: r.ok, skipped: r.skipped, ms: r.ms })) });
@@ -244,7 +248,7 @@ export async function runJob(opts: RunOptions, deps: Deps): Promise<Run> {
     const profile = repoProfile;
     const first = prior
       ? resumePrompt(prior, opts.resume?.answer)
-      : implementPrompt({ job, spec, ws, repo, notes: profile.notes, gates: jobChecks(profile, plan, spec, { base: ws.base, files: [] }).map((c) => c.command), ui: ui ? uiBrief(wt, profile, ui) : undefined });
+      : implementPrompt({ job, spec, ws, repo, notes: profile.notes, gates: jobChecks(profile, plan, spec, { base: ws.base, files: [] }).map((c) => c.command), ui: ui ? uiBrief(wt, profile, ui) : undefined, prove: plan.prove ? profile.tests : undefined });
     await implementer(prior ? 'resume' : 'implement', first, plan.implement.tier);
 
     // ---------------------------------------------------------------- gates
@@ -368,12 +372,13 @@ function uiBrief(worktree: string, profile: ReturnType<typeof loadProfile>, ui: 
   ].join('\n');
 }
 
-function implementPrompt(p: { job: string; spec: Spec; ws: Workspace; repo: string; notes?: string | undefined; gates: string[]; ui?: string | undefined }): string {
+function implementPrompt(p: { job: string; spec: Spec; ws: Workspace; repo: string; notes?: string | undefined; gates: string[]; ui?: string | undefined; prove?: readonly string[] | undefined }): string {
   return [
     `Job ${p.job}. You are in a fresh worktree of ${basename(p.repo)} on the branch ${p.ws.branch}, started from ${p.ws.baseBranch}. Its dependencies are installed.`,
     `The job's profile is ${p.spec.size}, ${p.spec.difficulty}, ${p.spec.type}.`,
     p.notes ? `This project's notes for unattended work:\n${p.notes.trim()}` : '',
     p.ui ?? '',
+    p.prove ? `This job must prove its test. Write the test that reproduces the problem first and see it fail. Once the gates below pass, Animus runs the spec's acceptance commands on the commit you started from with only your test files laid over it (files matching ${p.prove.join(', ')}), and at least one must fail there. \`${animusCommand()} check\` runs that too.` : '',
     `When you finish, Animus runs these gates, and sends failures back to you. Run them yourself first with \`${animusCommand()} check\` (foreground, Bash timeout 600000):\n${p.gates.map((g) => `  $ ${g}`).join('\n') || '  (the project names no check commands)'}`,
     `The spec follows. Its acceptance criteria are what the reviewer checks your change and its tests against.\n\n${p.spec.text.trim()}`,
   ].filter(Boolean).join('\n\n');

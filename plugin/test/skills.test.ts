@@ -9,9 +9,10 @@ import { clean, deps, done, fakeAgent, makeRepo, write, writeSpec } from './help
 const factory = loadFactory();
 const names = (role: string, type: string) => grantsFor(factory, role, type).map((g) => g.name);
 
-test('each role gets only the skills it is granted, and impeccable only on ui jobs', () => {
+test('each role gets only the skills it is granted, impeccable only on ui jobs and tdd only on bug jobs', () => {
   assert.deepEqual(names('implementer', 'feature'), ['ponytail', 'useful-tests']);
   assert.deepEqual(names('implementer', 'ui'), ['ponytail', 'useful-tests', 'impeccable']);
+  assert.deepEqual(names('implementer', 'bug'), ['ponytail', 'useful-tests', 'tdd']);
   assert.deepEqual(names('reviewer', 'feature'), []);
   assert.deepEqual(names('reviewer', 'ui'), []);
   assert.deepEqual(names('ui-reviewer', 'ui'), ['impeccable']);

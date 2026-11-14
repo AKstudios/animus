@@ -14,7 +14,7 @@ Take the conversation and your understanding of the codebase and write the spec.
 
    - **size**: `trivial` (a typo, copy, a config value, one or two files), `small` (a few files, follows a known pattern), `medium` (a feature across layers, roughly 5 to 20 files), `large` (multi-module work or a schema change). The factory refuses `large`: write several specs instead of one, as "Large work" below says.
    - **difficulty**: `routine` (follows an existing pattern in the repo), `hard` (unfamiliar area, cross-cutting change, unclear root cause), `risky` (auth, payments, migrations, data deletion). They are separate from size: a ten-line concurrency bug is small but hard.
-   - **type**: `feature`, `backend` or `ui` run today. `bug`, `refactor`, `upgrade`, `migration`, `performance`, `docs`, `tests` and `investigation` are defined but not built; `animus plan` says so. A `ui` spec may name the profile's target and pages (`ui: { target: app, pages: [home] }`) and design files (`design: [design/shop.png]`).
+   - **type**: `feature`, `backend`, `ui` or `bug` run today. A `bug` spec needs a `$ command` under at least one criterion that runs the test reproducing the bug: the factory checks that it fails without the fix. `refactor`, `upgrade`, `migration`, `performance`, `docs`, `tests` and `investigation` are defined but not built; `animus plan` says so. A `ui` spec may name the profile's target and pages (`ui: { target: app, pages: [home] }`) and design files (`design: [design/shop.png]`).
 
 3. Write the spec with the template below to `docs/specs/<slug>.md`, unless the project keeps specs elsewhere. Keep it short. It does not need to be committed: the factory copies it when the job starts.
 

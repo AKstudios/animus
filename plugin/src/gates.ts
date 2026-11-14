@@ -2,13 +2,14 @@
 // build), then the `$ command` lines of the spec's acceptance criteria, run in
 // the job's worktree by a script. Their captured output is also the evidence
 // the pull request shows for each criterion. Adapted from orbit's checks.ts.
-import { existsSync } from 'node:fs';
+import { existsSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
-import { matchesAny } from './git.ts';
+import { matchesAny, withScratch } from './git.ts';
 import { checksFor, type Profile } from './profile.ts';
 import type { Plan } from './profiles.ts';
-import { ANSI, failureExcerpt, sh } from './proc.ts';
+import { ANSI, failureExcerpt, sh, tryGit } from './proc.ts';
 import type { Spec } from './spec.ts';
+import { ensureSetup } from './workspace.ts';
 
 /** criterion: the acceptance criterion (from 1) the command proves. skip: why this job does not run it. */
 export type Check = { name: string; command: string; cwd?: string; skip?: string; env?: Record<string, string>; note?: string; criterion?: number };
@@ -73,6 +74,33 @@ export function runChecks(worktree: string, checks: readonly Check[], job: strin
     const result: CheckResult = { ...meta, ok: r.code === 0, skipped: false, ms: r.ms, output: r.output };
     if (!c.cwd) ran.set(squash(c.command), result);
     return result;
+  });
+}
+
+export const FAILS_ON_BASE = 'fails-on-base';
+
+/**
+ * A bug job's proof that its test tests the fix: the spec's acceptance
+ * commands run in a scratch worktree of the commit the job started from, with
+ * only the test files the job changed laid over it. One of them must fail
+ * there; the first that does is the evidence. It runs once the other gates
+ * pass, so a red here means the tests pass with and without the fix.
+ */
+export function failsOnBase(p: { repo: string; profile: Profile; spec: Pick<Spec, 'criteria'>; base: string; head: string; files: readonly string[]; job: string; green: boolean }): CheckResult {
+  const result = (ok: boolean, output: string, over: Partial<CheckResult> = {}): CheckResult => ({ name: FAILS_ON_BASE, command: 'the acceptance commands, on the base commit with only this job\'s test files', ok, skipped: false, ms: 0, output, ...over });
+  if (!p.green) return result(true, 'runs once the other gates pass', { skipped: true });
+  const tests = p.files.filter((f) => matchesAny(f, p.profile.tests));
+  if (!tests.length) return result(false, `This job changed no test file, so nothing shows the bug is fixed. Add a test that fails without the fix. The project's test files are those matching: ${p.profile.tests.join(', ')}`);
+  const commands = [...new Set(p.spec.criteria.flatMap((c) => c.commands))];
+  const started = Date.now();
+  return withScratch(p.repo, p.base, (scratch) => {
+    for (const f of tests) if (tryGit(scratch, ['checkout', p.head, '--', f]) === undefined) rmSync(join(scratch, f), { force: true });
+    ensureSetup(scratch, p.profile);
+    for (const command of commands) {
+      const [r] = runChecks(scratch, [{ name: FAILS_ON_BASE, command }], p.job);
+      if (!r!.ok && !findsNoTests(r!.output)) return result(true, r!.output, { command, ms: Date.now() - started, note: 'on the base commit with only this job\'s test files, where it fails as it should' });
+    }
+    return result(false, `Every acceptance command passes on the commit the job started from with only your test files added (${tests.join(', ')}), so no test fails without the fix. Make the test reproduce the bug: it must fail before the fix and pass after it.`, { ms: Date.now() - started });
   });
 }
 

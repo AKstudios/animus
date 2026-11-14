@@ -59,7 +59,7 @@ A job that cannot proceed stops as `needs-input` with one question. `animus resu
 
 ## Task profiles
 
-[plugin/config/profiles.yaml](plugin/config/profiles.yaml) is the one file that decides what a job runs. Size picks the stages, difficulty picks the tier and effort, type adds a reviewer or evidence. Profiles name a tier (fast, standard, deep), and one map turns tiers into models. The implementer may raise a job's size or difficulty and never lower it.
+[plugin/config/profiles.yaml](plugin/config/profiles.yaml) is the one file that decides what a job runs. Size picks the stages, difficulty picks the tier and effort, type adds a gate, a reviewer or evidence. A `bug` job gets the `tdd` skill and one more gate: the spec's acceptance commands run on the base commit with only the job's test files added, and one must fail there. Profiles name a tier (fast, standard, deep), and one map turns tiers into models. The implementer may raise a job's size or difficulty and never lower it.
 
 ## Skills
 
@@ -123,7 +123,7 @@ Left behind: Beads, epics, tickets and waves, the Workflow script, the test-writ
 
 ## Not built yet
 
-- Types marked `later` in the profiles file: bug, refactor, upgrade, migration, performance, docs, tests, investigation.
+- Types marked `later` in the profiles file: refactor, upgrade, migration, performance, docs, tests, investigation.
 - Services for a job (database, storage). The plan records the setup level, but a local job only runs the profile's installs and `setup`.
 - Running a job apart from the session that started it. Closing the session stops the job; `animus resume <job>` continues it. Helix is where jobs will outlive a session.
 - `animus init`. A new repo's profile is written by hand.
