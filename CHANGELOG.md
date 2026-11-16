@@ -8,6 +8,11 @@ clients with how to update.
 
 ## Unreleased
 
+- One interview skill: `/animus:grilling` is gone and `/animus:grill-with-docs`
+  holds the interview itself, loading `domain-modeling` for the glossary and
+  ADRs. Its size rule now says large work is one spec that the factory cuts
+  into slices, where it used to say to cut it into medium specs.
+
 - Each Helix job can run in a Docker container of its own: on when
   `config.yaml` has `container: {memory, cpus}`. A job sees only its
   submitter's folder under `~/.helix/people/` (their clone, job state and
