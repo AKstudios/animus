@@ -18,6 +18,8 @@ export type HelixJob = {
   title: string;
   draft: boolean;
   submitted: string;
+  /** When it last went back into the queue: after an answer, or when Helix stopped while it ran. */
+  queued?: string;
   started?: string;
   ended?: string;
   pid?: number;

@@ -1,13 +1,18 @@
 // Helix's HTTP API: five actions (submit, status, result, cancel, answer)
 // over JSON, for the private network only. Every request carries a person's
 // token; a job can be cancelled or answered only by whoever submitted it.
+// It also serves the display: its page at /, and what it shows at /display.
 import { timingSafeEqual } from 'node:crypto';
 import { createServer, type IncomingMessage, type Server } from 'node:http';
 import { hashToken, type Config } from './config.ts';
+import { display } from './display.ts';
 import type { Store } from './store.ts';
 import { Refused, type Submission, type Supervisor } from './supervisor.ts';
+import { asset } from './ui.ts';
 
 const MAX_BODY = 1024 * 1024;
+/** The display loads only what Helix serves and talks only to Helix. */
+const CSP = "default-src 'none'; script-src 'self'; style-src 'self'; font-src 'self'; img-src 'self' data:; connect-src 'self'; base-uri 'none'; form-action 'none'";
 
 function whoIs(config: Config, req: IncomingMessage): string | undefined {
   const token = /^Bearer (.+)$/.exec(req.headers.authorization ?? '')?.[1];
@@ -40,10 +45,17 @@ export function serve(opts: { config: Config; store: Store; supervisor: Supervis
       res.end(`${JSON.stringify(value)}\n`);
     };
     void (async () => {
+      const url = new URL(req.url ?? '/', 'http://helix');
+      // The display's page, scripts and fonts need no token: they hold nothing until one is given.
+      const file = req.method === 'GET' ? asset(url.pathname) : undefined;
+      if (file) {
+        res.writeHead(200, { 'content-type': file.type, 'cache-control': file.cache, 'content-security-policy': CSP, 'x-content-type-options': 'nosniff' });
+        return res.end(file.body);
+      }
       const person = whoIs(config, req);
       if (!person) return send(401, { error: 'a valid token is needed: Authorization: Bearer <token>' });
-      const url = new URL(req.url ?? '/', 'http://helix');
       const [, root, id, action] = url.pathname.split('/');
+      if (root === 'display' && !id && req.method === 'GET') return send(200, display(opts));
       if (root !== 'jobs') return send(404, { error: `nothing at ${url.pathname}` });
       if (!id) {
         if (req.method === 'GET') return send(200, { slots: config.slots, jobs: store.list() });

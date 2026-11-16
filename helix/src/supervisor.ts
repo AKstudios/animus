@@ -142,7 +142,7 @@ export function supervise(opts: { store: Store; config: Config; home: string; la
       say(`job ${job.id} was running when Helix stopped, for the ${interrupted}th time: ended`);
       continue;
     }
-    store.save({ ...rest, interrupted, state: 'queued' });
+    store.save({ ...rest, interrupted, state: 'queued', queued: now() });
     say(`job ${job.id} was running when Helix stopped: queued again${job.animus_job ? ', to resume' : ''}`);
   }
   tick();
@@ -173,7 +173,7 @@ export function supervise(opts: { store: Store; config: Config; home: string; la
       const job = mine(person, id);
       if (job.state !== 'ended' || job.outcome !== 'needs-input') throw new Refused(409, `job ${id} is not waiting for an answer`);
       const { outcome: _o, question: _q, reason: _r, ended: _e, ...rest } = job;
-      store.save({ ...rest, state: 'queued', answer: text });
+      store.save({ ...rest, state: 'queued', queued: now(), answer: text });
       tick();
       return store.get(id)!;
     },
@@ -185,7 +185,7 @@ export function supervise(opts: { store: Store; config: Config; home: string; la
       stopped = true;
       for (const [id, child] of children) {
         const job = store.get(id);
-        if (job?.state === 'running') { const { pid: _pid, ...rest } = job; store.save({ ...rest, state: 'queued' }); }
+        if (job?.state === 'running') { const { pid: _pid, ...rest } = job; store.save({ ...rest, state: 'queued', queued: now() }); }
         if (child.pid) kill(child.pid, child);
       }
     },

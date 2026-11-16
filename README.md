@@ -47,6 +47,8 @@ helix/bin/helix serve
 
 To keep Helix running with nobody signed in, [helix/deploy/ubuntu/setup.sh](helix/deploy/ubuntu/setup.sh) sets up an Ubuntu machine: an account for Helix, Node 24, no sleep, and a systemd unit that starts at boot and is started again whenever it stops. `finish.sh` beside it removes the account the machine was set up from. Helix itself needs none of this: on another system, anything that runs `helix serve` at boot and restarts it does the same job. With Tailscale, leave `host` at 127.0.0.1 and run `tailscale serve --bg 7420` once: the tailnet reaches Helix over https and the setting outlasts restarts.
 
+Helix also serves a display at its own address (`http://127.0.0.1:7420/`, or the tailnet address). It shows the slots, the agents working now with each job's stage, the queue, the jobs that wait for an answer, and the jobs that ended. It asks for a Helix token once and keeps it in that browser. It only reads, so answering and cancelling stay with the commands below. Click a project to narrow the page to it. The page follows the system's light or dark theme, and `?theme=dark` or `?theme=light` fixes one. Set `name` in `config.yaml` to change what the display calls the machine (default: its hostname).
+
 From a laptop, with `HELIX_URL` and `HELIX_TOKEN` set:
 
 | Command | What it does |

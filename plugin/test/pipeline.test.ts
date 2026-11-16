@@ -2,8 +2,8 @@ import assert from 'node:assert/strict';
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { test } from 'node:test';
-import { loadState, readRuns } from '../src/log.ts';
-import { runJob } from '../src/pipeline.ts';
+import { loadProgress, loadState, readRuns } from '../src/log.ts';
+import { jobOf, runJob } from '../src/pipeline.ts';
 import { git, AnimusError } from '../src/proc.ts';
 import { clean, deps, done, fakeAgent, makeRepo, write, writeSpec, type Step } from './helpers.ts';
 
@@ -69,6 +69,20 @@ test('a failed gate goes back to the same session one tier up', async () => {
   assert.deepEqual(run.gates.map((g) => g.ok), [false, true]);
   assert.deepEqual([calls[1]!.role, calls[1]!.tier, calls[1]!.resume], ['implementer', 'deep', 'session-1']);
   assert.match(calls[1]!.prompt, /FAIL acceptance-1: grep -q done/);
+});
+
+test('a running job says in its folder where it is: the stage, and who is working', async () => {
+  const repo = makeRepo();
+  const seen: string[] = [];
+  const look = (step: Step): Step => (req) => {
+    const p = loadProgress(jobOf(req.cwd)!)!;
+    seen.push(`${p.stage}: ${p.who}`);
+    return step(req);
+  };
+  const { agent } = fakeAgent([look(say('nearly')), look(say('done')), look(() => clean())]);
+  const run = await runJob({ repo, specFile: writeSpec(SMALL) }, deps(agent));
+  assert.deepEqual(seen, ['implement: implementer · standard tier', 'implement: implementer · deep tier · gate fix 1', 'review: reviewer · fast tier']);
+  assert.deepEqual([loadProgress(run.job)!.stage, loadProgress(run.job)!.who], ['pr', 'pr · writing the description']);
 });
 
 test('gates that still fail after two fix rounds end the job as a draft PR with the failure report', async () => {

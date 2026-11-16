@@ -91,6 +91,12 @@ export type JobState = {
   findings?: Finding[];
 };
 
+export const STAGES = ['setup', 'implement', 'gates', 'review', 'evidence', 'pr'] as const;
+export type Stage = (typeof STAGES)[number];
+
+/** Where a running job is, for whoever watches it: the stage, and who or what is doing it. */
+export type Progress = { stage: Stage; who: string; at: string };
+
 export function writeJson(file: string, value: unknown): void {
   mkdirSync(join(file, '..'), { recursive: true });
   writeFileSync(`${file}.tmp`, `${JSON.stringify(value, null, 2)}\n`);
@@ -104,6 +110,14 @@ export function saveState(state: JobState): void {
 export function loadState(job: string): JobState | undefined {
   const file = join(jobDir(job), 'state.json');
   return existsSync(file) ? (JSON.parse(readFileSync(file, 'utf8')) as JobState) : undefined;
+}
+
+export function saveProgress(job: string, stage: Stage, who: string): void {
+  writeJson(join(jobDir(job), 'progress.json'), { stage, who, at: new Date().toISOString() } satisfies Progress);
+}
+
+export function loadProgress(job: string): Progress | undefined {
+  try { return JSON.parse(readFileSync(join(jobDir(job), 'progress.json'), 'utf8')) as Progress; } catch { return undefined; }
 }
 
 export function appendRun(run: Run): void {

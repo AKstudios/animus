@@ -13,7 +13,7 @@ import { resolveAfter, waitForMerged } from './after.ts';
 import type { Agent, AgentResult } from './agent.ts';
 import { describe, failsOnBase, jobChecks, runChecks, type CheckResult } from './gates.ts';
 import { commitAll, mainCheckout, matchesAny, touchedFiles } from './git.ts';
-import { appendRun, jobDir, saveState, writeJson, type JobState, type Outcome, type Run } from './log.ts';
+import { appendRun, jobDir, saveProgress, saveState, writeJson, type JobState, type Outcome, type Run, type Stage } from './log.ts';
 import { evidenceBranch, prBody, prState, type Evidence, type PrLookup, type Publish } from './pr.ts';
 import { loadProfile } from './profile.ts';
 import { describePlan, escalate, modelFor, PLUGIN_ROOT, raise, resolvePlan, type Factory, type Tier } from './profiles.ts';
@@ -127,6 +127,9 @@ export async function runJob(opts: RunOptions, deps: Deps): Promise<Run> {
     try { return await fn(); } finally { run.ms[stage] += Date.now() - t; }
   };
 
+  /** Says where the job is, in its folder: what Helix's display shows while it runs. */
+  const at = (stage: Stage, who: string) => saveProgress(job, stage, who);
+
   const source = prior ? prior.source : resolve(opts.specFile!);
   if (source) run.spec_file = source;
 
@@ -134,6 +137,7 @@ export async function runJob(opts: RunOptions, deps: Deps): Promise<Run> {
   log(describePlan(factory, plan));
   // A spec that builds on another waits for it, then starts from a base that holds it.
   if (!prior && spec.after.length) {
+    at('setup', 'setup · waits for an earlier pull request to merge');
     const files = resolveAfter(repo, source!, spec.after);
     await timed('queue', () => waitForMerged({ repo, files, lookup: deps.prState ?? prState, log, ...(deps.sleep ? { sleep: deps.sleep } : {}) }));
   }
@@ -141,6 +145,7 @@ export async function runJob(opts: RunOptions, deps: Deps): Promise<Run> {
 
   // ---------------------------------------------------------------- setup
   let ws: Workspace;
+  at('setup', 'setup · worktree and dependencies');
   try {
     ws = await timed('setup', () => {
       const w = prior ? reopenWorkspace(repo, prior.workspace) : createWorkspace(repo, repoProfile, job, spec.base ?? repoProfile.base, log);
@@ -213,6 +218,7 @@ export async function runJob(opts: RunOptions, deps: Deps): Promise<Run> {
       run.handoffs = (run.handoffs ?? 0) + 1;
     }
     log(`${stage}: ${modelFor(factory, tier)}, ${effort} effort`);
+    at('implement', `implementer · ${tier} tier${/-fix-/.test(stage) ? ` · ${stage.replace('-fix-', ' fix ')}` : ''}`);
     const r = await timed('implement', () => deps.agent({ role: 'implementer', tier, effort, prompt, cwd: wt, ...instructions('implementer'), schema: REPORT_SCHEMA, ...caps(tier), ...(state.session ? { resume: state.session } : {}) }));
     record(stage, 'implementer', tier, effort, r);
     if (r.session) state.session = r.session;
@@ -246,6 +252,7 @@ export async function runJob(opts: RunOptions, deps: Deps): Promise<Run> {
       const attempt = run.gates.length + 1;
       const checks = jobChecks(repoProfile, plan, spec, { base: ws.base, files: touchedFiles(wt, ws.base, head) });
       log(`gates, run ${attempt}: ${checks.filter((c) => !c.skip).map((c) => c.name).join(', ') || 'nothing to run'}`);
+      at('gates', `gates · attempt ${attempt}${run.fix_rounds ? ` after ${run.fix_rounds === 1 ? 'a fix round' : `${run.fix_rounds} fix rounds`}` : ''}`);
       const t = Date.now();
       lastGates = await timed('gates', () => {
         const results = runChecks(wt, checks, job);
@@ -266,7 +273,9 @@ export async function runJob(opts: RunOptions, deps: Deps): Promise<Run> {
     }
   };
 
-  const shoot = async (of: UiJob = ui!): Promise<string> => {
+  /** Screenshots for the reviewer are part of the review; the ones taken after it are the evidence. */
+  const shoot = async (of: UiJob = ui!, stage: Stage = 'evidence'): Promise<string> => {
+    at(stage, `${stage} · screenshots`);
     const r = await timed('evidence', () => (deps.shots ?? takeShots)(wt, of, repoProfile, join(dir, 'shots')));
     shots = { dir: r.dir, files: r.shots.build };
     log(`${r.reused ? 'screenshots unchanged' : `${r.shots.build.length} screenshot(s) taken`}: ${r.dir}`);
@@ -290,8 +299,9 @@ export async function runJob(opts: RunOptions, deps: Deps): Promise<Run> {
     if (plan.review) {
       const { role, tier, effort } = plan.review;
       for (let round = 1; ; round++) {
-        const seen = ui ? await shoot() : undefined;
+        const seen = ui ? await shoot(ui, 'review') : undefined;
         log(`review ${round}: ${role}, ${modelFor(factory, tier)}, ${effort} effort`);
+        at('review', `${role} · ${tier} tier${round > 1 ? ` · round ${round}` : ''}`);
         const prompt = reviewPrompt({ spec, ws, round, earlier: open, shots: seen, answers });
         let said: Review | undefined;
         for (let tries = 0; tries < 2 && !said; tries++) {
@@ -340,6 +350,7 @@ export async function runJob(opts: RunOptions, deps: Deps): Promise<Run> {
   }
 
   // ------------------------------------------------------------------- PR
+  at('pr', outcome === 'needs-input' ? 'pr · stopping to ask' : outcome === 'failed' ? 'pr · writing the failure report' : 'pr · writing the description');
   const head = git(wt, ['rev-parse', 'HEAD']);
   run.head = head;
   run.protected_touched = touchedFiles(wt, ws.base, head).filter((f) => matchesAny(f, repoProfile.protected));
