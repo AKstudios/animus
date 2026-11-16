@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import type { AddressInfo } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -7,11 +7,12 @@ import { test } from 'node:test';
 import { saveProgress } from '../../plugin/src/log.ts';
 import * as client from '../../plugin/src/remote.ts';
 import { write } from '../../plugin/test/helpers.ts';
-import { hashToken, type Config } from '../src/config.ts';
+import { animusVersion } from '../../plugin/src/version.ts';
+import { addPerson, hashToken, loadConfig, removePerson, type Config } from '../src/config.ts';
 import type { Display } from '../src/display.ts';
 import { serve } from '../src/server.ts';
 import { openStore } from '../src/store.ts';
-import { supervise, type Launch } from '../src/supervisor.ts';
+import { cancelJobsOf, pauseFile, supervise, type Launch } from '../src/supervisor.ts';
 
 const SPEC = (title: string) => `---\nsize: small\n---\n# ${title}\n\n## Acceptance criteria\n\n1. It works.\n`;
 
@@ -54,7 +55,7 @@ async function helix(home = mkdtempSync(join(tmpdir(), 'helix-'))) {
   as('ana');
   const stop = () => { supervisor.stop(); server.close(); store.close(); };
   const ended = (id: number) => until(() => client.job(String(id)), (j) => j.state === 'ended');
-  return { home, release, as, stop, ended, submit: (title: string) => client.submit({ repo: 'app', spec: SPEC(title), name: 'spec.md' }) };
+  return { home, release, as, stop, ended, config, store, supervisor, submit: (title: string) => client.submit({ repo: 'app', spec: SPEC(title), name: 'spec.md' }) };
 }
 
 test('submitted jobs run one per slot, in order, each as its submitter with only that person\'s credentials', async () => {
@@ -198,4 +199,80 @@ test('a job that was running when Helix died is queued again and runs when Helix
   const done = await again.ended(j.id);
   assert.deepEqual([done.outcome, done.animus_job], ['pr', 'fake-hold-over-a-restart']);
   again.stop();
+});
+
+test('Helix says its version without a token, and refuses a client it cannot work with, saying how to update', async () => {
+  const h = await helix();
+  const asAna = (headers: Record<string, string>) => fetch(new URL('/jobs', process.env.HELIX_URL), { headers: { authorization: 'Bearer ana-token', ...headers } });
+  const v = await fetch(new URL('/version', process.env.HELIX_URL));
+  assert.deepEqual([v.status, await v.json(), v.headers.get('helix-version')], [200, { version: animusVersion() }, animusVersion()]);
+
+  const none = await asAna({});
+  assert.equal(none.status, 426);
+  assert.match(((await none.json()) as { error: string }).error, /from before versioned releases\. Update the animus plugin/);
+  assert.equal((await asAna({ 'animus-version': '99.0.0' })).status, 426);
+  assert.equal((await asAna({ 'animus-version': animusVersion() })).status, 200);
+  // The client sends its own.
+  assert.equal((await client.jobs()).slots, 1);
+  h.stop();
+});
+
+test('a person taken off Helix: their token stops working, their jobs are cancelled, and a queued one never runs with the machine\'s logins', async () => {
+  const h = await helix();
+  const running = await h.submit('hold for ana');
+  await until(() => client.job(String(running.id)), (j) => j.state === 'running');
+  h.as('ben');
+  const bens = await h.submit('hold for ben');
+
+  const cancelled = cancelJobsOf(h.store, 'ana');
+  delete h.config.people.ana;
+  assert.deepEqual(cancelled.map((j) => j.id), [running.id]);
+  const after = await until(() => client.job(String(running.id)), (j) => j.state === 'cancelled');
+  assert.match(after.reason!, /ana was removed from Helix/);
+  // The slot freed by ana's job goes to ben's.
+  await until(() => client.job(String(bens.id)), (j) => j.state === 'running');
+  h.as('ana');
+  await assert.rejects(client.jobs(), /a valid token is needed/);
+
+  // A job queued before its person went is ended, not run.
+  h.as('ben');
+  const stale = await h.submit('left behind');
+  h.store.save({ ...h.store.get(stale.id)!, person: 'gone' });
+  writeFileSync(h.release, '');
+  const ended = await h.ended(stale.id);
+  assert.deepEqual([ended.outcome, ended.reason], ['failed', 'gone is no longer on Helix']);
+  h.stop();
+});
+
+test('while the pause file is there no job starts, and waking the supervisor after it goes starts the queue', async () => {
+  const h = await helix();
+  writeFileSync(pauseFile(h.home), 'until restart\n');
+  const j = await h.submit('waits');
+  await new Promise((r) => { setTimeout(r, 200); });
+  assert.equal((await client.job(String(j.id))).state, 'queued');
+  rmSync(pauseFile(h.home));
+  h.supervisor.wake();
+  assert.equal((await h.ended(j.id)).outcome, 'pr');
+  h.stop();
+});
+
+test('remove-person deletes the credentials file Helix keeps for them, and leaves one kept elsewhere', () => {
+  const home = mkdtempSync(join(tmpdir(), 'helix-home-'));
+  const elsewhere = mkdtempSync(join(tmpdir(), 'helix-elsewhere-'));
+  const before = process.env.HELIX_HOME;
+  process.env.HELIX_HOME = home;
+  try {
+    writeFileSync(join(home, 'cleo.env'), 'GH_TOKEN=x\n');
+    writeFileSync(join(elsewhere, 'dan.env'), 'GH_TOKEN=y\n');
+    addPerson('cleo', join(home, 'cleo.env'));
+    addPerson('dan', join(elsewhere, 'dan.env'));
+    assert.deepEqual(removePerson('cleo'), {});
+    assert.equal(existsSync(join(home, 'cleo.env')), false);
+    assert.deepEqual(removePerson('dan'), { kept: join(elsewhere, 'dan.env') });
+    assert.equal(readFileSync(join(elsewhere, 'dan.env'), 'utf8'), 'GH_TOKEN=y\n');
+    assert.deepEqual(loadConfig().people, {});
+    assert.throws(() => removePerson('dan'), /no person named dan/);
+  } finally {
+    if (before === undefined) delete process.env.HELIX_HOME; else process.env.HELIX_HOME = before;
+  }
 });

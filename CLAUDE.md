@@ -42,5 +42,9 @@ removed on 2026-11-13). Helix is where jobs outlive a session.
 - Helix holds no state of its own: the SQLite table and Animus's job files
   are the record, so a restart carries on from them. It starts jobs only as
   `animus` processes and never calls the pipeline in its own process.
+- One version, in `plugin/.claude-plugin/plugin.json`; releases are cut by
+  `npm run release -- <version>`. A change that breaks the HTTP API, a spec,
+  a profile or a job's files goes under **Breaking** in CHANGELOG.md's
+  Unreleased section.
 - `npm test` and `npm run typecheck` must both pass. Tests drive the pipeline
   with a scripted fake agent (plugin/test/helpers.ts); none starts a model.

@@ -12,5 +12,5 @@
     "skipLibCheck": true,
     "types": ["node"]
   },
-  "include": ["plugin/src/**/*.ts", "plugin/test/**/*.ts", "helix/src/**/*.ts", "helix/ui/**/*.ts","helix/test/**/*.ts"]
+  "include": ["plugin/src/**/*.ts", "plugin/test/**/*.ts", "helix/src/**/*.ts", "helix/ui/**/*.ts","helix/test/**/*.ts", "scripts/**/*.ts"]
 }

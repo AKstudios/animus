@@ -3,9 +3,9 @@
 // A person is known by the hash of a token; the token itself is shown once,
 // when they are added, and never kept.
 import { createHash, randomBytes } from 'node:crypto';
-import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
-import { join, resolve } from 'node:path';
+import { isAbsolute, join, relative, resolve } from 'node:path';
 import { parse, stringify } from 'yaml';
 import { isRecord } from '../../plugin/src/profile.ts';
 import { AnimusError } from '../../plugin/src/proc.ts';
@@ -61,6 +61,37 @@ export function addPerson(name: string, envFile?: string): string {
   config.people[name] = { token_sha256: hashToken(token), ...(env ? { env_file: env } : {}) };
   saveConfig(config);
   return token;
+}
+
+/**
+ * Takes a person off Helix: their token stops working as soon as `helix serve`
+ * reads the file again, and the credentials file is deleted when it is under
+ * Helix's home. Returns a credentials file kept elsewhere, for whoever removes
+ * them to delete by hand.
+ */
+export function removePerson(name: string): { kept?: string } {
+  const config = loadConfig();
+  const person = config.people[name];
+  if (!person) throw new AnimusError(`${configFile()} has no person named ${name}`);
+  delete config.people[name];
+  saveConfig(config);
+  const file = person.env_file;
+  if (!file || !existsSync(file)) return {};
+  const inside = relative(helixHome(), resolve(file));
+  // A file someone else also points to is not this person's alone.
+  const shared = Object.values(config.people).some((p) => p.env_file && resolve(p.env_file) === resolve(file));
+  if (!inside.startsWith('..') && !isAbsolute(inside) && !shared) { rmSync(file); return {}; }
+  return { kept: file };
+}
+
+/** Stops Helix taking jobs for a repository. Its clone stays; returns where it is. */
+export function removeRepo(name: string): string {
+  const config = loadConfig();
+  const dir = config.repos[name];
+  if (!dir) throw new AnimusError(`${configFile()} has no repository named ${name}`);
+  delete config.repos[name];
+  saveConfig(config);
+  return dir;
 }
 
 export function addRepo(name: string, dir: string): void {

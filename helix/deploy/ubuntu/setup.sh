@@ -89,6 +89,9 @@ StartLimitIntervalSec=0
 User=$NEW_USER
 WorkingDirectory=$NEW_HOME/animus
 Environment=PATH=$NEW_HOME/.local/bin:/usr/local/bin:/usr/bin:/bin
+# Claude Code moves only when Helix does (helix upgrade, then update it by hand):
+# a job never meets a new Claude Code halfway through a release.
+Environment=DISABLE_AUTOUPDATER=1
 ExecStart=/usr/local/bin/node --disable-warning=ExperimentalWarning $NEW_HOME/animus/helix/src/cli.ts serve
 Restart=always
 RestartSec=5

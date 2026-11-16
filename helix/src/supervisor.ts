@@ -33,11 +33,18 @@ export type Preflight = (person: string, env: Record<string, string>, repoDir: s
 
 export type Submission = { repo: string; spec: string; name?: string; draft?: boolean };
 
+/** While this file is in Helix's home, no job starts; submissions still queue. `helix upgrade` sets it to drain the machine. */
+export const pauseFile = (home: string) => join(home, 'paused');
+/** What `helix upgrade` writes in the pause file: the next `helix serve` takes the pause off. */
+export const UNTIL_RESTART = 'until restart';
+
 export type Supervisor = {
   submit(person: string, s: Submission): HelixJob;
   cancel(person: string, id: number): HelixJob;
   answer(person: string, id: number, text: string): HelixJob;
   log(id: number, lines?: number): string;
+  /** Starts what the queue holds while slots are free: after the config changed, or a pause ended. */
+  wake(): void;
   /** Stops starting jobs and ends the ones running. */
   stop(): void;
 };
@@ -45,6 +52,31 @@ export type Supervisor = {
 export class Refused extends AnimusError {
   status: number;
   constructor(status: number, message: string) { super(message); this.status = status; }
+}
+
+/** Ends a job's process. A job is a tree (animus, the agent, the project's checks): the whole group goes where there is one. */
+function kill(pid: number, child?: ChildProcess): void {
+  try {
+    if (process.platform !== 'win32') process.kill(-pid, 'SIGTERM');
+    else if (child) child.kill();
+    else process.kill(pid);
+  } catch { /* already gone */ }
+}
+
+/**
+ * Cancels a person's queued and running jobs, from any process: `helix
+ * remove-person` runs beside `helix serve`, which sees the job's process end
+ * and leaves the table as this says. Jobs that already ended are kept.
+ */
+export function cancelJobsOf(store: Store, person: string): HelixJob[] {
+  const now = new Date().toISOString();
+  const theirs = [...store.inState('queued'), ...store.inState('running')].filter((j) => j.person === person);
+  for (const job of theirs) {
+    const { pid, ...rest } = job;
+    store.save({ ...rest, state: 'cancelled', ended: now, reason: `${person} was removed from Helix` });
+    if (pid) kill(pid);
+  }
+  return theirs;
 }
 
 export function supervise(opts: { store: Store; config: Config; home: string; launch?: Launch; preflight?: Preflight; say?: (line: string) => void }): Supervisor {
@@ -56,10 +88,6 @@ export function supervise(opts: { store: Store; config: Config; home: string; la
   const logFile = (id: number) => join(home, 'jobs', String(id), 'log.txt');
   let stopped = false;
 
-  const kill = (pid: number, child?: ChildProcess) => {
-    // A job is a tree (animus, the agent, the project's checks): end the whole group where there is one.
-    try { if (process.platform === 'win32') child?.kill(); else process.kill(-pid, 'SIGTERM'); } catch { /* already gone */ }
-  };
 
   const mine = (person: string, id: number): HelixJob => {
     const job = store.get(id);
@@ -69,11 +97,14 @@ export function supervise(opts: { store: Store; config: Config; home: string; la
   };
 
   function start(job: HelixJob): void {
-    const repoDir = config.repos[job.repo]!;
+    const repoDir = config.repos[job.repo] ?? '';
     const { command, args } = launch(job, repoDir);
     mkdirSync(dirname(logFile(job.id)), { recursive: true });
     let env: NodeJS.ProcessEnv;
     try {
+      // Taken off since the job was queued: it never runs, and never with the machine's own logins in place of theirs.
+      if (!config.people[job.person]) throw new AnimusError(`${job.person} is no longer on Helix`);
+      if (!repoDir) throw new AnimusError(`Helix no longer has the repository ${job.repo}`);
       const theirs = personEnv(config.people[job.person]);
       const looked = opts.preflight?.(job.person, theirs, repoDir) ?? {};
       if (looked.why) throw new AnimusError(looked.why);
@@ -125,7 +156,7 @@ export function supervise(opts: { store: Store; config: Config; home: string; la
   }
 
   function tick(): void {
-    if (stopped) return;
+    if (stopped || existsSync(pauseFile(home))) return;
     const queued = store.inState('queued');
     while (children.size < config.slots && queued.length) start(queued.shift()!);
   }
@@ -181,6 +212,7 @@ export function supervise(opts: { store: Store; config: Config; home: string; la
       if (!existsSync(logFile(id))) return '';
       return readFileSync(logFile(id), 'utf8').trimEnd().split('\n').slice(-lines).join('\n');
     },
+    wake: () => tick(),
     stop() {
       stopped = true;
       for (const [id, child] of children) {

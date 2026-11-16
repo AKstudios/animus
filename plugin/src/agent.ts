@@ -71,14 +71,16 @@ type ClaudeJson = {
 /**
  * Claude Code, headless. Sessions load the project's own settings and rules
  * only (--setting-sources project), so a job runs the same on a laptop and in
- * a container that has none of the person's own. They get no Skill tool and no
+ * a container that has none of the person's own. No MCP server starts, not
+ * even one the person added for themselves (--strict-mcp-config with none
+ * given): a job's tools are the ones listed below. They get no Skill tool and no
  * slash commands: a skill reaches a role as text in its instructions
  * (skills.ts), so each role has exactly the skills it was granted.
  */
 export function claudeAgent(factory: Factory, command = process.env.ANIMUS_CLAUDE ?? 'claude'): Agent {
   return (req) => {
     const model = modelFor(factory, req.tier);
-    const args = ['-p', req.prompt, '--model', model, '--effort', req.effort, '--output-format', 'json', '--permission-mode', 'dontAsk', '--setting-sources', 'project', '--disable-slash-commands'];
+    const args = ['-p', req.prompt, '--model', model, '--effort', req.effort, '--output-format', 'json', '--permission-mode', 'dontAsk', '--setting-sources', 'project', '--disable-slash-commands', '--strict-mcp-config'];
     for (const dir of req.addDirs ?? []) args.push('--add-dir', dir);
     if (req.resume) args.push('--resume', req.resume);
     if (req.system) args.push('--append-system-prompt', req.system);

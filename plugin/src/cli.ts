@@ -4,6 +4,7 @@ import { resolve } from 'node:path';
 import { parseArgs } from 'node:util';
 import { claudeAgent } from './agent.ts';
 import { cleanup, describeCleanup, KEEP_DAYS } from './cleanup.ts';
+import { describeFindings, doctor } from './doctor.ts';
 import { initProfile } from './init.ts';
 import { describe, failsOnBase, jobChecks, runChecks } from './gates.ts';
 import { mainCheckout, touchedFiles } from './git.ts';
@@ -18,6 +19,7 @@ import * as helix from './remote.ts';
 import { describeSkills, grantsFor } from './skills.ts';
 import { criteriaSoFar, describeSlicing, planSlices } from './slices.ts';
 import { loadSpec } from './spec.ts';
+import { animusVersion } from './version.ts';
 import { describeShots, takeShots, uiDown, uiTarget, uiUp } from './ui.ts';
 import { basename, join } from 'node:path';
 
@@ -52,6 +54,11 @@ const USAGE = `animus: a spec goes in, a pull request with proof comes out
         --dry-run only says what would go.
   animus skills
         The vendored skills, where each came from, and which role gets it.
+  animus doctor
+        Whether this machine can run and submit jobs: Node, Claude Code, git,
+        gh, the repo's profile, Helix and its version, and what in your own
+        setup reaches a job (orbit's plugin, git hooks, commit signing).
+        Exits 1 if something would stop a job.
 
 With Helix, the machine that runs jobs for everyone (HELIX_URL, HELIX_TOKEN):
   animus submit <spec.md> [--repo <dir>] [--draft]
@@ -223,8 +230,13 @@ async function main(argv: string[]): Promise<number> {
     case 'skills':
       console.log(describeSkills(loadFactory()));
       return 0;
+    case 'doctor': {
+      const found = await doctor(cwd);
+      console.log(describeFindings(found));
+      return found.some((f) => f.level === 'fail') ? 1 : 0;
+    }
     case 'version':
-      console.log(factoryVersion());
+      console.log(`${animusVersion()} (${factoryVersion()})`);
       return 0;
     case undefined: case 'help': case '--help': case '-h':
       console.log(USAGE);

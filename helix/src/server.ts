@@ -4,6 +4,8 @@
 // It also serves the display: its page at /, and what it shows at /display.
 import { timingSafeEqual } from 'node:crypto';
 import { createServer, type IncomingMessage, type Server } from 'node:http';
+import { VERSION_HEADER } from '../../plugin/src/remote.ts';
+import { animusVersion, compatible } from '../../plugin/src/version.ts';
 import { hashToken, type Config } from './config.ts';
 import { display } from './display.ts';
 import type { Store } from './store.ts';
@@ -39,9 +41,10 @@ async function body(req: IncomingMessage): Promise<Record<string, unknown>> {
 
 export function serve(opts: { config: Config; store: Store; supervisor: Supervisor }): Server {
   const { config, store, supervisor } = opts;
+  const version = animusVersion();
   return createServer((req, res) => {
     const send = (status: number, value: unknown) => {
-      res.writeHead(status, { 'content-type': 'application/json' });
+      res.writeHead(status, { 'content-type': 'application/json', 'helix-version': version });
       res.end(`${JSON.stringify(value)}\n`);
     };
     void (async () => {
@@ -54,8 +57,15 @@ export function serve(opts: { config: Config; store: Store; supervisor: Supervis
       }
       // What the display shows needs no token either: Helix listens on a private network only, and this only reads.
       if (req.method === 'GET' && url.pathname === '/display') return send(200, display(opts));
+      // Which release this is, for `animus doctor`; it says no more than the display does.
+      if (req.method === 'GET' && url.pathname === '/version') return send(200, { version });
       const person = whoIs(config, req);
       if (!person) return send(401, { error: 'a valid token is needed: Authorization: Bearer <token>' });
+      // A client from a release this one cannot work with is told how to catch up, before anything is done for it.
+      const theirs = req.headers[VERSION_HEADER];
+      if (typeof theirs !== 'string' || !compatible(theirs, version)) {
+        return send(426, { error: `this Helix runs Animus ${version} and your animus is ${typeof theirs === 'string' ? theirs : 'from before versioned releases'}. Update the animus plugin in Claude Code (/plugin), or pull your clone of it, then try again` });
+      }
       const [, root, id, action] = url.pathname.split('/');
       if (root !== 'jobs') return send(404, { error: `nothing at ${url.pathname}` });
       if (!id) {

@@ -49,6 +49,8 @@ export type Store = {
 export function openStore(file: string): Store {
   mkdirSync(dirname(file), { recursive: true });
   const db = new DatabaseSync(file);
+  // helix remove-person and helix upgrade open the table while helix serve has it: wait for each other's writes.
+  db.exec('pragma busy_timeout = 5000');
   db.exec('create table if not exists jobs (id integer primary key autoincrement, state text not null, data text not null)');
   const row = (r: unknown): HelixJob => {
     const { id, state, data } = r as { id: number; state: State; data: string };

@@ -27,7 +27,38 @@ From a Claude Code session with the plugin installed, you talk and the factory d
 | `animus outcomes [--json]` | What became of each PR, read from GitHub and kept in `~/.animus/outcomes.json`: merged or closed, time to merge, human commits, reverted or reworked within 30 days. Prints the five numbers split by task class. |
 | `animus cleanup [<job>...] [--days <n>] [--dry-run]` | Removes what finished jobs left behind: the branches (local and on origin) and worktree of a job whose PR merged or closed, and a job's folder 14 days after its last run. A job with an open PR is kept. A named job does not wait. |
 | `animus skills` | The vendored skills, where each came from, and which role gets it. |
+| `animus doctor` | Whether this machine can run and submit jobs: Node, Claude Code, git, gh, the repo's profile, Helix and its version, and what of your own setup reaches a job (orbit's old plugin of the same name, git hooks, commit signing). Exits 1 if something would stop a job. |
 | `animus check`, `animus shots`, `animus ui up\|down` | For the implementer, inside a job's worktree. |
+
+## Releases
+
+The version is the one in `plugin/.claude-plugin/plugin.json`; the plugin and
+Helix ship from the same tag. `npm run release -- <version>` cuts one from a
+clean main that matches origin: it needs `CHANGELOG.md`'s Unreleased section
+filled in, runs the tests and the typecheck, sets the version, commits, tags
+`v<version>` and moves the `stable` branch there. It prints the push.
+
+A release that breaks the HTTP API, a spec, a profile or a job's files bumps
+the minor version before 1.0 (the major after) and needs `--breaking`. Helix
+refuses a client it cannot work with, saying how to update, so upgrade Helix
+and tell the team together.
+
+The team follows `stable`, not `main`. Put this in each team repository's
+`.claude/settings.json` (or in managed settings), and Claude Code offers
+Animus when they open it and keeps it on the latest release:
+
+```json
+{
+  "extraKnownMarketplaces": {
+    "animus": { "source": { "source": "github", "repo": "AKstudios/animus", "ref": "stable" }, "autoUpdate": true }
+  },
+  "enabledPlugins": { "animus@animus": true }
+}
+```
+
+They need read access to the repository on GitHub. `animus doctor` then says
+what is missing on their machine. Orbit's plugin had the same name from a
+marketplace of the same name; doctor says so if it is still registered.
 
 ## Helix
 
@@ -40,7 +71,18 @@ helix/bin/helix add-repo meal-planner /srv/repos/meal-planner   # a clone with a
 helix/bin/helix add-person ajmal --env-file /srv/helix/ajmal.env   # prints their token once
 helix/bin/helix check          # each person's credentials, tried against GitHub and Claude
 helix/bin/helix serve
+helix/bin/helix remove-person ajmal     # token off, their jobs cancelled, their credentials file deleted
+helix/bin/helix remove-repo meal-planner
+helix/bin/helix upgrade v0.3.0          # drain, check out the release, install, test, restart
 ```
+
+Helix reads `config.yaml` again whenever it changes, so adding or removing a
+person or a repository, or changing the slots, needs no restart. Someone
+leaving is `helix remove-person`, which prints what is left to revoke
+elsewhere. `helix upgrade` stops starting jobs, waits for the running ones,
+checks out the tag and runs the tests; if they fail it goes back. It then
+stops `helix serve` for its service manager to start again. Moving Helix to
+another machine is [helix/deploy/README.md](helix/deploy/README.md).
 
 `config.yaml` there sets `host` (default 127.0.0.1; set it to the machine's address on your private network, never a public one), `port` (7420) and `slots` (2). A person's `--env-file` holds `KEY=VALUE` lines set for their jobs only, such as `CLAUDE_CODE_OAUTH_TOKEN` and `GH_TOKEN`, so the PR appears as them. Without one, their jobs use the machine's own logins. With a `GH_TOKEN`, git uses that token for https remotes for the job's processes only, so clone the repositories over https.
 

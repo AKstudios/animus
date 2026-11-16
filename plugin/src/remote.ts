@@ -2,6 +2,10 @@
 // spec to the machine that runs jobs, and ask about it. Five thin HTTP calls;
 // the result never depends on them, since it lands as a pull request.
 import { AnimusError } from './proc.ts';
+import { animusVersion } from './version.ts';
+
+/** How a client tells Helix its version; Helix refuses one it cannot work with (version.ts, compatible). */
+export const VERSION_HEADER = 'animus-version';
 
 /** A job as Helix reports it. */
 export type RemoteJob = {
@@ -15,13 +19,24 @@ async function call<T>(method: string, path: string, body?: unknown): Promise<T>
   if (!url || !token) throw new AnimusError('set HELIX_URL (where Helix listens, such as http://office:7420) and HELIX_TOKEN (yours, from helix add-person)');
   let res: Response;
   try {
-    res = await fetch(new URL(path, url), { method, headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' }, ...(body === undefined ? {} : { body: JSON.stringify(body) }) });
+    res = await fetch(new URL(path, url), { method, headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json', [VERSION_HEADER]: animusVersion() }, ...(body === undefined ? {} : { body: JSON.stringify(body) }) });
   } catch (err) {
     throw new AnimusError(`could not reach Helix at ${url}: ${(err as Error).cause instanceof Error ? ((err as Error).cause as Error).message : (err as Error).message}`);
   }
   const value = (await res.json().catch(() => ({}))) as { error?: string };
   if (!res.ok) throw new AnimusError(`Helix refused: ${value.error ?? res.statusText}`);
   return value as T;
+}
+
+/** Helix's version, asked without a token: what `animus doctor` compares with its own. */
+export async function helixVersion(url: string): Promise<string> {
+  let res: Response;
+  try { res = await fetch(new URL('/version', url), { signal: AbortSignal.timeout(5000) }); } catch (err) {
+    throw new AnimusError(`could not reach Helix at ${url}: ${(err as Error).cause instanceof Error ? ((err as Error).cause as Error).message : (err as Error).message}`);
+  }
+  const value = (await res.json().catch(() => ({}))) as { version?: string };
+  if (!res.ok || !value.version) throw new AnimusError(`Helix at ${url} did not say its version (${res.status}): it predates versioned releases`);
+  return value.version;
 }
 
 export const submit = (s: { repo: string; spec: string; name: string; draft?: boolean }) => call<RemoteJob>('POST', '/jobs', s);
