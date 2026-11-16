@@ -31,6 +31,14 @@ tdd:
   paths: [skills/engineering/tdd/SKILL.md, skills/engineering/tdd/tests.md, skills/engineering/tdd/mocking.md, LICENSE]
   left_out: agents/ (settings for another vendor's CLI)
 
+to-tickets:
+  repo: https://github.com/mattpocock/skills
+  commit: 5863806dd4e15c63174bee4e7515a4256792ecfa
+  license: MIT
+  strip: skills/engineering/to-tickets/
+  paths: [skills/engineering/to-tickets/SKILL.md, LICENSE]
+  left_out: agents/ (settings for another vendor's CLI)
+
 # The person's own skill, written for orbit; not from a public repo.
 useful-tests:
   repo: ../orbit (plugin/skills/useful-tests)

@@ -144,7 +144,7 @@ test('the display is told every job, where a running one is, and why a queued on
   const running = await h.submit('hold the slot');
   const asks = await h.submit('ask later');
   const first = await until(read, (d) => Boolean(d.jobs[0]?.animus_job));
-  assert.deepEqual([first.slots, first.stages.length, first.repos], [1, 6, [{ name: 'app', base: 'develop', gates: ['test', 'typecheck'] }]]);
+  assert.deepEqual([first.slots, first.stages.length, first.repos], [1, 7, [{ name: 'app', base: 'develop', gates: ['test', 'typecheck'] }]]);
   assert.ok(first.name && Math.abs(Date.parse(first.at) - Date.now()) < 5000);
   // The last line the job said; nothing yet about its stage. And nothing that is only Helix's business.
   assert.deepEqual([first.jobs[0]!.state, first.jobs[0]!.now, first.jobs[0]!.progress], ['running', 'job fake-hold-the-slot: hold the slot', undefined]);
