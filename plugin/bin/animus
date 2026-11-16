@@ -16,8 +16,9 @@ if [[ -z $v ]] || (( major < 24 )); then
   exit 1
 fi
 # Claude Code installs the dependencies of a plugin from a git marketplace;
-# one loaded in place from a local path has to be installed by hand.
-if [[ ! -d $root/node_modules/yaml ]]; then
+# one loaded in place from a local path has to be installed by hand. In a
+# clone of the whole repository the one at its root serves: Node looks there too.
+if [[ ! -d $root/node_modules/yaml && ! -d $root/../node_modules/yaml ]]; then
   echo "animus: its dependencies are not installed; run: npm ci --prefix \"$root\"" >&2
   exit 1
 fi
