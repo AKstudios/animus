@@ -1,11 +1,12 @@
 // The animus command.
+import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { parseArgs } from 'node:util';
 import { claudeAgent } from './agent.ts';
 import { cleanup, describeCleanup, KEEP_DAYS } from './cleanup.ts';
 import { initProfile } from './init.ts';
 import { describe, failsOnBase, jobChecks, runChecks } from './gates.ts';
-import { touchedFiles } from './git.ts';
+import { mainCheckout, touchedFiles } from './git.ts';
 import { describeRuns, jobDir, loadState, readRuns, type Run } from './log.ts';
 import { factoryVersion, jobOf, onPath, runJob, uiJobOf } from './pipeline.ts';
 import { describeNumbers, numbers, refreshOutcomes } from './outcomes.ts';
@@ -13,10 +14,11 @@ import { prFacts, prState, publish, pushEvidence } from './pr.ts';
 import { loadProfile } from './profile.ts';
 import { describePlan, loadFactory, resolvePlan } from './profiles.ts';
 import { git, AnimusError, GitError } from './proc.ts';
+import * as helix from './remote.ts';
 import { describeSkills, grantsFor } from './skills.ts';
 import { loadSpec } from './spec.ts';
 import { describeShots, takeShots, uiDown, uiTarget, uiUp } from './ui.ts';
-import { join } from 'node:path';
+import { basename, join } from 'node:path';
 
 const USAGE = `animus: a spec goes in, a pull request with proof comes out
 
@@ -47,6 +49,14 @@ const USAGE = `animus: a spec goes in, a pull request with proof comes out
         --dry-run only says what would go.
   animus skills
         The vendored skills, where each came from, and which role gets it.
+
+With Helix, the machine that runs jobs for everyone (HELIX_URL, HELIX_TOKEN):
+  animus submit <spec.md> [--repo <dir>] [--draft]
+        Queue the spec there, for the repository of this name.
+  animus status [<id>]      Its queue, or one job with the end of its log.
+  animus result <id>        One job as JSON; exits 0 once it ended in a pull request.
+  animus answer <id> <text> Answer a job's question; it is queued again.
+  animus cancel <id>
 
 Inside a job's worktree (the implementer runs these):
   animus check              Run the job's gates now.
@@ -86,7 +96,7 @@ async function main(argv: string[]): Promise<number> {
       if (!values['dry-run'] && !onPath('gh')) throw new AnimusError('gh is not installed, so no pull request can be opened; install it or use --dry-run');
       const specFile = resolve(positionals[0]);
       const repo = resolve(values.repo ?? cwd);
-      return finish(await runJob({ repo, specFile, ...flags }, deps()));
+      return finish(await runJob({ repo, specFile, ...flags, ...(process.env.ANIMUS_TRIGGER ? { trigger: process.env.ANIMUS_TRIGGER } : {}) }, deps()));
     }
     case 'plan': {
       if (!positionals[0]) throw new AnimusError('usage: animus plan <spec.md>');
@@ -98,6 +108,37 @@ async function main(argv: string[]): Promise<number> {
       if (spec.after.length) console.log(`  waits for  ${spec.after.join(', ')} to be merged`);
       if (spec.defaulted.length) console.log(`  (no ${spec.defaulted.join(', ')} in the header: the default)`);
       spec.criteria.forEach((c, i) => console.log(`  ${i + 1}. ${c.text}${c.commands.map((x) => `\n       $ ${x}`).join('') || '\n       (no check command: only the reviewer judges it)'}`));
+      return 0;
+    }
+    case 'submit': {
+      if (!positionals[0]) throw new AnimusError('usage: animus submit <spec.md>');
+      const file = resolve(positionals[0]);
+      // Refused here, before it is sent, when its labels would not run.
+      resolvePlan(loadFactory(), loadSpec(file));
+      const repo = basename(mainCheckout(resolve(values.repo ?? cwd)));
+      const j = await helix.submit({ repo, spec: readFileSync(file, 'utf8'), name: basename(file), ...(values.draft ? { draft: true } : {}) });
+      console.log(`job ${j.id} is ${j.state} on Helix: ${j.title}\nfollow it with: animus status ${j.id}`);
+      return 0;
+    }
+    case 'status':
+      console.log(positionals[0] ? helix.describeJob(await helix.job(positionals[0])) : helix.describeJobs((await helix.jobs()).jobs));
+      return 0;
+    case 'result': {
+      if (!positionals[0]) throw new AnimusError('usage: animus result <id>');
+      const { log: _log, ...j } = await helix.job(positionals[0]);
+      console.log(JSON.stringify(j, null, 2));
+      return j.outcome === 'pr' ? 0 : 1;
+    }
+    case 'answer': {
+      if (!positionals[0] || !positionals[1]) throw new AnimusError('usage: animus answer <id> <text>');
+      const j = await helix.answer(positionals[0], positionals.slice(1).join(' '));
+      console.log(`job ${j.id} is ${j.state} again with your answer`);
+      return 0;
+    }
+    case 'cancel': {
+      if (!positionals[0]) throw new AnimusError('usage: animus cancel <id>');
+      const j = await helix.cancel(positionals[0]);
+      console.log(`job ${j.id} is cancelled`);
       return 0;
     }
     case 'init': {

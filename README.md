@@ -20,12 +20,39 @@ From a Claude Code session with the plugin installed, you talk and the factory d
 | --- | --- |
 | `animus run <spec.md> [--dry-run] [--draft] [--keep]` | One job, spec to PR. `--dry-run` stops before the push; `--draft` opens the PR as a draft. |
 | `animus plan <spec.md>` | Validates a spec and prints its stages and models. Starts nothing. |
+| `animus init [--force]` | Drafts `.animus/animus.yaml` from the repo's `package.json`, `pyproject.toml`, `go.mod` or `Cargo.toml`: the install as setup, the scripts as gates, a UI target for a vite or next app. Runs nothing, and lists what it could not find. |
 | `animus resume <job> [--answer <text>]` | Picks up a job that asked a question or was interrupted, in the same session. |
 | `animus runs [-n <count>] [--json]` | The run log. |
 | `animus outcomes [--json]` | What became of each PR, read from GitHub and kept in `~/.animus/outcomes.json`: merged or closed, time to merge, human commits, reverted or reworked within 30 days. Prints the five numbers split by task class. |
 | `animus cleanup [<job>...] [--days <n>] [--dry-run]` | Removes what finished jobs left behind: the branches (local and on origin) and worktree of a job whose PR merged or closed, and a job's folder 14 days after its last run. A job with an open PR is kept. A named job does not wait. |
 | `animus skills` | The vendored skills, where each came from, and which role gets it. |
 | `animus check`, `animus shots`, `animus ui up\|down` | For the implementer, inside a job's worktree. |
+
+## Helix
+
+[helix/](helix/) is the supervisor for a machine that runs jobs for several people (docs/factory.md, "The office machine"). It is not part of the plugin and is not installed with it. It keeps a queue in one SQLite table, starts each job as its own `animus run` process while slots are free, and answers five actions over HTTP.
+
+On the machine, with its files under `~/.helix` (`HELIX_HOME`):
+
+```sh
+helix/bin/helix add-repo meal-planner /srv/repos/meal-planner   # a clone with a .animus/animus.yaml
+helix/bin/helix add-person ajmal --env-file /srv/helix/ajmal.env   # prints their token once
+helix/bin/helix serve
+```
+
+`config.yaml` there sets `host` (default 127.0.0.1; set it to the machine's address on your private network, never a public one), `port` (7420) and `slots` (2). A person's `--env-file` holds `KEY=VALUE` lines set for their jobs only, such as `CLAUDE_CODE_OAUTH_TOKEN` and `GH_TOKEN`, so the PR appears as them. Without one, their jobs use the machine's own logins.
+
+From a laptop, with `HELIX_URL` and `HELIX_TOKEN` set:
+
+| Command | What it does |
+| --- | --- |
+| `animus submit <spec.md> [--draft]` | Queues the spec for the repository named like this checkout's folder. |
+| `animus status [<id>]` | The queue, or one job with the end of its log. |
+| `animus result <id>` | One job as JSON; exits 0 once it ended in a PR. |
+| `animus answer <id> <text>` | Answers a job that stopped with a question; it is queued again and resumes. |
+| `animus cancel <id>` | Ends a queued or running job. Only its submitter can. |
+
+A job that was running when Helix stopped or died is queued again when it comes back, and resumes from its own files. Jobs run in worktrees on the machine, with no containers yet, so they share its tools, ports and network. Traffic is plain HTTP: keep it on a private network such as Tailscale. A spec with `after:` cannot wait on a spec submitted separately, because Helix keeps each submitted spec under its own job folder.
 
 ## The spec
 
@@ -44,7 +71,7 @@ type: feature        # feature | backend | ui
 2. An empty list shows a hint.
 ```
 
-Each list item under "Acceptance criteria" is one criterion. A `$ command` line under it is its check. Animus runs it as a gate and puts the output in the PR. A criterion with no command is judged by the reviewer alone, and the PR says so. A `ui` spec may add `ui: { target, pages }` and `design: [files]`.
+Each list item under "Acceptance criteria" is one criterion. A `$ command` line under it is its check. Animus runs it as a gate and puts the output in the PR. A criterion with no command is judged by the reviewer alone, and the PR says so. A `ui` spec may add `ui: { target, pages }` and `design: [files]`. A spec that builds on another names it with `after: <spec.md>` in the header: its job waits until that spec's PR is merged, checking once a minute, and then starts from the updated base. It stops if that PR is closed unmerged.
 
 ## What a job does
 
@@ -125,9 +152,8 @@ Left behind: Beads, epics, tickets and waves, the Workflow script, the test-writ
 
 - Types marked `later` in the profiles file: refactor, upgrade, migration, performance, docs, tests, investigation.
 - Services for a job (database, storage). The plan records the setup level, but a local job only runs the profile's installs and `setup`.
-- Running a job apart from the session that started it. Closing the session stops the job; `animus resume <job>` continues it. Helix is where jobs will outlive a session.
-- `animus init`. A new repo's profile is written by hand.
-- Steps 3 to 7 of the build order: containers, Helix, the issue and Slack triggers, a second submitter.
+- Containers: on Helix a job still runs in a worktree on the machine itself.
+- Steps 3 and 5 to 7 of the build order: containers, the issue and Slack triggers, a second submitter tried for real.
 
 ## Develop
 

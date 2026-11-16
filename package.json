@@ -6,7 +6,7 @@
   "type": "module",
   "engines": { "node": ">=24" },
   "scripts": {
-    "test": "sh scripts/with-tmp.sh node --disable-warning=ExperimentalWarning --test 'plugin/test/**/*.test.ts'",
+    "test": "sh scripts/with-tmp.sh node --disable-warning=ExperimentalWarning --test 'plugin/test/**/*.test.ts' 'helix/test/**/*.test.ts'",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": { "yaml": "2.9.1" },

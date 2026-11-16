@@ -3,36 +3,24 @@
 A software factory on Claude Code. A spec goes in and a pull request with
 proof for each acceptance criterion comes out. The design is docs/factory.md;
 docs/workflow.md is the text of its walkthrough. The plugin in `plugin/` is
-the whole product: skills to shape a spec, and the `animus` CLI that runs a job.
+what a developer installs: skills to shape a spec, and the `animus` CLI that
+runs a job. `helix/` is the supervisor for a shared machine: a queue, an HTTP
+API and one `animus run` process per job. It imports from `plugin/src` and is
+never shipped in the plugin.
 
 This project replaces orbit (`../orbit`, archived), whose plugin was also
 called Animus from 2026-11-11. Orbit ran Beads epics of tickets in waves.
 This one runs one spec as one job with no tracker. README.md lists what was
 taken from orbit.
 
-Built so far: steps 1 and 2 of the build order (local `animus run`, the run
-log), task profiles, the draft PR on failure, skills granted per role from
-plugin/vendor/, screenshots in the PR, `animus cleanup` (branches, worktree
-and job folder of a finished job), `animus outcomes` (each PR's outcome read
-from GitHub, and the five numbers by task class), and the bug task type (the
-`tdd` skill, and a gate that the job's test fails on the base commit). Two
-real jobs ran on ../../meal-planner (its PRs 1 and 2, closed unmerged and
-cleaned up).
-
-Not built, roughly in the order wanted:
-- The other task types marked `later` in plugin/config/profiles.yaml.
-- `animus init`, and an `after:` header field so a split spec waits for the
-  one before it.
-- Containers, Helix, the issue and Slack triggers (build order steps 3 to 7).
-
-Not yet tried against real sessions: a bug job, a gate fix round, a review
-send-back, needs-input with resume, a UI spec with a real visual change
-(impeccable's guidance), to-spec starting a job, grill-with-docs, splitting
-a large design.
+What is built, what is next, and what has never run against a real session
+are in docs/handoff.md. Read it before starting work, and update it in the
+same change whenever something there is built, tried or dropped. Keep this
+file to what the project is and its conventions.
 
 Nothing here may depend on one operating system. A job runs in the
 foreground of whoever started it: there is no detached mode (tried and
-removed on 2026-11-13; Helix is where jobs will outlive a session).
+removed on 2026-11-13). Helix is where jobs outlive a session.
 
 ## Conventions
 
@@ -51,5 +39,8 @@ removed on 2026-11-13; Helix is where jobs will outlive a session).
 - A job leaves nothing in the target repo but its branch. Its state, the run
   log and its evidence live under `~/.animus` (`ANIMUS_HOME`).
 - Errors meant for the user throw `AnimusError` (printed without a stack).
+- Helix holds no state of its own: the SQLite table and Animus's job files
+  are the record, so a restart carries on from them. It starts jobs only as
+  `animus` processes and never calls the pipeline in its own process.
 - `npm test` and `npm run typecheck` must both pass. Tests drive the pipeline
   with a scripted fake agent (plugin/test/helpers.ts); none starts a model.

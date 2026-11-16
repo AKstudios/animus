@@ -1,0 +1,4 @@
+#!/bin/sh
+# Runs Helix from the repository it is in. Needs Node 24 or later.
+root=$(cd "$(dirname "$0")/.." && pwd)
+exec node --disable-warning=ExperimentalWarning "$root/src/cli.ts" "$@"

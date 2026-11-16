@@ -1,0 +1,82 @@
+// Helix's home and its one config file: where it listens, how many jobs run
+// at once, the repositories it has clones of, and the people who may submit.
+// A person is known by the hash of a token; the token itself is shown once,
+// when they are added, and never kept.
+import { createHash, randomBytes } from 'node:crypto';
+import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { homedir } from 'node:os';
+import { join, resolve } from 'node:path';
+import { parse, stringify } from 'yaml';
+import { isRecord } from '../../plugin/src/profile.ts';
+import { AnimusError } from '../../plugin/src/proc.ts';
+
+export const helixHome = () => process.env.HELIX_HOME ?? join(homedir(), '.helix');
+export const configFile = () => join(helixHome(), 'config.yaml');
+
+/** env_file: KEY=VALUE lines set for that person's jobs only: their Claude token and GitHub credential. */
+export type Person = { token_sha256: string; env_file?: string };
+
+export type Config = {
+  /** The address to listen on: one on the private network, never a public one. */
+  host: string;
+  port: number;
+  /** Jobs that run at once; set by the machine's memory. */
+  slots: number;
+  /** Repositories by name, each a clone on this machine with a .animus/animus.yaml. */
+  repos: Record<string, string>;
+  people: Record<string, Person>;
+};
+
+const DEFAULTS: Config = { host: '127.0.0.1', port: 7420, slots: 2, repos: {}, people: {} };
+
+export const hashToken = (token: string) => createHash('sha256').update(token).digest('hex');
+
+export function loadConfig(file = configFile()): Config {
+  if (!existsSync(file)) return structuredClone(DEFAULTS);
+  let raw: unknown;
+  try { raw = parse(readFileSync(file, 'utf8')); } catch (err) { throw new AnimusError(`${file}: ${(err as Error).message}`); }
+  if (!isRecord(raw)) throw new AnimusError(`${file}: expected a mapping at the top`);
+  const config = { ...structuredClone(DEFAULTS), ...raw } as Config;
+  if (!Number.isInteger(config.slots) || config.slots < 1) throw new AnimusError(`${file}: slots must be a whole number, 1 or more`);
+  if (!isRecord(config.repos) || !isRecord(config.people)) throw new AnimusError(`${file}: repos and people must be mappings`);
+  return config;
+}
+
+export function saveConfig(config: Config, file = configFile()): void {
+  mkdirSync(helixHome(), { recursive: true });
+  writeFileSync(file, stringify(config));
+  // The file names where credentials are kept: the owner's eyes only, where the system has such a thing.
+  chmodSync(file, 0o600);
+}
+
+/** Adds a person, or gives one a new token. Returns the token: the only time it exists in the clear. */
+export function addPerson(name: string, envFile?: string): string {
+  if (!/^[A-Za-z0-9._-]+$/.test(name)) throw new AnimusError('a person\'s name may hold letters, digits, dot, dash and underscore');
+  if (envFile && !existsSync(envFile)) throw new AnimusError(`no file at ${envFile}`);
+  const config = loadConfig();
+  const token = randomBytes(24).toString('base64url');
+  const env = envFile ? resolve(envFile) : config.people[name]?.env_file;
+  config.people[name] = { token_sha256: hashToken(token), ...(env ? { env_file: env } : {}) };
+  saveConfig(config);
+  return token;
+}
+
+export function addRepo(name: string, dir: string): void {
+  const path = resolve(dir);
+  if (!existsSync(join(path, '.git'))) throw new AnimusError(`${path} is not a git checkout`);
+  const config = loadConfig();
+  config.repos[name] = path;
+  saveConfig(config);
+}
+
+/** The variables a person's jobs run with, from their env_file. */
+export function personEnv(person: Person | undefined): Record<string, string> {
+  if (!person?.env_file) return {};
+  if (!existsSync(person.env_file)) throw new AnimusError(`the credentials file ${person.env_file} is gone`);
+  const out: Record<string, string> = {};
+  for (const line of readFileSync(person.env_file, 'utf8').split(/\r?\n/)) {
+    const m = /^\s*(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)=(.*)$/.exec(line);
+    if (m) out[m[1]!] = m[2]!.trim().replace(/^(['"])(.*)\1$/, '$2');
+  }
+  return out;
+}
