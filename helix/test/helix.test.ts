@@ -1,11 +1,14 @@
 import assert from 'node:assert/strict';
-import { existsSync, mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import type { AddressInfo } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
+import { saveProgress } from '../../plugin/src/log.ts';
 import * as client from '../../plugin/src/remote.ts';
+import { write } from '../../plugin/test/helpers.ts';
 import { hashToken, type Config } from '../src/config.ts';
+import type { Display } from '../src/display.ts';
 import { serve } from '../src/server.ts';
 import { openStore } from '../src/store.ts';
 import { supervise, type Launch } from '../src/supervisor.ts';
@@ -109,6 +112,60 @@ test('a job that asks a question waits for its answer, then resumes with it', as
   assert.match(done.reason!, /answer=the second/);
   assert.equal(done.question, undefined);
   await assert.rejects(client.answer(String(j.id), 'again'), /not waiting for an answer/);
+  h.stop();
+});
+
+test('the display\'s page and scripts need no token, what it shows does, and no path climbs out of its folder', async () => {
+  const h = await helix();
+  const get = (path: string, token?: string) => fetch(new URL(path, process.env.HELIX_URL), token ? { headers: { authorization: `Bearer ${token}` } } : {});
+
+  const page = await get('/');
+  assert.deepEqual([page.status, page.headers.get('content-type')], [200, 'text/html; charset=utf-8']);
+  assert.match(await page.text(), /<script type="module" src="\/ui\/app\.ts">/);
+  // A script is sent as JavaScript: its types are gone.
+  const script = await get('/ui/view.ts');
+  const text = await script.text();
+  assert.deepEqual([script.status, script.headers.get('content-type')], [200, 'text/javascript; charset=utf-8']);
+  assert.ok(text.includes('export function view(') && !text.includes('import type') && !text.includes(': Display'));
+  assert.equal((await get('/ui/fonts/titillium-web-400.woff2')).headers.get('content-type'), 'font/woff2');
+  for (const path of ['/ui/../src/server.ts', '/ui/%2e%2e/src/server.ts', '/ui/fonts/../../src/server.ts', '/ui/nothing.css', '/ui/fonts/OFL-TitilliumWeb.txt']) {
+    assert.equal((await get(path)).status, 401, path);
+  }
+  assert.equal((await get('/display')).status, 401);
+  assert.equal((await get('/display', 'wrong')).status, 401);
+  h.stop();
+});
+
+test('the display is told every job, where a running one is, and why a queued one is back in the queue', async () => {
+  const h = await helix();
+  write(h.home, 'repo/.animus/animus.yaml', 'base: develop\ncommands:\n  test: npm test\n  typecheck: npm run typecheck\n');
+  const read = async () => (await (await fetch(new URL('/display', process.env.HELIX_URL), { headers: { authorization: 'Bearer ben-token' } })).json()) as Display;
+
+  const running = await h.submit('hold the slot');
+  const asks = await h.submit('ask later');
+  const first = await until(read, (d) => Boolean(d.jobs[0]?.animus_job));
+  assert.deepEqual([first.slots, first.stages.length, first.repos], [1, 7, [{ name: 'app', base: 'develop', gates: ['test', 'typecheck'] }]]);
+  assert.ok(first.name && Math.abs(Date.parse(first.at) - Date.now()) < 5000);
+  // The last line the job said; nothing yet about its stage. And nothing that is only Helix's business.
+  assert.deepEqual([first.jobs[0]!.state, first.jobs[0]!.now, first.jobs[0]!.progress], ['running', 'job fake-hold-the-slot: hold the slot', undefined]);
+  assert.deepEqual(Object.keys(first.jobs[0]!).filter((k) => ['spec', 'pid', 'answer', 'draft'].includes(k)), []);
+
+  // The job says where it is, as `animus run` does while it works.
+  saveProgress('fake-hold-the-slot', 'review', 'reviewer · deep tier');
+  const at = (await read()).jobs[0]!.progress!;
+  assert.deepEqual([at.stage, at.who], ['review', 'reviewer · deep tier']);
+
+  writeFileSync(h.release, '');
+  await h.ended(running.id);
+  await h.ended(asks.id);
+  // The slot is taken again, so the answered job waits its turn and says why it is back.
+  rmSync(h.release);
+  await h.submit('hold again');
+  await client.answer(String(asks.id), 'the second');
+  const back = (await read()).jobs.find((j) => j.id === asks.id)!;
+  assert.deepEqual([back.state, back.resumed, Boolean(back.queued)], ['queued', 'answer', true]);
+  writeFileSync(h.release, '');
+  await until(() => client.job(String(asks.id)), (j) => j.outcome === 'pr');
   h.stop();
 });
 

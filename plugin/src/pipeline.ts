@@ -13,14 +13,14 @@ import { resolveAfter, waitForMerged } from './after.ts';
 import type { Agent, AgentResult } from './agent.ts';
 import { describe, failsOnBase, jobChecks, LATER_SLICE, runChecks, type CheckResult } from './gates.ts';
 import { commitAll, mainCheckout, matchesAny, touchedFiles } from './git.ts';
-import { appendRun, jobDir, saveState, writeJson, type JobState, type Outcome, type Run } from './log.ts';
+import { appendRun, jobDir, saveProgress, saveState, writeJson, type JobState, type Outcome, type Run, type Stage } from './log.ts';
 import { evidenceBranch, prBody, prState, type Evidence, type PrLookup, type Publish } from './pr.ts';
 import { loadProfile } from './profile.ts';
 import { describePlan, escalate, modelFor, PLUGIN_ROOT, raise, readPrompt, resolvePlan, type Factory, type Tier } from './profiles.ts';
 import { animusCommand, git, AnimusError, tryGit } from './proc.ts';
 import { asReport, asReview, blockers, criteriaList, listFindings, REPORT_SCHEMA, REVIEW_SCHEMA, type Finding, type Report, type Review } from './review.ts';
 import { roleSkills } from './skills.ts';
-import { criteriaSoFar, oneSlice, planSlices, type Slicing } from './slices.ts';
+import { criteriaSoFar, isPlanned, oneSlice, planSlices, type Slicing } from './slices.ts';
 import { loadSpec, type Spec } from './spec.ts';
 import { describeShots, designOf, takeShots, uiProblem, uiTarget, type UiJob } from './ui.ts';
 import { createWorkspace, ensureSetup, removeWorkspace, reopenWorkspace, type Workspace } from './workspace.ts';
@@ -128,6 +128,9 @@ export async function runJob(opts: RunOptions, deps: Deps): Promise<Run> {
     try { return await fn(); } finally { run.ms[stage] += Date.now() - t; }
   };
 
+  /** Says where the job is, in its folder: what Helix's display shows while it runs. */
+  const at = (stage: Stage, who: string) => saveProgress(job, stage, who);
+
   const source = prior ? prior.source : resolve(opts.specFile!);
   if (source) run.spec_file = source;
 
@@ -135,6 +138,7 @@ export async function runJob(opts: RunOptions, deps: Deps): Promise<Run> {
   log(describePlan(factory, plan));
   // A spec that builds on another waits for it, then starts from a base that holds it.
   if (!prior && spec.after.length) {
+    at('setup', 'setup · waits for an earlier pull request to merge');
     const files = resolveAfter(repo, source!, spec.after);
     await timed('queue', () => waitForMerged({ repo, files, lookup: deps.prState ?? prState, log, ...(deps.sleep ? { sleep: deps.sleep } : {}) }));
   }
@@ -142,6 +146,7 @@ export async function runJob(opts: RunOptions, deps: Deps): Promise<Run> {
 
   // ---------------------------------------------------------------- setup
   let ws: Workspace;
+  at('setup', 'setup · worktree and dependencies');
   try {
     ws = await timed('setup', () => {
       const w = prior ? reopenWorkspace(repo, prior.workspace) : createWorkspace(repo, repoProfile, job, spec.base ?? repoProfile.base, log);
@@ -173,6 +178,8 @@ export async function runJob(opts: RunOptions, deps: Deps): Promise<Run> {
   /** Gate fix rounds spent inside slices: each slice has its own allowance, and so has the finished branch. */
   let sliceRounds = 0;
   let planFallback: string | undefined;
+  /** The slice being worked on, for whoever watches the job: "slice 2 of 4". */
+  let inSlice = '';
 
   const record = (stage: string, role: string, tier: Tier, effort: string, r: AgentResult) => {
     run.agents.push({
@@ -222,6 +229,7 @@ export async function runJob(opts: RunOptions, deps: Deps): Promise<Run> {
       if (!state.session) prompt = handoffPrompt({ brief, base: ws.base, summary, notes, asked, over });
     }
     log(`${stage}: ${modelFor(factory, tier)}, ${effort} effort`);
+    at('implement', `implementer · ${tier} tier${inSlice ? ` · ${inSlice}` : ''}${/-fix-/.test(stage) ? ` · ${stage.replace('-fix-', ' fix ')}` : ''}`);
     const r = await timed('implement', () => deps.agent({ role: 'implementer', tier, effort, prompt, cwd: wt, ...instructions('implementer'), schema: REPORT_SCHEMA, ...caps(tier), ...(state.session ? { resume: state.session } : {}) }));
     record(stage, 'implementer', tier, effort, r);
     if (r.session) state.session = r.session;
@@ -261,6 +269,7 @@ export async function runJob(opts: RunOptions, deps: Deps): Promise<Run> {
       const attempt = run.gates.length + 1;
       const checks = jobChecks(repoProfile, plan, spec, { base: ws.base, files: touchedFiles(wt, ws.base, head) }, slice?.only);
       log(`gates${of}, run ${attempt}: ${checks.filter((c) => !c.skip).map((c) => c.name).join(', ') || 'nothing to run'}`);
+      at('gates', `gates${of} · attempt ${attempt}${run.fix_rounds ? ` after ${run.fix_rounds === 1 ? 'a fix round' : `${run.fix_rounds} fix rounds`}` : ''}`);
       const t = Date.now();
       lastGates = await timed('gates', () => {
         const results = runChecks(wt, checks, job);
@@ -284,7 +293,9 @@ export async function runJob(opts: RunOptions, deps: Deps): Promise<Run> {
     }
   };
 
-  const shoot = async (of: UiJob = ui!): Promise<string> => {
+  /** Screenshots for the reviewer are part of the review; the ones taken after it are the evidence. */
+  const shoot = async (of: UiJob = ui!, stage: Stage = 'evidence'): Promise<string> => {
+    at(stage, `${stage} · screenshots`);
     const r = await timed('evidence', () => (deps.shots ?? takeShots)(wt, of, repoProfile, join(dir, 'shots')));
     shots = { dir: r.dir, files: r.shots.build };
     log(`${r.reused ? 'screenshots unchanged' : `${r.shots.build.length} screenshot(s) taken`}: ${r.dir}`);
@@ -306,6 +317,7 @@ export async function runJob(opts: RunOptions, deps: Deps): Promise<Run> {
     if (!state.slicing) {
       state.slicing = prior ? oneSlice(spec) : await timed('plan', () => {
         try {
+          if (isPlanned(factory, spec.size)) at('plan', `planner · ${factory.planner!.tier} tier`);
           const planned = planSlices({ factory, agent: deps.agent, spec, cwd: wt, log, record: (stage, r) => record(stage, 'planner', factory.planner!.tier, factory.planner!.effort, r) });
           state.sliced_by = planned.by;
           if (planned.by === 'planner') for (const name of roleSkills(factory, 'planner', plan.type, wt).names) if (!run.skills.includes(name)) run.skills.push(name);
@@ -340,6 +352,7 @@ export async function runJob(opts: RunOptions, deps: Deps): Promise<Run> {
         const name = `slice ${i + 1} of ${slices.length}`;
         const only = criteriaSoFar(state.slicing, i)!;
         log(`${name}: ${slices[i]!.title}`);
+        inSlice = name;
         brief = slicePrompt({ ...about, slicing: state.slicing, index: i, done, gates: jobChecks(profile, plan, spec, { base: ws.base, files: [] }, only).filter((c) => c.skip !== LATER_SLICE).map((c) => c.command) });
         if (prior && i === resumed && state.session) {
           // The job stopped inside this slice: its session carries on.
@@ -361,6 +374,7 @@ export async function runJob(opts: RunOptions, deps: Deps): Promise<Run> {
         saveState(state);
       }
       brief = whole;
+      inSlice = '';
       if (prior && resumed >= slices.length) await implementer('resume', resumePrompt(prior, opts.resume?.answer), plan.implement.tier);
     }
 
@@ -371,8 +385,9 @@ export async function runJob(opts: RunOptions, deps: Deps): Promise<Run> {
     if (plan.review) {
       const { role, tier, effort } = plan.review;
       for (let round = 1; ; round++) {
-        const seen = ui ? await shoot() : undefined;
+        const seen = ui ? await shoot(ui, 'review') : undefined;
         log(`review ${round}: ${role}, ${modelFor(factory, tier)}, ${effort} effort`);
+        at('review', `${role} · ${tier} tier${round > 1 ? ` · round ${round}` : ''}`);
         const prompt = reviewPrompt({ spec, ws, round, earlier: open, shots: seen, answers });
         let said: Review | undefined;
         for (let tries = 0; tries < 2 && !said; tries++) {
@@ -421,6 +436,7 @@ export async function runJob(opts: RunOptions, deps: Deps): Promise<Run> {
   }
 
   // ------------------------------------------------------------------- PR
+  at('pr', outcome === 'needs-input' ? 'pr · stopping to ask' : outcome === 'failed' ? 'pr · writing the failure report' : 'pr · writing the description');
   const head = git(wt, ['rev-parse', 'HEAD']);
   run.head = head;
   run.protected_touched = touchedFiles(wt, ws.base, head).filter((f) => matchesAny(f, repoProfile.protected));

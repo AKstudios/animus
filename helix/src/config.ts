@@ -17,6 +17,8 @@ export const configFile = () => join(helixHome(), 'config.yaml');
 export type Person = { token_sha256: string; env_file?: string };
 
 export type Config = {
+  /** What the display calls this machine; its hostname when unset. */
+  name?: string;
   /** The address to listen on: one on the private network, never a public one. */
   host: string;
   port: number;
