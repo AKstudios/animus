@@ -69,6 +69,17 @@ export function addRepo(name: string, dir: string): void {
   saveConfig(config);
 }
 
+/**
+ * Makes git use the person's GitHub token for https remotes, for this process
+ * only: nothing is written to the machine's git config, and no sign-in kept
+ * there is tried first.
+ */
+export function credentialEnv(env: Record<string, string>): Record<string, string> {
+  if (!env.GH_TOKEN && !env.GITHUB_TOKEN) return {};
+  const key = 'credential.https://github.com.helper';
+  return { GIT_CONFIG_COUNT: '2', GIT_CONFIG_KEY_0: key, GIT_CONFIG_VALUE_0: '', GIT_CONFIG_KEY_1: key, GIT_CONFIG_VALUE_1: '!gh auth git-credential' };
+}
+
 /** The variables a person's jobs run with, from their env_file. */
 export function personEnv(person: Person | undefined): Record<string, string> {
   if (!person?.env_file) return {};

@@ -37,10 +37,15 @@ On the machine, with its files under `~/.helix` (`HELIX_HOME`):
 ```sh
 helix/bin/helix add-repo meal-planner /srv/repos/meal-planner   # a clone with a .animus/animus.yaml
 helix/bin/helix add-person ajmal --env-file /srv/helix/ajmal.env   # prints their token once
+helix/bin/helix check          # each person's credentials, tried against GitHub and Claude
 helix/bin/helix serve
 ```
 
-`config.yaml` there sets `host` (default 127.0.0.1; set it to the machine's address on your private network, never a public one), `port` (7420) and `slots` (2). A person's `--env-file` holds `KEY=VALUE` lines set for their jobs only, such as `CLAUDE_CODE_OAUTH_TOKEN` and `GH_TOKEN`, so the PR appears as them. Without one, their jobs use the machine's own logins.
+`config.yaml` there sets `host` (default 127.0.0.1; set it to the machine's address on your private network, never a public one), `port` (7420) and `slots` (2). A person's `--env-file` holds `KEY=VALUE` lines set for their jobs only, such as `CLAUDE_CODE_OAUTH_TOKEN` and `GH_TOKEN`, so the PR appears as them. Without one, their jobs use the machine's own logins. With a `GH_TOKEN`, git uses that token for https remotes for the job's processes only, so clone the repositories over https.
+
+`helix check [<name>]` asks the services themselves: who GitHub says the token is and when it ends, whether it may push to each repository (a push that sends nothing), and whether the Claude token answers, in one small session that has no login kept on the machine to fall back on. It exits 1 if anything fails. `helix serve` runs the GitHub part when it starts and again before each job, so a token that ended fails the job at once with the reason.
+
+To keep Helix running with nobody signed in, [helix/deploy/ubuntu/setup.sh](helix/deploy/ubuntu/setup.sh) sets up an Ubuntu machine: an account for Helix, Node 24, no sleep, and a systemd unit that starts at boot and is started again whenever it stops. `finish.sh` beside it removes the account the machine was set up from. Helix itself needs none of this: on another system, anything that runs `helix serve` at boot and restarts it does the same job. With Tailscale, leave `host` at 127.0.0.1 and run `tailscale serve --bg 7420` once: the tailnet reaches Helix over https and the setting outlasts restarts.
 
 From a laptop, with `HELIX_URL` and `HELIX_TOKEN` set:
 
@@ -52,7 +57,7 @@ From a laptop, with `HELIX_URL` and `HELIX_TOKEN` set:
 | `animus answer <id> <text>` | Answers a job that stopped with a question; it is queued again and resumes. |
 | `animus cancel <id>` | Ends a queued or running job. Only its submitter can. |
 
-A job that was running when Helix stopped or died is queued again when it comes back, and resumes from its own files. Jobs run in worktrees on the machine, with no containers yet, so they share its tools, ports and network. Traffic is plain HTTP: keep it on a private network such as Tailscale. A spec with `after:` cannot wait on a spec submitted separately, because Helix keeps each submitted spec under its own job folder.
+A job that was running when Helix stopped or died is queued again when it comes back, and resumes from its own files. One found running three times is ended as failed instead, since it may be what takes Helix down. Jobs run in worktrees on the machine, with no containers yet, so they share its tools, ports and network. Traffic is plain HTTP: keep it on a private network such as Tailscale. A spec with `after:` cannot wait on a spec submitted separately, because Helix keeps each submitted spec under its own job folder.
 
 ## The spec
 

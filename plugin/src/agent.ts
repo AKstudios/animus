@@ -27,6 +27,8 @@ export type AgentRequest = {
   /** No file edits: the reviewer's sessions. */
   readOnly?: boolean;
   timeoutMs?: number;
+  /** Variables set for this session on top of the process's own: one person's credentials, when they are being checked. */
+  env?: Record<string, string>;
 };
 
 export type Tokens = { input: number; output: number; cache_read: number; cache_write: number };
@@ -80,7 +82,7 @@ export function claudeAgent(factory: Factory, command = process.env.ANIMUS_CLAUD
     else args.push('--allowedTools', 'Bash', 'Read', 'Write', 'Edit', 'Glob', 'Grep', '--disallowedTools', ...noGit);
 
     const started = Date.now();
-    const r = spawnSync(command, args, { cwd: req.cwd, encoding: 'utf8', timeout: req.timeoutMs ?? DEFAULT_TIMEOUT_MS, maxBuffer: 256 * 1024 * 1024 });
+    const r = spawnSync(command, args, { cwd: req.cwd, encoding: 'utf8', timeout: req.timeoutMs ?? DEFAULT_TIMEOUT_MS, maxBuffer: 256 * 1024 * 1024, ...(req.env ? { env: { ...process.env, ...req.env } } : {}) });
     const ms = Date.now() - started;
     if (r.error && (r.error as NodeJS.ErrnoException).code === 'ENOENT') throw new AnimusError(`${command} is not installed or not on PATH`);
     const base = { provider: 'claude', model, cost_usd: 0, turns: 0, tokens: { input: 0, output: 0, cache_read: 0, cache_write: 0 }, ms };

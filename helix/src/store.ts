@@ -21,6 +21,8 @@ export type HelixJob = {
   started?: string;
   ended?: string;
   pid?: number;
+  /** Times Helix came back and found the job running with no supervisor. */
+  interrupted?: number;
   /** Animus's own id for the job, once its run has said it: what a restart or an answer resumes. */
   animus_job?: string;
   /** The person's answer to the job's question, for the next start. */

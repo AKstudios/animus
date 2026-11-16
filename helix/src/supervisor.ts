@@ -5,11 +5,12 @@
 // a crash it puts what was running back in the queue and resumes it.
 import { spawn, type ChildProcess } from 'node:child_process';
 import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { uptime } from 'node:os';
 import { basename, dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { AnimusError } from '../../plugin/src/proc.ts';
 import { parseSpec } from '../../plugin/src/spec.ts';
-import { personEnv, type Config } from './config.ts';
+import { credentialEnv, personEnv, type Config } from './config.ts';
 import type { HelixJob, Store } from './store.ts';
 
 const PLUGIN = join(dirname(fileURLToPath(import.meta.url)), '..', '..', 'plugin');
@@ -23,6 +24,12 @@ const animus: Launch = (job, repoDir) => ({
     ? ['resume', job.animus_job, ...(job.answer ? ['--answer', job.answer] : [])]
     : ['run', job.spec, '--repo', repoDir, ...(job.draft ? ['--draft'] : [])])],
 });
+
+/** A job found running this many times when Helix came back is ended, not queued again: it may be what takes Helix down. */
+export const MAX_INTERRUPTIONS = 3;
+
+/** Looks at a person's credentials before their job starts; returns why the job cannot run, or nothing. */
+export type Preflight = (person: string, env: Record<string, string>, repoDir: string) => string | undefined;
 
 export type Submission = { repo: string; spec: string; name?: string; draft?: boolean };
 
@@ -40,7 +47,7 @@ export class Refused extends AnimusError {
   constructor(status: number, message: string) { super(message); this.status = status; }
 }
 
-export function supervise(opts: { store: Store; config: Config; home: string; launch?: Launch; say?: (line: string) => void }): Supervisor {
+export function supervise(opts: { store: Store; config: Config; home: string; launch?: Launch; preflight?: Preflight; say?: (line: string) => void }): Supervisor {
   const { store, config, home } = opts;
   const launch = opts.launch ?? animus;
   const say = opts.say ?? (() => {});
@@ -67,9 +74,13 @@ export function supervise(opts: { store: Store; config: Config; home: string; la
     mkdirSync(dirname(logFile(job.id)), { recursive: true });
     let env: NodeJS.ProcessEnv;
     try {
-      env = { ...process.env, ...personEnv(config.people[job.person]), ANIMUS_USER: job.person, ANIMUS_TRIGGER: 'helix', ANIMUS_BIN: join(PLUGIN, 'bin', 'animus') };
+      const theirs = personEnv(config.people[job.person]);
+      const why = opts.preflight?.(job.person, theirs, repoDir);
+      if (why) throw new AnimusError(why);
+      env = { ...process.env, ...theirs, ...credentialEnv(theirs), ANIMUS_USER: job.person, ANIMUS_TRIGGER: 'helix', ANIMUS_BIN: join(PLUGIN, 'bin', 'animus') };
     } catch (err) {
       store.save({ ...job, state: 'ended', ended: now(), outcome: 'failed', reason: (err as Error).message });
+      say(`job ${job.id} did not start: ${(err as Error).message}`);
       return;
     }
     const child = spawn(command, args, { cwd: repoDir, env, detached: process.platform !== 'win32', stdio: ['ignore', 'pipe', 'pipe'] });
@@ -119,10 +130,18 @@ export function supervise(opts: { store: Store; config: Config; home: string; la
   }
 
   // What the table calls running has no supervisor: end what is left of it and queue it again.
+  // A pid from before the machine last started names nothing of ours now, and may name something else.
+  const booted = Date.now() - uptime() * 1000;
   for (const job of store.inState('running')) {
-    if (job.pid) kill(job.pid);
+    if (job.pid && job.started && Date.parse(job.started) > booted) kill(job.pid);
     const { pid: _pid, ...rest } = job;
-    store.save({ ...rest, state: 'queued' });
+    const interrupted = (job.interrupted ?? 0) + 1;
+    if (interrupted >= MAX_INTERRUPTIONS) {
+      store.save({ ...rest, interrupted, state: 'ended', ended: now(), outcome: 'failed', reason: `Helix stopped ${interrupted} times while this job ran, so it was not started again` });
+      say(`job ${job.id} was running when Helix stopped, for the ${interrupted}th time: ended`);
+      continue;
+    }
+    store.save({ ...rest, interrupted, state: 'queued' });
     say(`job ${job.id} was running when Helix stopped: queued again${job.animus_job ? ', to resume' : ''}`);
   }
   tick();
