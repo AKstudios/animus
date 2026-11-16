@@ -25,6 +25,8 @@ export type Factory = {
   provider: string;
   providers: Record<string, Record<Tier, string>>;
   limits: { gate_rounds: number; review_rounds: number; context_budget?: number; context_cap?: number; session_usd?: Partial<Record<Tier, number>> };
+  /** The session that cuts a spec into slices, the sizes it runs for, and the most slices a plan may have. */
+  planner?: Run & { sizes: string[]; max_slices: number };
   sizes: Record<string, SizeProfile>;
   difficulties: Record<string, DifficultyProfile>;
   types: Record<string, TypeProfile>;
@@ -47,6 +49,9 @@ export type Plan = Labels & {
 };
 
 export const PLUGIN_ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
+
+/** A role's standing instructions (prompts/<role>.md). */
+export const readPrompt = (role: string) => readFileSync(join(PLUGIN_ROOT, 'prompts', `${role}.md`), 'utf8');
 
 export function loadFactory(file = join(PLUGIN_ROOT, 'config', 'profiles.yaml')): Factory {
   const raw = parse(readFileSync(file, 'utf8')) as unknown;

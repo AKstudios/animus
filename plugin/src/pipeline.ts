@@ -16,7 +16,7 @@ import { commitAll, mainCheckout, matchesAny, touchedFiles } from './git.ts';
 import { appendRun, jobDir, saveState, writeJson, type JobState, type Outcome, type Run } from './log.ts';
 import { evidenceBranch, prBody, prState, type Evidence, type PrLookup, type Publish } from './pr.ts';
 import { loadProfile } from './profile.ts';
-import { describePlan, escalate, modelFor, PLUGIN_ROOT, raise, resolvePlan, type Factory, type Tier } from './profiles.ts';
+import { describePlan, escalate, modelFor, PLUGIN_ROOT, raise, readPrompt, resolvePlan, type Factory, type Tier } from './profiles.ts';
 import { animusCommand, git, AnimusError, tryGit } from './proc.ts';
 import { asReport, asReview, blockers, criteriaList, listFindings, REPORT_SCHEMA, REVIEW_SCHEMA, type Finding, type Report, type Review } from './review.ts';
 import { roleSkills } from './skills.ts';
@@ -68,7 +68,7 @@ const MARKER = 'animus-job.json';
 const slug = (s: string) => s.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 32).replace(/-$/, '') || 'job';
 export const newJobId = (title: string) => `${slug(title)}-${randomBytes(2).toString('hex')}`;
 
-export const readPrompt = (role: string) => readFileSync(join(PLUGIN_ROOT, 'prompts', `${role}.md`), 'utf8');
+export { readPrompt };
 
 /** The job a worktree belongs to, for `animus check` and `animus shots` run inside it. */
 export function jobOf(cwd: string): string | undefined {

@@ -20,6 +20,7 @@ From a Claude Code session with the plugin installed, you talk and the factory d
 | --- | --- |
 | `animus run <spec.md> [--dry-run] [--draft] [--keep]` | One job, spec to PR. `--dry-run` stops before the push; `--draft` opens the PR as a draft. |
 | `animus plan <spec.md>` | Validates a spec and prints its stages and models. Starts nothing. |
+| `animus plan <spec.md> --slices` | Also asks the planner how it would cut the spec into slices (one read-only session in the repo) and prints the plan the script took. A small or trivial spec is one slice, with no session. |
 | `animus init [--force]` | Drafts `.animus/animus.yaml` from the repo's `package.json`, `pyproject.toml`, `go.mod` or `Cargo.toml`: the install as setup, the scripts as gates, a UI target for a vite or next app. Runs nothing, and lists what it could not find. |
 | `animus resume <job> [--answer <text>]` | Picks up a job that asked a question or was interrupted, in the same session. |
 | `animus runs [-n <count>] [--json]` | The run log. |
@@ -103,6 +104,7 @@ An agent has the skills its role is granted and no others. A skill reaches a rol
 | --- | --- | --- |
 | [ponytail](https://github.com/dietrichgebert/ponytail) | implementer, every job | The whole skill: the smallest change that fully solves the task |
 | useful-tests (yours, from orbit) | implementer, every job | The whole skill: fewer tests, each one justified |
+| to-tickets ([mattpocock/skills](https://github.com/mattpocock/skills)) | planner, medium and large specs | Its cutting rules: tracer-bullet slices, each sized for one fresh context window, prefactoring first. Its tracker and its quiz are left out: a script checks the plan instead (`src/slices.ts`) |
 | [impeccable](https://github.com/pbakaus/impeccable) | implementer, UI jobs | The skill, with its reference files to read on demand |
 | impeccable | ui-reviewer, UI jobs | Only its quality floor, as a checklist |
 | none | reviewer | |

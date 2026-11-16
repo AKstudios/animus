@@ -26,6 +26,15 @@ limits:
   # reaches it is ended and the job stops as failed.
   session_usd: { fast: 2, standard: 8, deep: 20 }
 
+# The planner: a read-only session that cuts a spec into slices before any
+# code is written (src/slices.ts). A size not listed in `sizes` is one slice,
+# by script, with no session. A plan with more than max_slices is refused.
+planner:
+  tier: standard
+  effort: medium
+  sizes: [medium, large]
+  max_slices: 8
+
 sizes:
   trivial:
     looks_like: Typo, copy, config value, one or two files
@@ -95,6 +104,9 @@ types:
 # limits a skill to jobs of those types. Sessions cannot reach any other skill:
 # not the person's own, not Claude Code's built-in ones.
 skills:
+  to-tickets:
+    roles:
+      planner: SKILL.md
   ponytail:
     roles:
       implementer: SKILL.md

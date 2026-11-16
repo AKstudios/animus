@@ -16,6 +16,7 @@ import { describePlan, loadFactory, resolvePlan } from './profiles.ts';
 import { git, AnimusError, GitError } from './proc.ts';
 import * as helix from './remote.ts';
 import { describeSkills, grantsFor } from './skills.ts';
+import { describeSlicing, planSlices } from './slices.ts';
 import { loadSpec } from './spec.ts';
 import { describeShots, takeShots, uiDown, uiTarget, uiUp } from './ui.ts';
 import { basename, join } from 'node:path';
@@ -28,8 +29,10 @@ const USAGE = `animus: a spec goes in, a pull request with proof comes out
         --keep leaves the worktree.
         A spec with \`after: <spec.md>\` in its header waits until that spec's
         pull request is merged, then starts.
-  animus plan <spec.md>
-        Check a spec and print what its labels would run. Starts nothing.
+  animus plan <spec.md> [--slices] [--repo <dir>]
+        Check a spec and print what its labels would run. Starts no job.
+        --slices also asks the planner how it would cut the spec (one
+        read-only session in the repo) and prints the checked plan.
   animus init [--repo <dir>] [--force]
         Draft .animus/animus.yaml from the repo's package.json, pyproject.toml,
         go.mod or Cargo.toml. Runs nothing; --force replaces a profile.
@@ -80,7 +83,7 @@ async function main(argv: string[]): Promise<number> {
     args: rest, allowPositionals: true,
     options: {
       repo: { type: 'string' }, 'dry-run': { type: 'boolean' }, keep: { type: 'boolean' }, draft: { type: 'boolean' }, answer: { type: 'string' },
-      json: { type: 'boolean' }, n: { type: 'string', short: 'n' }, again: { type: 'boolean' }, days: { type: 'string' }, force: { type: 'boolean' },
+      json: { type: 'boolean' }, n: { type: 'string', short: 'n' }, again: { type: 'boolean' }, days: { type: 'string' }, force: { type: 'boolean' }, slices: { type: 'boolean' },
     },
   });
   const cwd = process.cwd();
@@ -102,12 +105,18 @@ async function main(argv: string[]): Promise<number> {
       if (!positionals[0]) throw new AnimusError('usage: animus plan <spec.md>');
       const spec = loadSpec(resolve(positionals[0]));
       const factory = loadFactory();
-      const plan = resolvePlan(factory, spec);
-      console.log(`${spec.title}\n${describePlan(factory, plan)}`);
-      for (const role of ['implementer', ...(plan.review ? [plan.review.role] : [])]) console.log(`  skills     ${role}: ${grantsFor(factory, role, plan.type).map((g) => g.name).join(', ') || 'none'}`);
+      // A large spec runs only as slices, which is not built yet: its cut can still be looked at.
+      const plan = values.slices && spec.size === 'large' ? undefined : resolvePlan(factory, spec);
+      console.log(plan ? `${spec.title}\n${describePlan(factory, plan)}` : `${spec.title}\nlarge: not run as a job yet. This is how it would be cut.`);
+      for (const role of plan ? ['implementer', ...(plan.review ? [plan.review.role] : [])] : []) console.log(`  skills     ${role}: ${grantsFor(factory, role, spec.type).map((g) => g.name).join(', ') || 'none'}`);
       if (spec.after.length) console.log(`  waits for  ${spec.after.join(', ')} to be merged`);
       if (spec.defaulted.length) console.log(`  (no ${spec.defaulted.join(', ')} in the header: the default)`);
       spec.criteria.forEach((c, i) => console.log(`  ${i + 1}. ${c.text}${c.commands.map((x) => `\n       $ ${x}`).join('') || '\n       (no check command: only the reviewer judges it)'}`));
+      if (values.slices) {
+        const planned = planSlices({ factory, agent: claudeAgent(factory), spec, cwd: git(resolve(values.repo ?? cwd), ['rev-parse', '--show-toplevel']), log: say });
+        console.log(`\n${describeSlicing(spec, planned)}`);
+        for (const s of planned.sessions) say(`${s.stage}: $${s.result.cost_usd.toFixed(4)}${s.result.context !== undefined ? `, ${Math.round(s.result.context / 1000)}k tokens of context at the end` : ''}`);
+      }
       return 0;
     }
     case 'submit': {
