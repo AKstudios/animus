@@ -12,6 +12,7 @@
 #   5. lets that account manage Tailscale's serve setting, and nothing else of it
 #   6. installs helix.service, which starts at boot once ~/.helix/config.yaml exists
 #   7. lets the browser that takes screenshots use its own sandbox
+#   8. lets that account run Docker, for jobs in containers (when Docker is installed)
 #
 # It removes nothing. The old account goes with finish.sh, once the new one works.
 set -euo pipefail
@@ -128,6 +129,12 @@ profile agent-browser-chrome $NEW_HOME/.agent-browser/browsers/*/chrome flags=(u
 PROFILE
   apparmor_parser -r /etc/apparmor.d/agent-browser-chrome
 fi
+
+say "8. $NEW_USER may run Docker"
+# Membership of the docker group is as good as root on this machine: the
+# account already has sudo, and only Helix uses it. Jobs never get the socket.
+if getent group docker >/dev/null; then usermod -aG docker "$NEW_USER"
+else echo "  Docker is not installed: jobs run on the machine until it is (see helix/deploy/README.md)"; fi
 
 say "read back"
 printf '  %-22s %s\n' \

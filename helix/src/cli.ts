@@ -9,6 +9,7 @@ import { loadFactory } from '../../plugin/src/profiles.ts';
 import { AnimusError } from '../../plugin/src/proc.ts';
 import { checkPerson, describeFindings, githubToken } from './check.ts';
 import { animusVersion } from '../../plugin/src/version.ts';
+import { containerLaunch, containerProblem, imageName, personDirs, removeContainer } from './container.ts';
 import { addPerson, addRepo, configFile, helixHome, identityEnv, loadConfig, removePerson, removeRepo } from './config.ts';
 import { serve } from './server.ts';
 import { openStore } from './store.ts';
@@ -17,6 +18,16 @@ import { cancelJobsOf, pauseFile, supervise, UNTIL_RESTART } from './supervisor.
 /** This checkout of Animus: what `helix upgrade` moves to another release. */
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..', '..');
 const pidFile = () => join(helixHome(), 'serve.pid');
+const uid = () => process.getuid?.() ?? 1000;
+const gid = () => process.getgid?.() ?? 1000;
+
+/** Builds the job image for this release, for this account's uid. */
+function buildImage(): boolean {
+  const image = imageName(animusVersion());
+  console.log(`building ${image}`);
+  return run('docker', ['build', '-t', image, '--build-arg', `UID=${uid()}`, '--build-arg', `GID=${gid()}`, join(ROOT, 'helix', 'deploy', 'image')]);
+}
+
 const sleep = (ms: number) => { Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms); };
 
 const USAGE = `helix: runs Animus jobs for several people on one machine
@@ -40,6 +51,9 @@ const USAGE = `helix: runs Animus jobs for several people on one machine
         running ones to end, check out the tag, install, run the tests, and
         restart Helix (its service manager starts it again). If the tests
         fail, the checkout goes back to where it was.
+  helix image
+        Build the image jobs run in (animus-job:<version>). Jobs run in
+        containers when config.yaml has a container: entry.
   helix check [<name>]
         Try each person's credentials against GitHub and Claude: who the
         GitHub token is, when it ends, whether it may push to each repository,
@@ -74,9 +88,21 @@ function main(argv: string[]): number | undefined {
       if (existsSync(pauseFile(home)) && readFileSync(pauseFile(home), 'utf8').trim() === UNTIL_RESTART) rmSync(pauseFile(home));
       if (existsSync(pauseFile(home))) say(`${pauseFile(home)} is there, so no job starts until it is removed`);
       writeFileSync(pidFile(), `${process.pid}\n`);
-      const supervisor = supervise({ store, config, home, preflight, say });
+      // With containers, a job sees only its person's folders, and Helix never falls back to running it on the machine.
+      let isolation = {};
+      if (config.container) {
+        const image = imageName(animusVersion());
+        const problem = containerProblem(image);
+        if (problem) throw new AnimusError(`config.yaml asks for containers, but ${problem}`);
+        isolation = {
+          launch: containerLaunch({ home, animusRoot: ROOT, image, limits: config.container, uid: uid(), gid: gid() }),
+          reap: removeContainer,
+          animusHomeOf: (person: string) => personDirs(home, person).animus,
+        };
+      }
+      const supervisor = supervise({ store, config, home, preflight, say, ...isolation });
       const server = serve({ config, store, supervisor });
-      server.listen(config.port, config.host, () => console.error(`helix ${animusVersion()}: listening on http://${config.host}:${config.port}, ${config.slots} job(s) at once, repositories: ${Object.keys(config.repos).join(', ')}`));
+      server.listen(config.port, config.host, () => console.error(`helix ${animusVersion()}: listening on http://${config.host}:${config.port}, ${config.slots} job(s) at once${config.container ? ', each in a container' : ''}, repositories: ${Object.keys(config.repos).join(', ')}`));
       // Someone added or removed a person or a repository, or changed the slots: the same config object, so everything sees it at once.
       watchFile(configFile(), { interval: 2000 }, () => {
         try {
@@ -113,13 +139,17 @@ function main(argv: string[]): number | undefined {
     case 'remove-person': {
       const name = positionals[0];
       if (!name) throw new AnimusError('usage: helix remove-person <name>');
+      const contained = Boolean(loadConfig().container);
       const { kept } = removePerson(name);
       const store = openStore(join(helixHome(), 'helix.db'));
-      const cancelled = cancelJobsOf(store, name);
+      const cancelled = cancelJobsOf(store, name, contained ? removeContainer : undefined);
       store.close();
+      // Their clones, job state and Claude config: theirs alone, and no use to anyone once they are gone.
+      rmSync(personDirs(helixHome(), name).root, { recursive: true, force: true });
       console.log([
         `${name} is off Helix: their token no longer works${cancelled.length ? `, and job(s) ${cancelled.map((j) => j.id).join(', ')} were cancelled` : ''}.`,
         kept ? `Their credentials file is outside ${helixHome()}, so it was left: delete ${kept}` : 'Their credentials file is deleted.',
+        `Their folder ${personDirs(helixHome(), name).root} (clones, job state, Claude config) is deleted.`,
         '',
         'Left to do elsewhere:',
         '  - GitHub: revoke the token they gave Helix (they can, or an org owner under the org\'s personal access tokens), and take them off the organisation or repositories.',
@@ -140,6 +170,8 @@ function main(argv: string[]): number | undefined {
       console.log(`${name} is off Helix. Its clone is still at ${dir}; delete it when you no longer want it.`);
       return 0;
     }
+    case 'image':
+      return buildImage() ? 0 : 1;
     case 'upgrade':
       if (!positionals[0]) throw new AnimusError('usage: helix upgrade <tag>');
       return upgrade(positionals[0]);
@@ -181,7 +213,10 @@ function upgrade(ref: string): number {
     sleep(5000);
   }
   store.close();
-  const moved = run('git', ['checkout', '--quiet', '--detach', ref]) && run('npm', ['ci']) && run('npm', ['test']) && run('npm', ['run', 'typecheck']);
+  const contained = Boolean(loadConfig().container);
+  // The new release's image is built from its own Dockerfile, tagged with its own version.
+  const moved = run('git', ['checkout', '--quiet', '--detach', ref]) && run('npm', ['ci']) && run('npm', ['test']) && run('npm', ['run', 'typecheck'])
+    && (!contained || spawnSync(process.execPath, ['--disable-warning=ExperimentalWarning', join(ROOT, 'helix', 'src', 'cli.ts'), 'image'], { cwd: ROOT, stdio: 'inherit' }).status === 0);
   if (!moved) {
     console.error(`helix: ${ref} did not install or pass its tests here; going back to ${before.slice(0, 12)}`);
     run('git', ['checkout', '--quiet', '--detach', before]);

@@ -8,6 +8,16 @@ clients with how to update.
 
 ## Unreleased
 
+- Each Helix job can run in a Docker container of its own: on when
+  `config.yaml` has `container: {memory, cpus}`. A job sees only its
+  submitter's folder under `~/.helix/people/` (their clone, job state and
+  Claude config), Animus read-only and its spec, and only their credentials,
+  passed by name. No Docker socket, no published port, all capabilities
+  dropped. `helix image` builds the image (`animus-job:<version>`) and
+  `helix upgrade` rebuilds it. `helix remove-person` also deletes the
+  person's folder and removes their containers.
+- setup.sh step 8 adds Helix's account to the docker group.
+
 ## 0.3.0 (2026-11-16)
 
 - **Breaking:** the client sends its version to Helix, and Helix refuses one it

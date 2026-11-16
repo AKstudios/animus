@@ -9,20 +9,29 @@ import { uptime } from 'node:os';
 import { basename, dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { AnimusError } from '../../plugin/src/proc.ts';
+import { loadProgress, type Progress } from '../../plugin/src/log.ts';
 import { parseSpec } from '../../plugin/src/spec.ts';
 import { credentialEnv, personEnv, type Config } from './config.ts';
 import type { HelixJob, Store } from './store.ts';
 
 const PLUGIN = join(dirname(fileURLToPath(import.meta.url)), '..', '..', 'plugin');
 
-export type Launch = (job: HelixJob, repoDir: string) => { command: string; args: string[] };
+/**
+ * How a job's process is started. env is what the job runs with (the
+ * person's credentials and Animus's variables); a launch may add to it, and
+ * names the folder to start in.
+ */
+export type Launch = (job: HelixJob, repoDir: string, env: Record<string, string>) => { command: string; args: string[]; env?: Record<string, string>; cwd?: string };
 
-/** The same command a person runs on a laptop; a job that ran before is resumed. */
+/** What `animus` is asked to do for a job: run it, or resume one that ran before. */
+export const animusArgs = (job: HelixJob, repoDir: string): string[] => (job.animus_job
+  ? ['resume', job.animus_job, ...(job.answer ? ['--answer', job.answer] : [])]
+  : ['run', job.spec, '--repo', repoDir, ...(job.draft ? ['--draft'] : [])]);
+
+/** The same command a person runs on a laptop, on this machine as Helix's account. */
 const animus: Launch = (job, repoDir) => ({
   command: process.execPath,
-  args: ['--disable-warning=ExperimentalWarning', join(PLUGIN, 'src', 'cli.ts'), ...(job.animus_job
-    ? ['resume', job.animus_job, ...(job.answer ? ['--answer', job.answer] : [])]
-    : ['run', job.spec, '--repo', repoDir, ...(job.draft ? ['--draft'] : [])])],
+  args: ['--disable-warning=ExperimentalWarning', join(PLUGIN, 'src', 'cli.ts'), ...animusArgs(job, repoDir)],
 });
 
 /** A job found running this many times when Helix came back is ended, not queued again: it may be what takes Helix down. */
@@ -43,6 +52,8 @@ export type Supervisor = {
   cancel(person: string, id: number): HelixJob;
   answer(person: string, id: number, text: string): HelixJob;
   log(id: number, lines?: number): string;
+  /** Where a running job says it is, from the Animus state it writes. */
+  progress(job: HelixJob): Progress | undefined;
   /** Starts what the queue holds while slots are free: after the config changed, or a pause ended. */
   wake(): void;
   /** Stops starting jobs and ends the ones running. */
@@ -68,21 +79,29 @@ function kill(pid: number, child?: ChildProcess): void {
  * remove-person` runs beside `helix serve`, which sees the job's process end
  * and leaves the table as this says. Jobs that already ended are kept.
  */
-export function cancelJobsOf(store: Store, person: string): HelixJob[] {
+export function cancelJobsOf(store: Store, person: string, reap: (id: number) => void = () => {}): HelixJob[] {
   const now = new Date().toISOString();
   const theirs = [...store.inState('queued'), ...store.inState('running')].filter((j) => j.person === person);
   for (const job of theirs) {
     const { pid, ...rest } = job;
     store.save({ ...rest, state: 'cancelled', ended: now, reason: `${person} was removed from Helix` });
     if (pid) kill(pid);
+    reap(job.id);
   }
   return theirs;
 }
 
-export function supervise(opts: { store: Store; config: Config; home: string; launch?: Launch; preflight?: Preflight; say?: (line: string) => void }): Supervisor {
+export function supervise(opts: {
+  store: Store; config: Config; home: string; launch?: Launch; preflight?: Preflight; say?: (line: string) => void;
+  /** Ends what a job leaves running outside its process tree (its container). */
+  reap?: (id: number) => void;
+  /** The Animus home a person's jobs write their state to, when it is not Helix's own. */
+  animusHomeOf?: (person: string) => string;
+}): Supervisor {
   const { store, config, home } = opts;
   const launch = opts.launch ?? animus;
   const say = opts.say ?? (() => {});
+  const reap = opts.reap ?? (() => {});
   const children = new Map<number, ChildProcess>();
   const now = () => new Date().toISOString();
   const logFile = (id: number) => join(home, 'jobs', String(id), 'log.txt');
@@ -98,9 +117,9 @@ export function supervise(opts: { store: Store; config: Config; home: string; la
 
   function start(job: HelixJob): void {
     const repoDir = config.repos[job.repo] ?? '';
-    const { command, args } = launch(job, repoDir);
     mkdirSync(dirname(logFile(job.id)), { recursive: true });
     let env: NodeJS.ProcessEnv;
+    let launched: ReturnType<Launch>;
     try {
       // Taken off since the job was queued: it never runs, and never with the machine's own logins in place of theirs.
       if (!config.people[job.person]) throw new AnimusError(`${job.person} is no longer on Helix`);
@@ -109,13 +128,15 @@ export function supervise(opts: { store: Store; config: Config; home: string; la
       const looked = opts.preflight?.(job.person, theirs, repoDir) ?? {};
       if (looked.why) throw new AnimusError(looked.why);
       // What the person set themselves wins over what was looked up.
-      env = { ...process.env, ...looked.env, ...theirs, ...credentialEnv(theirs), ANIMUS_USER: job.person, ANIMUS_TRIGGER: 'helix', ANIMUS_BIN: join(PLUGIN, 'bin', 'animus') };
+      const jobEnv = { ...looked.env, ...theirs, ...credentialEnv(theirs), ANIMUS_USER: job.person, ANIMUS_TRIGGER: 'helix', ANIMUS_BIN: join(PLUGIN, 'bin', 'animus') };
+      launched = launch(job, repoDir, jobEnv);
+      env = { ...process.env, ...jobEnv, ...launched.env };
     } catch (err) {
       store.save({ ...job, state: 'ended', ended: now(), outcome: 'failed', reason: (err as Error).message });
       say(`job ${job.id} did not start: ${(err as Error).message}`);
       return;
     }
-    const child = spawn(command, args, { cwd: repoDir, env, detached: process.platform !== 'win32', stdio: ['ignore', 'pipe', 'pipe'] });
+    const child = spawn(launched.command, launched.args, { cwd: launched.cwd ?? repoDir, env, detached: process.platform !== 'win32', stdio: ['ignore', 'pipe', 'pipe'] });
     children.set(job.id, child);
     const { answer: _used, ...rest } = job;
     let running: HelixJob = { ...rest, state: 'running', started: now(), ...(child.pid ? { pid: child.pid } : {}) };
@@ -166,6 +187,7 @@ export function supervise(opts: { store: Store; config: Config; home: string; la
   const booted = Date.now() - uptime() * 1000;
   for (const job of store.inState('running')) {
     if (job.pid && job.started && Date.parse(job.started) > booted) kill(job.pid);
+    reap(job.id);
     const { pid: _pid, ...rest } = job;
     const interrupted = (job.interrupted ?? 0) + 1;
     if (interrupted >= MAX_INTERRUPTIONS) {
@@ -198,6 +220,7 @@ export function supervise(opts: { store: Store; config: Config; home: string; la
       const { pid, ...rest } = job;
       store.save({ ...rest, state: 'cancelled', ended: now() });
       if (pid) kill(pid, children.get(id));
+      reap(id);
       return store.get(id)!;
     },
     answer(person, id, text) {
@@ -213,12 +236,14 @@ export function supervise(opts: { store: Store; config: Config; home: string; la
       return readFileSync(logFile(id), 'utf8').trimEnd().split('\n').slice(-lines).join('\n');
     },
     wake: () => tick(),
+    progress: (job) => (job.animus_job ? loadProgress(job.animus_job, opts.animusHomeOf?.(job.person)) : undefined),
     stop() {
       stopped = true;
       for (const [id, child] of children) {
         const job = store.get(id);
         if (job?.state === 'running') { const { pid: _pid, ...rest } = job; store.save({ ...rest, state: 'queued', queued: now() }); }
         if (child.pid) kill(child.pid, child);
+        reap(id);
       }
     },
   };

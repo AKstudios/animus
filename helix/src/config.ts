@@ -27,6 +27,11 @@ export type Config = {
   /** Repositories by name, each a clone on this machine with a .animus/animus.yaml. */
   repos: Record<string, string>;
   people: Record<string, Person>;
+  /**
+   * Run each job in a container of its own (container.ts), with these limits.
+   * Left out, jobs run on the machine as Helix's account, sharing it.
+   */
+  container?: { memory?: string; cpus?: number };
 };
 
 const DEFAULTS: Config = { host: '127.0.0.1', port: 7420, slots: 2, repos: {}, people: {} };

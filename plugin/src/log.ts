@@ -124,8 +124,9 @@ export function saveProgress(job: string, stage: Stage, who: string): void {
   writeJson(join(jobDir(job), 'progress.json'), { stage, who, at: new Date().toISOString() } satisfies Progress);
 }
 
-export function loadProgress(job: string): Progress | undefined {
-  try { return JSON.parse(readFileSync(join(jobDir(job), 'progress.json'), 'utf8')) as Progress; } catch { return undefined; }
+/** A job's progress; home is the Animus home it ran under, when not this process's (a Helix job in a container). */
+export function loadProgress(job: string, home = animusHome()): Progress | undefined {
+  try { return JSON.parse(readFileSync(join(home, 'jobs', job, 'progress.json'), 'utf8')) as Progress; } catch { return undefined; }
 }
 
 export function appendRun(run: Run): void {

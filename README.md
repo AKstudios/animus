@@ -76,6 +76,12 @@ helix/bin/helix remove-repo meal-planner
 helix/bin/helix upgrade v0.3.0          # drain, check out the release, install, test, restart
 ```
 
+With `container: {memory: 6g, cpus: 2}` in `config.yaml`, each job runs in a
+Docker container of its own, built by `helix image` from
+`helix/deploy/image/Dockerfile`. It sees only its submitter's folder under
+`~/.helix/people/` (their clone, job state and Claude config), Animus
+read-only, and their credentials, with no Docker socket and no published port.
+
 Helix reads `config.yaml` again whenever it changes, so adding or removing a
 person or a repository, or changing the slots, needs no restart. Someone
 leaving is `helix remove-person`, which prints what is left to revoke

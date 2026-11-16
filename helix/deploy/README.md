@@ -30,9 +30,12 @@ works as it is. Otherwise edit those paths in `config.yaml`.
 5. For each person: write their `~/.helix/<name>.env` (mode 600, with
    `CLAUDE_CODE_OAUTH_TOKEN` and `GH_TOKEN`) and run `helix add-person <name>
    --env-file ~/.helix/<name>.env`. Each gets a new Helix token.
-6. Run `helix/bin/helix check`. Then `sudo systemctl start helix.service` and
+6. For jobs in containers (recommended once more than one person submits):
+   install Docker, run setup.sh again for the docker group, run `helix/bin/helix
+   image`, and add `container: {memory: 6g, cpus: 2}` to `config.yaml`.
+7. Run `helix/bin/helix check`. Then `sudo systemctl start helix.service` and
    `tailscale serve --bg 7420`.
-7. From a laptop, run `animus doctor` with the new `HELIX_URL`.
+8. From a laptop, run `animus doctor` with the new `HELIX_URL`.
 
 ## Moving abstergo to new hardware, keeping everything
 

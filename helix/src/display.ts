@@ -5,7 +5,7 @@
 import { statSync } from 'node:fs';
 import { hostname } from 'node:os';
 import { join } from 'node:path';
-import { loadProgress, STAGES, type Progress } from '../../plugin/src/log.ts';
+import { STAGES, type Progress } from '../../plugin/src/log.ts';
 import { loadProfile, PROFILE_PATH } from '../../plugin/src/profile.ts';
 import type { Config } from './config.ts';
 import type { HelixJob, Store } from './store.ts';
@@ -57,7 +57,7 @@ function jobOf(job: HelixJob, supervisor: Supervisor): DisplayJob {
   const { spec: _spec, pid: _pid, answer, draft: _draft, interrupted: _interrupted, ...shown } = job;
   if (job.state === 'queued' && job.animus_job) return { ...shown, resumed: answer ? 'answer' : 'restart' };
   if (job.state !== 'running') return shown;
-  const progress = job.animus_job ? loadProgress(job.animus_job) : undefined;
+  const progress = supervisor.progress(job);
   const now = supervisor.log(job.id, 1).trim();
   return {
     ...shown,
