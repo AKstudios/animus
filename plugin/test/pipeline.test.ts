@@ -138,7 +138,7 @@ test('an implementer that raises the job to risky gets it reviewed at the deep t
   assert.equal(run.difficulty, 'risky');
 });
 
-test('a job that needs input stops with its question, and the answer resumes the same job and session', async () => {
+test('a job that needs input stops with its question, and the answer resumes the same job and session and reaches the reviewer', async () => {
   const repo = makeRepo();
   const first = fakeAgent([() => ({ output: { status: 'needs-input', summary: '', question: 'Done, or finished?' } })]);
   const d = deps(first.agent);
@@ -154,6 +154,8 @@ test('a job that needs input stops with its question, and the answer resumes the
   assert.equal(again.outcome, 'pr');
   assert.equal(second.calls[0]!.resume, 'session-1');
   assert.match(second.calls[0]!.prompt, /Done, or finished\?[\s\S]*The person's answer: Done\./);
+  // The reviewer is told what was asked and answered, or it would judge the answer as the implementer's guess.
+  assert.match(second.calls[1]!.prompt, /Asked: Done, or finished\?\n  Answered: Done\./);
   assert.deepEqual(readRuns().filter((r) => r.job === run.job).map((r) => [r.trigger, r.outcome]), [['cli', 'needs-input'], ['resume', 'pr']]);
 });
 

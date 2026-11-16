@@ -11,6 +11,7 @@
 #   4. masks sleep, suspend and hibernate
 #   5. lets that account manage Tailscale's serve setting, and nothing else of it
 #   6. installs helix.service, which starts at boot once ~/.helix/config.yaml exists
+#   7. lets the browser that takes screenshots use its own sandbox
 #
 # It removes nothing. The old account goes with finish.sh, once the new one works.
 set -euo pipefail
@@ -106,6 +107,23 @@ chmod 440 /etc/sudoers.d/helix
 visudo -cf /etc/sudoers.d/helix >/dev/null || { rm -f /etc/sudoers.d/helix; die "the sudoers rule did not parse and was removed"; }
 systemctl daemon-reload
 systemctl enable helix.service >/dev/null 2>&1
+
+say "7. the screenshot browser may use its sandbox"
+# Ubuntu stops a program from making user namespaces unless AppArmor has a
+# profile for it, and Chrome's sandbox needs them. This names agent-browser's
+# Chrome, as Ubuntu's own profile names /opt/google/chrome/chrome.
+if [[ -d /etc/apparmor.d ]] && command -v apparmor_parser >/dev/null; then
+  cat > /etc/apparmor.d/agent-browser-chrome <<PROFILE
+abi <abi/4.0>,
+include <tunables/global>
+
+profile agent-browser-chrome $NEW_HOME/.agent-browser/browsers/*/chrome flags=(unconfined) {
+  userns,
+  include if exists <local/agent-browser-chrome>
+}
+PROFILE
+  apparmor_parser -r /etc/apparmor.d/agent-browser-chrome
+fi
 
 say "read back"
 printf '  %-22s %s\n' \

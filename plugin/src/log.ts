@@ -80,6 +80,8 @@ export type JobState = {
   session?: string;
   outcome?: Outcome;
   question?: string;
+  /** The questions this job stopped to ask, each with the person's answer: the reviewer reads them beside the spec. */
+  answers?: { question: string; answer: string }[];
   findings?: Finding[];
 };
 

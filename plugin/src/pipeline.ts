@@ -154,7 +154,8 @@ export async function runJob(opts: RunOptions, deps: Deps): Promise<Run> {
   const wt = ws.worktree;
   run.branch = ws.branch;
   run.base = ws.base;
-  const state: JobState = { job, repo, spec: specCopy, ...(source ? { source } : {}), workspace: ws, plan, ...(prior?.session ? { session: prior.session } : {}) };
+  const answers = [...(prior?.answers ?? []), ...(prior?.question && opts.resume?.answer ? [{ question: prior.question, answer: opts.resume.answer }] : [])];
+  const state: JobState = { job, repo, spec: specCopy, ...(source ? { source } : {}), workspace: ws, plan, ...(prior?.session ? { session: prior.session } : {}), ...(answers.length ? { answers } : {}) };
   saveState(state);
 
   let summary = '';
@@ -272,7 +273,7 @@ export async function runJob(opts: RunOptions, deps: Deps): Promise<Run> {
       for (let round = 1; ; round++) {
         const seen = ui ? await shoot() : undefined;
         log(`review ${round}: ${role}, ${modelFor(factory, tier)}, ${effort} effort`);
-        const prompt = reviewPrompt({ spec, ws, round, earlier: open, shots: seen });
+        const prompt = reviewPrompt({ spec, ws, round, earlier: open, shots: seen, answers });
         let said: Review | undefined;
         for (let tries = 0; tries < 2 && !said; tries++) {
           const r = await timed('review', () => deps.agent({ role, tier, effort, prompt, cwd: wt, ...instructions(role), schema: REVIEW_SCHEMA, readOnly: true, timeoutMs: REVIEW_TIMEOUT_MS }));
@@ -409,13 +410,14 @@ function resumePrompt(prior: JobState, answer?: string): string {
   return `This job was interrupted and is being picked up again. Your earlier commits are on the branch. ${answer ? `From the person: ${answer}\n\n` : ''}Check what is done against the spec, finish the rest, and finish as before.`;
 }
 
-function reviewPrompt(p: { spec: Spec; ws: Workspace; round: number; earlier: readonly Finding[]; shots?: string | undefined }): string {
+function reviewPrompt(p: { spec: Spec; ws: Workspace; round: number; earlier: readonly Finding[]; shots?: string | undefined; answers?: readonly { question: string; answer: string }[] }): string {
   return [
     `You are in the worktree of the finished change. Read the diff with: git diff ${p.ws.base}...HEAD`,
     p.round > 1 ? `This is review ${p.round}, after a fix round. The earlier blockers were:\n${listFindings(p.earlier)}` : '',
     p.shots ?? '',
     `The acceptance criteria, numbered as your answer must number them:\n${criteriaList(p.spec)}`,
     `The spec:\n\n${p.spec.text.trim()}`,
+    p.answers?.length ? `While it ran, the job stopped to ask the person who submitted it, and they answered. Their answers decide what the spec left open; judge the work against them as you do the spec:\n${p.answers.map((a) => `- Asked: ${a.question}\n  Answered: ${a.answer}`).join('\n')}` : '',
   ].filter(Boolean).join('\n\n');
 }
 
