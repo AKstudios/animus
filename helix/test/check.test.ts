@@ -22,7 +22,9 @@ test('the GitHub token check says who it is and when it ends, and fails when Git
   const today = Date.parse('2026-11-16T00:00:00Z');
   const env = { GH_TOKEN: 't' };
   assert.deepEqual(githubToken({}, answers({})), { what: 'GitHub token', ok: false, detail: 'the env file sets no GH_TOKEN' });
-  assert.match(githubToken(env, answers({ 'gh api': { stdout: USER() } }), today).detail, /signs in as ana; it has no end date/);
+  const good = githubToken(env, answers({ 'gh api': { stdout: USER() } }), today);
+  assert.match(good.detail, /signs in as ana; it has no end date/);
+  assert.deepEqual(good.identity, { name: 'ana', email: '1+ana@users.noreply.github.com' });
   assert.match(githubToken(env, answers({ 'gh api': { stdout: USER('2027-02-14 08:00:00 UTC') } }), today).detail, /ends in 90 day\(s\), on 2027-02-14$/);
   assert.match(githubToken(env, answers({ 'gh api': { stdout: USER('2026-11-19 00:00:00 UTC') } }), today).detail, /ends in 3 day\(s\).*replace it now/);
   const refused = githubToken(env, answers({ 'gh api': { code: 1, stderr: 'gh: Bad credentials (HTTP 401)' } }), today);
@@ -101,9 +103,22 @@ test('a pid recorded before the machine last started is left alone: it is no lon
 test('a job whose credentials fail the look before it starts ends at once with the reason', () => {
   const c = crashed({});
   c.store.save({ ...c.store.get(c.id)!, state: 'queued' });
-  const s = supervise({ store: c.store, config: c.config, home: c.home, launch: c.launch, preflight: (person) => `${person}'s GitHub token ended` });
+  const s = supervise({ store: c.store, config: c.config, home: c.home, launch: c.launch, preflight: (person) => ({ why: `${person}'s GitHub token ended` }) });
   const job = c.store.get(c.id)!;
   assert.deepEqual([job.state, job.outcome, job.reason], ['ended', 'failed', 'ana\'s GitHub token ended']);
+  s.stop();
+  c.store.close();
+});
+
+test('a job runs with the git identity the look before it found, unless the person\'s env file sets its own', async () => {
+  const c = crashed({});
+  writeFileSync(join(c.home, 'ana.env'), 'GIT_AUTHOR_EMAIL=own@example.test\n');
+  c.config.people.ana!.env_file = join(c.home, 'ana.env');
+  c.store.save({ ...c.store.get(c.id)!, state: 'queued' });
+  const launch: Launch = () => ({ command: process.execPath, args: ['-e', 'console.log(JSON.stringify({ outcome: "pr", reason: process.env.GIT_AUTHOR_NAME + " " + process.env.GIT_AUTHOR_EMAIL + " " + process.env.GIT_COMMITTER_EMAIL }))'] });
+  const s = supervise({ store: c.store, config: c.config, home: c.home, launch, preflight: () => ({ env: { GIT_AUTHOR_NAME: 'ana', GIT_AUTHOR_EMAIL: '1+ana@users.noreply.github.com', GIT_COMMITTER_EMAIL: '1+ana@users.noreply.github.com' } }) });
+  for (let i = 0; i < 200 && c.store.get(c.id)!.state !== 'ended'; i++) await new Promise((r) => { setTimeout(r, 20); });
+  assert.equal(c.store.get(c.id)!.reason, 'ana own@example.test 1+ana@users.noreply.github.com');
   s.stop();
   c.store.close();
 });

@@ -13,6 +13,9 @@ import { credentialEnv, personEnv, type Config } from './config.ts';
 
 export type Finding = { what: string; ok: boolean; detail: string };
 
+/** The name and address GitHub credits a person's commits to. */
+export type Identity = { name: string; email: string };
+
 export type Ran = { code: number; stdout: string; stderr: string };
 export type Runner = (command: string, args: string[], opts: { cwd?: string; env: Record<string, string> }) => Ran;
 
@@ -28,19 +31,22 @@ const lastLine = (text: string) => text.trim().split('\n').pop() ?? '';
 const SOON_DAYS = 7;
 
 /** Who GitHub says the token is, and when it ends. */
-export function githubToken(env: Record<string, string>, runner: Runner = run, today = Date.now()): Finding {
+export function githubToken(env: Record<string, string>, runner: Runner = run, today = Date.now()): Finding & { identity?: Identity } {
   const what = 'GitHub token';
   if (!env.GH_TOKEN && !env.GITHUB_TOKEN) return { what, ok: false, detail: 'the env file sets no GH_TOKEN' };
   const r = runner('gh', ['api', '-i', 'user'], { env });
   if (r.code !== 0) return { what, ok: false, detail: `GitHub refused it: ${lastLine(r.stderr || r.stdout)}` };
   const login = /"login"\s*:\s*"([^"]+)"/.exec(r.stdout)?.[1] ?? 'someone';
+  const id = /"id"\s*:\s*(\d+)/.exec(r.stdout)?.[1];
+  // The address GitHub gives every account, so a commit is theirs without their real one.
+  const who = id && login !== 'someone' ? { identity: { name: login, email: `${id}+${login}@users.noreply.github.com` } } : {};
   // "2027-02-01 08:00:00 UTC", or with an offset; a token that never ends has no such header.
   const ends = /^github-authentication-token-expiration:\s*(.+)$/im.exec(r.stdout)?.[1]?.trim();
-  if (!ends) return { what, ok: true, detail: `signs in as ${login}; it has no end date` };
+  if (!ends) return { what, ok: true, ...who, detail: `signs in as ${login}; it has no end date` };
   const at = Date.parse(ends.replace(' UTC', 'Z').replace(' ', 'T'));
   const days = Number.isNaN(at) ? undefined : Math.floor((at - today) / 86_400_000);
-  if (days === undefined) return { what, ok: true, detail: `signs in as ${login}; ends ${ends}` };
-  return { what, ok: true, detail: `signs in as ${login}; ends in ${days} day(s), on ${ends.slice(0, 10)}${days < SOON_DAYS ? ': replace it now' : ''}` };
+  if (days === undefined) return { what, ok: true, ...who, detail: `signs in as ${login}; ends ${ends}` };
+  return { what, ok: true, ...who, detail: `signs in as ${login}; ends in ${days} day(s), on ${ends.slice(0, 10)}${days < SOON_DAYS ? ': replace it now' : ''}` };
 }
 
 /** Whether the token may push to a repository: a push that sends nothing still has to be let in. */

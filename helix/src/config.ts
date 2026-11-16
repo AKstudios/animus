@@ -80,6 +80,11 @@ export function credentialEnv(env: Record<string, string>): Record<string, strin
   return { GIT_CONFIG_COUNT: '2', GIT_CONFIG_KEY_0: key, GIT_CONFIG_VALUE_0: '', GIT_CONFIG_KEY_1: key, GIT_CONFIG_VALUE_1: '!gh auth git-credential' };
 }
 
+/** Makes a job's commits the person's, on a machine whose account has no git identity of its own. */
+export function identityEnv(who: { name: string; email: string }): Record<string, string> {
+  return { GIT_AUTHOR_NAME: who.name, GIT_AUTHOR_EMAIL: who.email, GIT_COMMITTER_NAME: who.name, GIT_COMMITTER_EMAIL: who.email };
+}
+
 /** The variables a person's jobs run with, from their env_file. */
 export function personEnv(person: Person | undefined): Record<string, string> {
   if (!person?.env_file) return {};

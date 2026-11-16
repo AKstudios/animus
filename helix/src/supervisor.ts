@@ -28,8 +28,8 @@ const animus: Launch = (job, repoDir) => ({
 /** A job found running this many times when Helix came back is ended, not queued again: it may be what takes Helix down. */
 export const MAX_INTERRUPTIONS = 3;
 
-/** Looks at a person's credentials before their job starts; returns why the job cannot run, or nothing. */
-export type Preflight = (person: string, env: Record<string, string>, repoDir: string) => string | undefined;
+/** Looks at a person's credentials before their job starts: why the job cannot run, or variables to add to it (the person's git identity). */
+export type Preflight = (person: string, env: Record<string, string>, repoDir: string) => { why?: string; env?: Record<string, string> };
 
 export type Submission = { repo: string; spec: string; name?: string; draft?: boolean };
 
@@ -75,9 +75,10 @@ export function supervise(opts: { store: Store; config: Config; home: string; la
     let env: NodeJS.ProcessEnv;
     try {
       const theirs = personEnv(config.people[job.person]);
-      const why = opts.preflight?.(job.person, theirs, repoDir);
-      if (why) throw new AnimusError(why);
-      env = { ...process.env, ...theirs, ...credentialEnv(theirs), ANIMUS_USER: job.person, ANIMUS_TRIGGER: 'helix', ANIMUS_BIN: join(PLUGIN, 'bin', 'animus') };
+      const looked = opts.preflight?.(job.person, theirs, repoDir) ?? {};
+      if (looked.why) throw new AnimusError(looked.why);
+      // What the person set themselves wins over what was looked up.
+      env = { ...process.env, ...looked.env, ...theirs, ...credentialEnv(theirs), ANIMUS_USER: job.person, ANIMUS_TRIGGER: 'helix', ANIMUS_BIN: join(PLUGIN, 'bin', 'animus') };
     } catch (err) {
       store.save({ ...job, state: 'ended', ended: now(), outcome: 'failed', reason: (err as Error).message });
       say(`job ${job.id} did not start: ${(err as Error).message}`);

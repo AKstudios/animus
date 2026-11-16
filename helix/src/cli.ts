@@ -5,7 +5,7 @@ import { claudeAgent } from '../../plugin/src/agent.ts';
 import { loadFactory } from '../../plugin/src/profiles.ts';
 import { AnimusError } from '../../plugin/src/proc.ts';
 import { checkPerson, describeFindings, githubToken } from './check.ts';
-import { addPerson, addRepo, configFile, helixHome, loadConfig } from './config.ts';
+import { addPerson, addRepo, configFile, helixHome, identityEnv, loadConfig } from './config.ts';
 import { serve } from './server.ts';
 import { openStore } from './store.ts';
 import { supervise } from './supervisor.ts';
@@ -38,9 +38,11 @@ function main(argv: string[]): number | undefined {
       const store = openStore(join(home, 'helix.db'));
       // A GitHub token that ended fails the job before it starts, with the reason.
       const preflight = (_person: string, env: Record<string, string>) => {
-        if (!env.GH_TOKEN && !env.GITHUB_TOKEN) return undefined;
+        if (!env.GH_TOKEN && !env.GITHUB_TOKEN) return {};
         const f = githubToken(env);
-        return f.ok ? undefined : `the GitHub token in the env file does not work: ${f.detail}`;
+        if (!f.ok) return { why: `the GitHub token in the env file does not work: ${f.detail}` };
+        // The job's commits, and its screenshots' commit, are the person's as GitHub knows them.
+        return f.identity ? { env: identityEnv(f.identity) } : {};
       };
       for (const name of Object.keys(config.people)) {
         const bad = checkPerson(config, name).filter((f) => !f.ok);
