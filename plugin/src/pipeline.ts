@@ -155,11 +155,13 @@ export async function runJob(opts: RunOptions, deps: Deps): Promise<Run> {
   run.branch = ws.branch;
   run.base = ws.base;
   const answers = [...(prior?.answers ?? []), ...(prior?.question && opts.resume?.answer ? [{ question: prior.question, answer: opts.resume.answer }] : [])];
-  const state: JobState = { job, repo, spec: specCopy, ...(source ? { source } : {}), workspace: ws, plan, ...(prior?.session ? { session: prior.session } : {}), ...(answers.length ? { answers } : {}) };
+  const state: JobState = { job, repo, spec: specCopy, ...(source ? { source } : {}), workspace: ws, plan, ...(prior?.session ? { session: prior.session } : {}), ...(prior?.context !== undefined ? { context: prior.context } : {}), ...(answers.length ? { answers } : {}) };
   saveState(state);
 
   let summary = '';
   let notes: string | undefined;
+  /** What a session new to the job is told first: where it is, the gates, the spec. */
+  let brief = '';
   let lastGates: CheckResult[] = [];
   let review: Review | undefined;
   let reviewRounds = 0;
@@ -171,8 +173,9 @@ export async function runJob(opts: RunOptions, deps: Deps): Promise<Run> {
   const record = (stage: string, role: string, tier: Tier, effort: string, r: AgentResult) => {
     run.agents.push({
       stage, role, tier, effort, model: r.model, ok: r.ok, status: r.status, cost_usd: r.cost_usd, turns: r.turns, tokens: r.tokens, ms: r.ms,
-      ...(r.session ? { session: r.session } : {}), ...(r.transcript ? { transcript: r.transcript } : {}),
+      ...(r.session ? { session: r.session } : {}), ...(r.transcript ? { transcript: r.transcript } : {}), ...(r.context !== undefined ? { context: r.context } : {}),
     });
+    if (r.context !== undefined) log(`  ${stage}: ${k(r.context)} tokens of context at the end${budget ? `, budget ${k(budget)}` : ''}`);
     run.cost_usd = Math.round((run.cost_usd + r.cost_usd) * 10_000) / 10_000;
     run.turns += r.turns;
     for (const k of ['input', 'output', 'cache_read', 'cache_write'] as const) run.tokens[k] += r.tokens[k];
@@ -189,13 +192,31 @@ export async function runJob(opts: RunOptions, deps: Deps): Promise<Run> {
     return { system: [readPrompt(role), s.system].filter(Boolean).join('\n\n'), ...(s.dirs.length ? { addDirs: s.dirs } : {}) };
   };
 
-  /** One turn of the implementer's session: the first starts it, later ones resume it. */
-  const implementer = async (stage: string, prompt: string, tier: Tier): Promise<Report> => {
+  const budget = factory.limits.context_budget;
+  const k = (tokens: number) => `${Math.round(tokens / 1000)}k`;
+  /** What every session is held to while it runs: where its context is compacted, and what it may spend. */
+  const caps = (tier: Tier) => ({ ...(factory.limits.context_cap ? { compactAt: factory.limits.context_cap } : {}), ...(factory.limits.session_usd?.[tier] ? { maxUsd: factory.limits.session_usd[tier]! } : {}) });
+
+  /**
+   * One turn of the implementer: the first starts a session and later ones
+   * resume it, unless it ended over the context budget. Then a fresh session
+   * is started with the job's brief and what was done, so a long job is a
+   * chain of short sessions and not one that only grows.
+   */
+  const implementer = async (stage: string, asked: string, tier: Tier): Promise<Report> => {
     const effort = plan.implement.effort;
+    let prompt = asked;
+    if (state.session && budget && (state.context ?? 0) > budget) {
+      log(`the implementer's session ended at ${k(state.context!)} tokens of context, over the ${k(budget)} budget: ${stage} starts a fresh session`);
+      prompt = handoffPrompt({ brief, base: ws.base, summary, notes, asked });
+      delete state.session;
+      run.handoffs = (run.handoffs ?? 0) + 1;
+    }
     log(`${stage}: ${modelFor(factory, tier)}, ${effort} effort`);
-    const r = await timed('implement', () => deps.agent({ role: 'implementer', tier, effort, prompt, cwd: wt, ...instructions('implementer'), schema: REPORT_SCHEMA, ...(state.session ? { resume: state.session } : {}) }));
+    const r = await timed('implement', () => deps.agent({ role: 'implementer', tier, effort, prompt, cwd: wt, ...instructions('implementer'), schema: REPORT_SCHEMA, ...caps(tier), ...(state.session ? { resume: state.session } : {}) }));
     record(stage, 'implementer', tier, effort, r);
     if (r.session) state.session = r.session;
+    if (r.context !== undefined) state.context = r.context; else delete state.context;
     saveState(state);
     // The implementer commits at each working step; whatever it left is kept too, so a retry starts from it.
     commitAll(wt, `${spec.title}: work left uncommitted at the end of ${stage}`);
@@ -259,10 +280,8 @@ export async function runJob(opts: RunOptions, deps: Deps): Promise<Run> {
 
     // ------------------------------------------------------------ implement
     const profile = repoProfile;
-    const first = prior
-      ? resumePrompt(prior, opts.resume?.answer)
-      : implementPrompt({ job, spec, ws, repo, notes: profile.notes, gates: jobChecks(profile, plan, spec, { base: ws.base, files: [] }).map((c) => c.command), ui: ui ? uiBrief(wt, profile, ui) : undefined, prove: plan.prove ? profile.tests : undefined });
-    await implementer(prior ? 'resume' : 'implement', first, plan.implement.tier);
+    brief = implementPrompt({ job, spec, ws, repo, notes: profile.notes, gates: jobChecks(profile, plan, spec, { base: ws.base, files: [] }).map((c) => c.command), ui: ui ? uiBrief(wt, profile, ui) : undefined, prove: plan.prove ? profile.tests : undefined });
+    await implementer(prior ? 'resume' : 'implement', prior ? resumePrompt(prior, opts.resume?.answer) : brief, plan.implement.tier);
 
     // ---------------------------------------------------------------- gates
     await gate();
@@ -276,7 +295,7 @@ export async function runJob(opts: RunOptions, deps: Deps): Promise<Run> {
         const prompt = reviewPrompt({ spec, ws, round, earlier: open, shots: seen, answers });
         let said: Review | undefined;
         for (let tries = 0; tries < 2 && !said; tries++) {
-          const r = await timed('review', () => deps.agent({ role, tier, effort, prompt, cwd: wt, ...instructions(role), schema: REVIEW_SCHEMA, readOnly: true, timeoutMs: REVIEW_TIMEOUT_MS }));
+          const r = await timed('review', () => deps.agent({ role, tier, effort, prompt, cwd: wt, ...instructions(role), schema: REVIEW_SCHEMA, readOnly: true, timeoutMs: REVIEW_TIMEOUT_MS, ...caps(tier) }));
           record(`review-${round}${tries ? '-retry' : ''}`, role, tier, effort, r);
           restore(wt);
           said = asReview(r.output);
@@ -394,6 +413,17 @@ function implementPrompt(p: { job: string; spec: Spec; ws: Workspace; repo: stri
     p.prove ? `This job must prove its test. Write the test that reproduces the problem first and see it fail. Once the gates below pass, Animus runs the spec's acceptance commands on the commit you started from with only your test files laid over it (files matching ${p.prove.join(', ')}), and at least one must fail there. \`${animusCommand()} check\` runs that too.` : '',
     `When you finish, Animus runs these gates, and sends failures back to you. Run them yourself first with \`${animusCommand()} check\` (foreground, Bash timeout 600000):\n${p.gates.map((g) => `  $ ${g}`).join('\n') || '  (the project names no check commands)'}`,
     `The spec follows. Its acceptance criteria are what the reviewer checks your change and its tests against.\n\n${p.spec.text.trim()}`,
+  ].filter(Boolean).join('\n\n');
+}
+
+/** For a session that starts in the middle of a job: the brief a first session gets, what the sessions before it left, then what is asked now. */
+function handoffPrompt(p: { brief: string; base: string; summary: string; notes?: string | undefined; asked: string }): string {
+  return [
+    p.brief,
+    `This job is already under way. Earlier sessions did the work that is on this branch, and the last one was ended because its context had grown long. You are a fresh session picking the job up, so read what is there before you change anything: \`git log --oneline ${p.base}..HEAD\` and \`git diff ${p.base}...HEAD\`.`,
+    p.summary ? `The last session's summary: ${p.summary}` : '',
+    p.notes ? `Its notes: ${p.notes}` : '',
+    `What is asked of you now:\n\n${p.asked}`,
   ].filter(Boolean).join('\n\n');
 }
 

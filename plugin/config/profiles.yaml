@@ -16,6 +16,15 @@ providers:
 limits:
   gate_rounds: 2
   review_rounds: 1
+  # How full a session's context may get, in tokens. A session that ended past
+  # context_budget is not resumed for the next round: a fresh one is started
+  # and told what was done. context_cap is where the provider compacts a
+  # session that is still running (Claude Code takes 100000 or more).
+  context_budget: 100000
+  context_cap: 160000
+  # The most one session may spend, in dollars, by tier. A session that
+  # reaches it is ended and the job stops as failed.
+  session_usd: { fast: 2, standard: 8, deep: 20 }
 
 sizes:
   trivial:

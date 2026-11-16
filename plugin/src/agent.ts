@@ -3,7 +3,7 @@
 // transcript and exit status out. Nothing else in Animus knows which CLI runs
 // a model, so another provider is another function of this shape.
 import { spawnSync } from 'node:child_process';
-import { existsSync, realpathSync } from 'node:fs';
+import { existsSync, readFileSync, realpathSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { modelFor, type Factory, type Tier } from './profiles.ts';
@@ -27,6 +27,10 @@ export type AgentRequest = {
   /** No file edits: the reviewer's sessions. */
   readOnly?: boolean;
   timeoutMs?: number;
+  /** Tokens of context at which the provider compacts the session while it runs. */
+  compactAt?: number;
+  /** Dollars this session may spend before the provider ends it. */
+  maxUsd?: number;
   /** Variables set for this session on top of the process's own: one person's credentials, when they are being checked. */
   env?: Record<string, string>;
 };
@@ -49,6 +53,8 @@ export type AgentResult = {
   ms: number;
   /** Where the provider keeps the session's transcript, when it says. */
   transcript?: string;
+  /** Tokens in the session's context when it ended, when the transcript says: what a resume would start from. */
+  context?: number;
 };
 
 export type Agent = (req: AgentRequest) => AgentResult;
@@ -77,6 +83,8 @@ export function claudeAgent(factory: Factory, command = process.env.ANIMUS_CLAUD
     if (req.resume) args.push('--resume', req.resume);
     if (req.system) args.push('--append-system-prompt', req.system);
     if (req.schema) args.push('--json-schema', JSON.stringify(req.schema));
+    if (req.compactAt) args.push('--autocompact', String(req.compactAt));
+    if (req.maxUsd) args.push('--max-budget-usd', String(req.maxUsd));
     const noGit = ['Bash(git push:*)', 'Bash(git checkout:*)', 'Bash(git switch:*)', 'Bash(git worktree:*)', 'Bash(gh:*)'];
     if (req.readOnly) args.push('--allowedTools', 'Bash', 'Read', 'Glob', 'Grep', '--disallowedTools', 'Edit', 'Write', 'NotebookEdit', 'Bash(git commit:*)', ...noGit);
     else args.push('--allowedTools', 'Bash', 'Read', 'Write', 'Edit', 'Glob', 'Grep', '--disallowedTools', ...noGit);
@@ -112,10 +120,35 @@ export function claudeAgent(factory: Factory, command = process.env.ANIMUS_CLAUD
     if (out.session_id) {
       result.session = out.session_id;
       const file = claudeTranscript(req.cwd, out.session_id);
-      if (file) result.transcript = file;
+      if (file) {
+        result.transcript = file;
+        const context = contextAtEnd(file);
+        if (context !== undefined) result.context = context;
+      }
     }
     return result;
   };
+}
+
+/**
+ * How full the session's context was at its last message: what that message
+ * was sent (new, cached and newly cached tokens) and what it answered. The
+ * session's total usage does not say this, since it counts every turn's input.
+ */
+export function contextAtEnd(transcript: string): number | undefined {
+  let lines: string[];
+  try { lines = readFileSync(transcript, 'utf8').split('\n'); } catch { return undefined; }
+  for (let i = lines.length - 1; i >= 0; i--) {
+    if (!lines[i]!.includes('"usage"')) continue;
+    try {
+      const entry = JSON.parse(lines[i]!) as { type?: string; isSidechain?: boolean; message?: { usage?: Record<string, unknown> } };
+      const u = entry.message?.usage;
+      if (entry.type !== 'assistant' || entry.isSidechain || !u) continue;
+      const n = (k: string) => (typeof u[k] === 'number' ? (u[k] as number) : 0);
+      return n('input_tokens') + n('cache_read_input_tokens') + n('cache_creation_input_tokens') + n('output_tokens');
+    } catch { /* a line cut short: the one before it */ }
+  }
+  return undefined;
 }
 
 /** Claude Code's transcript of a session started in cwd, if it is still on disk. */

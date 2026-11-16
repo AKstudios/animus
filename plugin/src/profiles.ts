@@ -24,7 +24,7 @@ type TypeProfile = { setup?: string; reviewer?: string; evidence?: string[]; pro
 export type Factory = {
   provider: string;
   providers: Record<string, Record<Tier, string>>;
-  limits: { gate_rounds: number; review_rounds: number };
+  limits: { gate_rounds: number; review_rounds: number; context_budget?: number; context_cap?: number; session_usd?: Partial<Record<Tier, number>> };
   sizes: Record<string, SizeProfile>;
   difficulties: Record<string, DifficultyProfile>;
   types: Record<string, TypeProfile>;
@@ -122,6 +122,7 @@ export function describePlan(factory: Factory, plan: Plan): string {
     `${plan.size}, ${plan.difficulty}, ${plan.type}`,
     `  setup      ${plan.setup}`,
     `  implement  ${run(plan.implement)}`,
+    ...(factory.limits.context_budget ? [`  sessions   a fresh session past ${Math.round(factory.limits.context_budget / 1000)}k tokens of context${factory.limits.context_cap ? `, compacted at ${Math.round(factory.limits.context_cap / 1000)}k` : ''}${factory.limits.session_usd?.[plan.implement.tier] ? `, at most $${factory.limits.session_usd[plan.implement.tier]} each` : ''}`] : []),
     `  gates      ${plan.gates}${plan.prove ? ', and the job\'s tests must fail on the base commit' : ''}, sent back at most ${factory.limits.gate_rounds} times`,
     `  review     ${plan.review ? `${plan.review.role}, ${run(plan.review)}, sent back at most ${factory.limits.review_rounds} time(s)` : 'skipped'}`,
     `  evidence   ${plan.evidence.join(', ')}`,

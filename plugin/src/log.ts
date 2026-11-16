@@ -17,6 +17,8 @@ export const runLog = () => join(animusHome(), 'runs.jsonl');
 export type AgentRun = {
   stage: string; role: string; tier: string; effort: string; model: string;
   session?: string; ok: boolean; status: string; cost_usd: number; turns: number; tokens: Tokens; ms: number; transcript?: string;
+  /** Tokens in the session's context when it ended. */
+  context?: number;
 };
 
 export type GateRun = { attempt: number; ok: boolean; ms: number; checks: { name: string; ok: boolean; skipped: boolean; ms: number }[] };
@@ -54,6 +56,8 @@ export type Run = {
   gates: GateRun[];
   /** Times the gates sent the work back. */
   fix_rounds: number;
+  /** Rounds that began a fresh implementer session because the last one ended over the context budget. */
+  handoffs?: number;
   review: { rounds: number; findings: number; blockers: number; acted_on: number; open: number } | null;
   outcome: Outcome;
   reason?: string;
@@ -78,6 +82,8 @@ export type JobState = {
   workspace: Workspace;
   plan: Plan;
   session?: string;
+  /** Tokens in that session's context when it last ended: over the budget, the next round starts a fresh one. */
+  context?: number;
   outcome?: Outcome;
   question?: string;
   /** The questions this job stopped to ask, each with the person's answer: the reviewer reads them beside the spec. */

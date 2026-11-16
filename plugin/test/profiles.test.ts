@@ -52,3 +52,21 @@ test('the implementer may raise a profile and never lower it', () => {
   assert.deepEqual(down.applied, {});
   assert.equal(down.plan.size, 'medium');
 });
+
+test('a session\'s context at its end is read from its last message, leaving out subagents and broken lines', async () => {
+  const { mkdtempSync, writeFileSync } = await import('node:fs');
+  const { tmpdir } = await import('node:os');
+  const { join } = await import('node:path');
+  const { contextAtEnd } = await import('../src/agent.ts');
+  const file = join(mkdtempSync(join(tmpdir(), 'animus-transcript-')), 's.jsonl');
+  const line = (usage: object, extra: object = {}) => JSON.stringify({ type: 'assistant', message: { usage }, ...extra });
+  writeFileSync(file, [
+    line({ input_tokens: 2, cache_read_input_tokens: 24_000, cache_creation_input_tokens: 4_000, output_tokens: 500 }),
+    JSON.stringify({ type: 'user', message: { content: 'x' } }),
+    line({ input_tokens: 2, cache_read_input_tokens: 49_000, cache_creation_input_tokens: 200, output_tokens: 1_900 }),
+    line({ input_tokens: 9, cache_read_input_tokens: 900_000, output_tokens: 1 }, { isSidechain: true }),
+    '{"type":"assistant","message":{"usage":{"input_tokens":5',
+  ].join('\n'));
+  assert.equal(contextAtEnd(file), 51_102);
+  assert.equal(contextAtEnd(join(file, 'none')), undefined);
+});

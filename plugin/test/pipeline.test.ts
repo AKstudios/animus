@@ -312,3 +312,38 @@ test('a spec with after: waits until the earlier spec\'s pull request is merged,
   await assert.rejects(runJob({ repo, specFile: writeSpec(`${SMALL}\nafter: ${first}`) }, deps(c.agent, { prState: () => 'CLOSED' })), /closed without merging/);
   await assert.rejects(runJob({ repo, specFile: writeSpec(`${SMALL}\nafter: docs/specs/none.md`) }, deps(c.agent)), /is not a spec file/);
 });
+
+test('a session that ended over the context budget is not resumed: the next round is a fresh session told what was done', async () => {
+  const repo = makeRepo();
+  // The first session fails the gate and ends long; the second fails it and ends short; the third passes.
+  const long: Step = (req) => ({ ...say('no')(req), context: 130_000 });
+  const short: Step = (req) => ({ ...say('still no')(req), context: 40_000, session: 'session-2' });
+  const { agent, calls } = fakeAgent([long, short, say('done'), () => clean()]);
+  const d = deps(agent);
+  const run = await runJob({ repo, specFile: writeSpec(SMALL) }, d);
+
+  assert.equal(run.outcome, 'pr');
+  assert.equal(run.handoffs, 1);
+  assert.deepEqual(calls.map((c) => c.resume), [undefined, undefined, 'session-2', undefined]);
+  // The fresh session gets the spec and the gates again, where to read the work so far, and the round's own ask.
+  assert.match(calls[1]!.prompt, /The feature file should say done\.[\s\S]*already under way[\s\S]*git diff [0-9a-f]{40}\.\.\.HEAD[\s\S]*The last session's summary: The feature says done\.[\s\S]*What is asked of you now:[\s\S]*the gates on your last commit and they failed/);
+  assert.doesNotMatch(calls[2]!.prompt, /already under way/);
+  assert.match(d.lines.join('\n'), /ended at 130k tokens of context, over the 100k budget: gate-fix-1 starts a fresh session/);
+  assert.deepEqual(run.agents.map((a) => a.context), [130_000, 40_000, undefined, undefined]);
+  // Every session is held to the cap and to its tier's dollars while it runs.
+  // Every session is held to the cap and to its tier's dollars while it runs: standard, then deep for the fix rounds, fast for the review.
+  assert.deepEqual(calls.map((c) => [c.compactAt, c.maxUsd]), [[160_000, 8], [160_000, 20], [160_000, 20], [160_000, 2]]);
+});
+
+test('a job picked up again starts a fresh session when the one it had ended over the budget', async () => {
+  const repo = makeRepo();
+  const first = fakeAgent([() => ({ output: { status: 'needs-input', summary: '', question: 'Done, or finished?' }, context: 150_000 })]);
+  const run = await runJob({ repo, specFile: writeSpec(SMALL) }, deps(first.agent));
+  assert.equal(loadState(run.job)!.context, 150_000);
+
+  const second = fakeAgent([say('done'), () => clean()]);
+  const again = await runJob({ repo, resume: { state: loadState(run.job)!, answer: 'Done.' } }, deps(second.agent));
+  assert.equal(again.outcome, 'pr');
+  assert.equal(second.calls[0]!.resume, undefined);
+  assert.match(second.calls[0]!.prompt, /The feature file should say done\.[\s\S]*already under way[\s\S]*Done, or finished\?[\s\S]*The person's answer: Done\./);
+});
