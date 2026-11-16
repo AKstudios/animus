@@ -1,6 +1,8 @@
 {
   "name": "animus",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "A software factory: shape a spec in conversation, then one implementing agent, scripted gates, one fresh reviewing agent, and a pull request with evidence for each acceptance criterion.",
-  "author": { "name": "Ajmal Ali" }
+  "author": {
+    "name": "Ajmal Ali"
+  }
 }

@@ -8,6 +8,8 @@ clients with how to update.
 
 ## Unreleased
 
+## 0.3.0 (2026-11-16)
+
 - **Breaking:** the client sends its version to Helix, and Helix refuses one it
   cannot work with (HTTP 426, with how to update). A client from before this
   release sends none and is refused: update the plugin.
