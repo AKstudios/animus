@@ -8,6 +8,8 @@ clients with how to update.
 
 ## Unreleased
 
+## 0.3.1 (2026-11-16)
+
 - Each Helix job can run in a Docker container of its own: on when
   `config.yaml` has `container: {memory, cpus}`. A job sees only its
   submitter's folder under `~/.helix/people/` (their clone, job state and
