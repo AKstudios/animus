@@ -24,6 +24,15 @@ function whoIs(config: Config, req: IncomingMessage): string | undefined {
   })?.[0];
 }
 
+/** Whether the request carries the display's password: enough to read what the display shows, and nothing else. */
+function isDisplay(config: Config, req: IncomingMessage): boolean {
+  const given = /^Bearer (.+)$/.exec(req.headers.authorization ?? '')?.[1];
+  if (!given || !config.display_sha256) return false;
+  const a = Buffer.from(hashToken(given));
+  const b = Buffer.from(String(config.display_sha256));
+  return a.length === b.length && timingSafeEqual(a, b);
+}
+
 async function body(req: IncomingMessage): Promise<Record<string, unknown>> {
   let text = '';
   for await (const chunk of req) {
@@ -53,6 +62,7 @@ export function serve(opts: { config: Config; store: Store; supervisor: Supervis
         return res.end(file.body);
       }
       const person = whoIs(config, req);
+      if (!person && req.method === 'GET' && url.pathname === '/display' && isDisplay(config, req)) return send(200, display(opts));
       if (!person) return send(401, { error: 'a valid token is needed: Authorization: Bearer <token>' });
       const [, root, id, action] = url.pathname.split('/');
       if (root === 'display' && !id && req.method === 'GET') return send(200, display(opts));

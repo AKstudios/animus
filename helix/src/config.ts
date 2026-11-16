@@ -27,6 +27,8 @@ export type Config = {
   /** Repositories by name, each a clone on this machine with a .animus/animus.yaml. */
   repos: Record<string, string>;
   people: Record<string, Person>;
+  /** The hash of the display's password: it opens what the display shows and nothing else. */
+  display_sha256?: string;
 };
 
 const DEFAULTS: Config = { host: '127.0.0.1', port: 7420, slots: 2, repos: {}, people: {} };
@@ -61,6 +63,23 @@ export function addPerson(name: string, envFile?: string): string {
   config.people[name] = { token_sha256: hashToken(token), ...(env ? { env_file: env } : {}) };
   saveConfig(config);
   return token;
+}
+
+/** A password of the display's own, short enough to type on a wall screen. No l, o, 0 or 1, which read alike. */
+const PLAIN = 'abcdefghijkmnpqrstuvwxyz23456789';
+export const SHORTEST_PASSWORD = 4;
+
+/**
+ * Sets the display's password, to the one given or to six characters made
+ * here, and returns it. It only reads: it cannot submit, cancel or answer.
+ */
+export function setDisplayPassword(given?: string): string {
+  if (given !== undefined && !new RegExp(`^[\\x21-\\x7e]{${SHORTEST_PASSWORD},}$`).test(given)) throw new AnimusError(`the display's password needs ${SHORTEST_PASSWORD} or more characters, with no spaces`);
+  const password = given ?? Array.from(randomBytes(6), (b) => PLAIN[b % PLAIN.length]).join('');
+  const config = loadConfig();
+  config.display_sha256 = hashToken(password);
+  saveConfig(config);
+  return password;
 }
 
 export function addRepo(name: string, dir: string): void {

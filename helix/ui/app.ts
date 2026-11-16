@@ -77,10 +77,10 @@ const signin = () => `<main class="signin">
   <form data-signin>
     <span class="corner-a" aria-hidden="true"></span><span class="corner-b" aria-hidden="true"></span>
     <h1>This display is not signed in</h1>
-    <p>Helix answers only to a token. Paste one for this display. It is kept in this browser and nowhere else.</p>
-    <label class="label" for="hx-token">HELIX TOKEN</label>
+    <p>Helix answers only to a token. Type the display's password, or paste a person's token. It is kept in this browser and nowhere else.</p>
+    <label class="label" for="hx-token">PASSWORD OR TOKEN</label>
     <input id="hx-token" name="token" type="password" autocomplete="off" required>
-    ${state.refused ? '<div class="refused" role="alert">Helix refused the last token (401). Check it and try again.</div>' : ''}
+    ${state.refused ? '<div class="refused" role="alert">Helix refused that (401). Check it and try again.</div>' : ''}
     <button type="submit">CONNECT</button>
   </form>
 </main>`;
