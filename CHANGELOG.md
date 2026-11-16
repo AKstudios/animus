@@ -8,6 +8,8 @@ clients with how to update.
 
 ## Unreleased
 
+## 0.3.2 (2026-11-16)
+
 - Inviting and joining: `helix invite <name> [--github <login>]` prints a
   one-time code that ends after 24 hours, and `animus join <url> <code>` on
   the person's laptop runs `animus doctor`, then `claude setup-token`, then
