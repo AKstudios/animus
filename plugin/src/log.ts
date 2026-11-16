@@ -8,6 +8,7 @@ import { join } from 'node:path';
 import type { Tokens } from './agent.ts';
 import type { Plan } from './profiles.ts';
 import type { Finding } from './review.ts';
+import type { Slicing } from './slices.ts';
 import type { Workspace } from './workspace.ts';
 
 export const animusHome = () => process.env.ANIMUS_HOME ?? join(homedir(), '.animus');
@@ -47,8 +48,8 @@ export type Run = {
   skills: string[];
   started: string;
   ended: string;
-  /** Wall time per stage, in ms. queue is 0 in local mode. */
-  ms: { queue: number; setup: number; implement: number; gates: number; review: number; evidence: number; pr: number; total: number };
+  /** Wall time per stage, in ms. queue is 0 in local mode; plan is the planner's sessions. */
+  ms: { queue: number; setup: number; plan: number; implement: number; gates: number; review: number; evidence: number; pr: number; total: number };
   agents: AgentRun[];
   cost_usd: number;
   turns: number;
@@ -58,6 +59,8 @@ export type Run = {
   fix_rounds: number;
   /** Rounds that began a fresh implementer session because the last one ended over the context budget. */
   handoffs?: number;
+  /** How the spec was cut: by the planner or by script, into how many slices, and how many passed their gates. */
+  slices?: { by: 'planner' | 'script'; planned: number; done: number; fallback?: string };
   review: { rounds: number; findings: number; blockers: number; acted_on: number; open: number } | null;
   outcome: Outcome;
   reason?: string;
@@ -84,6 +87,11 @@ export type JobState = {
   session?: string;
   /** Tokens in that session's context when it last ended: over the budget, the next round starts a fresh one. */
   context?: number;
+  /** How the spec is cut, decided once when the job starts, and who cut it. */
+  slicing?: Slicing;
+  sliced_by?: 'planner' | 'script';
+  /** The slices whose gates passed, as the summary each one's session gave. Its length is the slice the job is on. */
+  slices_done?: string[];
   outcome?: Outcome;
   question?: string;
   /** The questions this job stopped to ask, each with the person's answer: the reviewer reads them beside the spec. */

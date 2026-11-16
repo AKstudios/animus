@@ -23,15 +23,20 @@ export function toolPath(dirs: readonly string[], path = process.env.PATH ?? '')
   return [...found, path].filter(Boolean).join(':');
 }
 
+/** Why an acceptance command is skipped while a job is part-way through its slices. */
+export const LATER_SLICE = 'its criterion belongs to a later slice';
+
 const squash = (command: string) => command.trim().replace(/\s+/g, ' ');
 
 /**
  * A job's gates. A profile command with `paths` is skipped when the job
  * changed nothing under them. A trivial job (plan.gates affected) runs a
  * command's `affected` form where the profile has one. The same command
- * twice runs once, as the acceptance one.
+ * twice runs once, as the acceptance one. While a job is part-way through
+ * its slices, `only` holds the criteria finished so far, and the commands of
+ * the others are skipped: nothing has been built for them yet.
  */
-export function jobChecks(profile: Profile, plan: Pick<Plan, 'type' | 'gates'>, spec: Pick<Spec, 'criteria'>, changed: { base: string; files: readonly string[] }): Check[] {
+export function jobChecks(profile: Profile, plan: Pick<Plan, 'type' | 'gates'>, spec: Pick<Spec, 'criteria'>, changed: { base: string; files: readonly string[] }, only?: ReadonlySet<number>): Check[] {
   const checks: Check[] = checksFor(profile, plan.type).map((name) => {
     const c = profile.commands[name]!;
     const check: Check = c.cwd ? { name, command: c.run, cwd: c.cwd } : { name, command: c.run };
@@ -46,6 +51,7 @@ export function jobChecks(profile: Profile, plan: Pick<Plan, 'type' | 'gates'>, 
   spec.criteria.forEach((criterion, i) => {
     for (const command of criterion.commands) {
       const name = `acceptance-${++n}`;
+      if (only && !only.has(i + 1)) { checks.push({ name, command, criterion: i + 1, skip: LATER_SLICE }); continue; }
       const key = squash(command);
       for (const c of checks.slice(0, profileChecks)) {
         if (!c.skip && !c.cwd && squash(profile.commands[c.name]!.run) === key) c.skip = `${name} runs the same command`;

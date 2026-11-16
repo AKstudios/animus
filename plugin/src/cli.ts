@@ -16,7 +16,7 @@ import { describePlan, loadFactory, resolvePlan } from './profiles.ts';
 import { git, AnimusError, GitError } from './proc.ts';
 import * as helix from './remote.ts';
 import { describeSkills, grantsFor } from './skills.ts';
-import { describeSlicing, planSlices } from './slices.ts';
+import { criteriaSoFar, describeSlicing, planSlices } from './slices.ts';
 import { loadSpec } from './spec.ts';
 import { describeShots, takeShots, uiDown, uiTarget, uiUp } from './ui.ts';
 import { basename, join } from 'node:path';
@@ -192,8 +192,10 @@ async function main(argv: string[]): Promise<number> {
       const profile = loadProfile(state.repo);
       if (command === 'check') {
         const files = [...new Set([...touchedFiles(root, state.workspace.base, 'HEAD'), ...git(root, ['ls-files', '--others', '--modified', '--exclude-standard']).split('\n').filter(Boolean)])];
-        const results = runChecks(root, jobChecks(profile, state.plan, spec, { base: state.workspace.base, files }), state.job);
-        if (state.plan.prove) {
+        // Part-way through a job's slices, only the criteria of the slices so far are checked.
+        const only = criteriaSoFar(state.slicing, state.slices_done?.length ?? 0);
+        const results = runChecks(root, jobChecks(profile, state.plan, spec, { base: state.workspace.base, files }, only), state.job);
+        if (state.plan.prove && !only) {
           // The proof reads the test files from a commit, so it sees only what is committed.
           const head = git(root, ['rev-parse', 'HEAD']);
           results.push(failsOnBase({ repo: state.repo, profile, spec, base: state.workspace.base, head, files: touchedFiles(root, state.workspace.base, head), job: state.job, green: results.every((r) => r.ok) }));

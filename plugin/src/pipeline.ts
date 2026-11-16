@@ -11,7 +11,7 @@ import { userInfo } from 'node:os';
 import { basename, join, resolve } from 'node:path';
 import { resolveAfter, waitForMerged } from './after.ts';
 import type { Agent, AgentResult } from './agent.ts';
-import { describe, failsOnBase, jobChecks, runChecks, type CheckResult } from './gates.ts';
+import { describe, failsOnBase, jobChecks, LATER_SLICE, runChecks, type CheckResult } from './gates.ts';
 import { commitAll, mainCheckout, matchesAny, touchedFiles } from './git.ts';
 import { appendRun, jobDir, saveState, writeJson, type JobState, type Outcome, type Run } from './log.ts';
 import { evidenceBranch, prBody, prState, type Evidence, type PrLookup, type Publish } from './pr.ts';
@@ -20,6 +20,7 @@ import { describePlan, escalate, modelFor, PLUGIN_ROOT, raise, readPrompt, resol
 import { animusCommand, git, AnimusError, tryGit } from './proc.ts';
 import { asReport, asReview, blockers, criteriaList, listFindings, REPORT_SCHEMA, REVIEW_SCHEMA, type Finding, type Report, type Review } from './review.ts';
 import { roleSkills } from './skills.ts';
+import { criteriaSoFar, oneSlice, planSlices, type Slicing } from './slices.ts';
 import { loadSpec, type Spec } from './spec.ts';
 import { describeShots, designOf, takeShots, uiProblem, uiTarget, type UiJob } from './ui.ts';
 import { createWorkspace, ensureSetup, removeWorkspace, reopenWorkspace, type Workspace } from './workspace.ts';
@@ -118,7 +119,7 @@ export async function runJob(opts: RunOptions, deps: Deps): Promise<Run> {
     size: plan.size, difficulty: plan.difficulty, type: plan.type, labels_defaulted: spec.defaulted, escalations: [],
     provider: factory.provider, factory_version: factoryVersion(), skills: [],
     started: new Date(startedAt).toISOString(), ended: '',
-    ms: { queue: 0, setup: 0, implement: 0, gates: 0, review: 0, evidence: 0, pr: 0, total: 0 },
+    ms: { queue: 0, setup: 0, plan: 0, implement: 0, gates: 0, review: 0, evidence: 0, pr: 0, total: 0 },
     agents: [], cost_usd: 0, turns: 0, tokens: { input: 0, output: 0, cache_read: 0, cache_write: 0 },
     gates: [], fix_rounds: 0, review: null, outcome: 'failed', branch: '', base: '', protected_touched: [], dir,
   };
@@ -155,7 +156,7 @@ export async function runJob(opts: RunOptions, deps: Deps): Promise<Run> {
   run.branch = ws.branch;
   run.base = ws.base;
   const answers = [...(prior?.answers ?? []), ...(prior?.question && opts.resume?.answer ? [{ question: prior.question, answer: opts.resume.answer }] : [])];
-  const state: JobState = { job, repo, spec: specCopy, ...(source ? { source } : {}), workspace: ws, plan, ...(prior?.session ? { session: prior.session } : {}), ...(prior?.context !== undefined ? { context: prior.context } : {}), ...(answers.length ? { answers } : {}) };
+  const state: JobState = { job, repo, spec: specCopy, ...(source ? { source } : {}), workspace: ws, plan, ...(prior?.session ? { session: prior.session } : {}), ...(prior?.context !== undefined ? { context: prior.context } : {}), ...(answers.length ? { answers } : {}), ...(prior?.slicing ? { slicing: prior.slicing, sliced_by: prior.sliced_by ?? 'script', slices_done: prior.slices_done ?? [] } : {}) };
   saveState(state);
 
   let summary = '';
@@ -169,6 +170,9 @@ export async function runJob(opts: RunOptions, deps: Deps): Promise<Run> {
   let shots: { dir: string; files: string[]; urls?: Record<string, string>; branch?: string } | undefined;
   const found = new Map<string, Finding>();
   let actedOn = 0;
+  /** Gate fix rounds spent inside slices: each slice has its own allowance, and so has the finished branch. */
+  let sliceRounds = 0;
+  let planFallback: string | undefined;
 
   const record = (stage: string, role: string, tier: Tier, effort: string, r: AgentResult) => {
     run.agents.push({
@@ -198,19 +202,24 @@ export async function runJob(opts: RunOptions, deps: Deps): Promise<Run> {
   const caps = (tier: Tier) => ({ ...(factory.limits.context_cap ? { compactAt: factory.limits.context_cap } : {}), ...(factory.limits.session_usd?.[tier] ? { maxUsd: factory.limits.session_usd[tier]! } : {}) });
 
   /**
-   * One turn of the implementer: the first starts a session and later ones
-   * resume it, unless it ended over the context budget. Then a fresh session
-   * is started with the job's brief and what was done, so a long job is a
-   * chain of short sessions and not one that only grows.
+   * One turn of the implementer. A turn that opens the job or a slice starts
+   * a session with what it is asked. Any other resumes the session before it,
+   * unless that ended over the context budget or there is none (the slice
+   * that made it is closed). Then a fresh session is started with the brief
+   * and what was done, so a long job is a chain of short sessions and not
+   * one that only grows.
    */
-  const implementer = async (stage: string, asked: string, tier: Tier): Promise<Report> => {
+  const implementer = async (stage: string, asked: string, tier: Tier, opens = false): Promise<Report> => {
     const effort = plan.implement.effort;
     let prompt = asked;
-    if (state.session && budget && (state.context ?? 0) > budget) {
-      log(`the implementer's session ended at ${k(state.context!)} tokens of context, over the ${k(budget)} budget: ${stage} starts a fresh session`);
-      prompt = handoffPrompt({ brief, base: ws.base, summary, notes, asked });
-      delete state.session;
-      run.handoffs = (run.handoffs ?? 0) + 1;
+    if (!opens) {
+      const over = Boolean(state.session && budget && (state.context ?? 0) > budget);
+      if (over) {
+        log(`the implementer's session ended at ${k(state.context!)} tokens of context, over the ${k(budget!)} budget: ${stage} starts a fresh session`);
+        delete state.session;
+        run.handoffs = (run.handoffs ?? 0) + 1;
+      }
+      if (!state.session) prompt = handoffPrompt({ brief, base: ws.base, summary, notes, asked, over });
     }
     log(`${stage}: ${modelFor(factory, tier)}, ${effort} effort`);
     const r = await timed('implement', () => deps.agent({ role: 'implementer', tier, effort, prompt, cwd: wt, ...instructions('implementer'), schema: REPORT_SCHEMA, ...caps(tier), ...(state.session ? { resume: state.session } : {}) }));
@@ -238,18 +247,25 @@ export async function runJob(opts: RunOptions, deps: Deps): Promise<Run> {
     return report;
   };
 
-  /** Runs the gates until they pass, sending failures back to the implementer while rounds are left. */
-  const gate = async (): Promise<void> => {
+  /**
+   * Runs the gates until they pass, sending failures back to the implementer
+   * while rounds are left. For a slice, only the criteria of the slices so
+   * far are checked, and the rounds are that slice's own.
+   */
+  const gate = async (slice?: { name: string; only: ReadonlySet<number> }): Promise<void> => {
+    const of = slice ? ` for ${slice.name}` : '';
+    let rounds = 0;
     for (;;) {
       const head = git(wt, ['rev-parse', 'HEAD']);
       if (head === ws.base) throw new Stop('failed', 'the implementer changed nothing');
       const attempt = run.gates.length + 1;
-      const checks = jobChecks(repoProfile, plan, spec, { base: ws.base, files: touchedFiles(wt, ws.base, head) });
-      log(`gates, run ${attempt}: ${checks.filter((c) => !c.skip).map((c) => c.name).join(', ') || 'nothing to run'}`);
+      const checks = jobChecks(repoProfile, plan, spec, { base: ws.base, files: touchedFiles(wt, ws.base, head) }, slice?.only);
+      log(`gates${of}, run ${attempt}: ${checks.filter((c) => !c.skip).map((c) => c.name).join(', ') || 'nothing to run'}`);
       const t = Date.now();
       lastGates = await timed('gates', () => {
         const results = runChecks(wt, checks, job);
-        if (!plan.prove) return results;
+        // The proof that the tests fail without the change is for the whole job: it runs on the finished branch.
+        if (!plan.prove || slice) return results;
         return [...results, failsOnBase({ repo, profile: repoProfile, spec, base: ws.base, head, files: touchedFiles(wt, ws.base, head), job, green: results.every((r) => r.ok) })];
       });
       restore(wt);
@@ -259,10 +275,12 @@ export async function runJob(opts: RunOptions, deps: Deps): Promise<Run> {
       writeFileSync(join(dir, 'gates', `run-${attempt}.txt`), `${describe(lastGates)}\n\n${lastGates.filter((r) => !r.skipped).map((r) => `=== ${r.name}: ${r.command}\n${r.output}`).join('\n')}`);
       for (const line of describe(lastGates).split('\n').slice(0, lastGates.length)) log(`  ${line}`);
       if (ok) return;
-      if (run.fix_rounds >= factory.limits.gate_rounds) throw new Stop('failed', `the gates still fail after ${run.fix_rounds} fix round(s):\n${describe(lastGates.filter((r) => !r.ok))}`);
+      const used = slice ? rounds : run.fix_rounds - sliceRounds;
+      if (used >= factory.limits.gate_rounds) throw new Stop('failed', `the gates${of} still fail after ${used} fix round(s):\n${describe(lastGates.filter((r) => !r.ok))}`);
       run.fix_rounds++;
+      if (slice) { rounds++; sliceRounds++; }
       // A failed gate round raises the model tier by one for the next.
-      await implementer(`gate-fix-${run.fix_rounds}`, gateFixPrompt(describe(lastGates), factory.limits.gate_rounds - run.fix_rounds), raise(plan.implement.tier));
+      await implementer(`gate-fix-${run.fix_rounds}`, gateFixPrompt(describe(lastGates), factory.limits.gate_rounds - used - 1), raise(plan.implement.tier));
     }
   };
 
@@ -280,8 +298,69 @@ export async function runJob(opts: RunOptions, deps: Deps): Promise<Run> {
 
     // ------------------------------------------------------------ implement
     const profile = repoProfile;
-    brief = implementPrompt({ job, spec, ws, repo, notes: profile.notes, gates: jobChecks(profile, plan, spec, { base: ws.base, files: [] }).map((c) => c.command), ui: ui ? uiBrief(wt, profile, ui) : undefined, prove: plan.prove ? profile.tests : undefined });
-    await implementer(prior ? 'resume' : 'implement', prior ? resumePrompt(prior, opts.resume?.answer) : brief, plan.implement.tier);
+    const about = { job, spec, ws, repo, notes: profile.notes, ui: ui ? uiBrief(wt, profile, ui) : undefined };
+    const whole = implementPrompt({ ...about, gates: jobChecks(profile, plan, spec, { base: ws.base, files: [] }).map((c) => c.command), prove: plan.prove ? profile.tests : undefined });
+
+    // ----------------------------------------------------------------- plan
+    // How the spec is cut is decided once. A job picked up again keeps its cut.
+    if (!state.slicing) {
+      state.slicing = prior ? oneSlice(spec) : await timed('plan', () => {
+        try {
+          const planned = planSlices({ factory, agent: deps.agent, spec, cwd: wt, log, record: (stage, r) => record(stage, 'planner', factory.planner!.tier, factory.planner!.effort, r) });
+          state.sliced_by = planned.by;
+          if (planned.by === 'planner') for (const name of roleSkills(factory, 'planner', plan.type, wt).names) if (!run.skills.includes(name)) run.skills.push(name);
+          return planned.slicing;
+        } catch (err) {
+          if (!(err instanceof AnimusError)) throw err;
+          // The work a planner could not cut is done the way it was before there was a planner.
+          planFallback = err.message;
+          log(`no plan was taken, so the job runs as one slice: ${err.message.split('\n')[0]}`);
+          return oneSlice(spec);
+        } finally {
+          restore(wt);
+        }
+      });
+      state.sliced_by ??= 'script';
+      state.slices_done = [];
+      saveState(state);
+    }
+    const { slices } = state.slicing;
+    const done = (state.slices_done ??= []);
+    const resumed = done.length;
+
+    // ------------------------------------------------------------ implement
+    if (slices.length === 1) {
+      brief = whole;
+      await implementer(prior ? 'resume' : 'implement', prior ? resumePrompt(prior, opts.resume?.answer) : brief, plan.implement.tier, !prior);
+    } else {
+      if (!prior) log(`${slices.length} slices: ${slices.map((s) => s.title).join('; ')}`);
+      for (let i = resumed; i < slices.length; i++) {
+        const name = `slice ${i + 1} of ${slices.length}`;
+        const only = criteriaSoFar(state.slicing, i)!;
+        log(`${name}: ${slices[i]!.title}`);
+        brief = slicePrompt({ ...about, slicing: state.slicing, index: i, done, gates: jobChecks(profile, plan, spec, { base: ws.base, files: [] }, only).filter((c) => c.skip !== LATER_SLICE).map((c) => c.command) });
+        if (prior && i === resumed && state.session) {
+          // The job stopped inside this slice: its session carries on.
+          await implementer(`slice-${i + 1}-resume`, resumePrompt(prior, opts.resume?.answer), plan.implement.tier);
+        } else {
+          delete state.session;
+          delete state.context;
+          summary = '';
+          notes = undefined;
+          await implementer(`slice-${i + 1}`, brief, plan.implement.tier, true);
+        }
+        // The last slice is gated with the finished branch, below, and its session takes what comes back.
+        if (i < slices.length - 1) {
+          await gate({ name, only });
+          delete state.session;
+          delete state.context;
+        }
+        done.push(summary || slices[i]!.title);
+        saveState(state);
+      }
+      brief = whole;
+      if (prior && resumed >= slices.length) await implementer('resume', resumePrompt(prior, opts.resume?.answer), plan.implement.tier);
+    }
 
     // ---------------------------------------------------------------- gates
     await gate();
@@ -346,6 +425,9 @@ export async function runJob(opts: RunOptions, deps: Deps): Promise<Run> {
   const all = [...found.values()];
   if (reviewRounds) run.review = { rounds: reviewRounds, findings: all.length, blockers: all.filter((f) => f.severity === 'blocker').length, acted_on: actedOn, open: outcome === 'failed' ? open.length : 0 };
   const failed = outcome === 'failed';
+  const cut = state.slicing?.slices ?? [];
+  if (cut.length) run.slices = { by: state.sliced_by ?? 'script', planned: cut.length, done: cut.length > 1 ? state.slices_done?.length ?? 0 : failed || outcome === 'needs-input' ? 0 : 1, ...(planFallback ? { fallback: planFallback } : {}) };
+  const sliced = cut.length > 1 ? cut.map((s, i) => ({ title: s.title, ...(state.slices_done?.[i] ? { summary: state.slices_done[i]! } : {}) })) : undefined;
   if (outcome !== 'needs-input' && head !== ws.base) {
     const models = [...new Set(run.agents.map((a) => `${a.role} ${a.model} (${a.effort})`))].join(', ');
     if (shots && !opts.dryRun && deps.evidence) {
@@ -359,7 +441,7 @@ export async function runJob(opts: RunOptions, deps: Deps): Promise<Run> {
       }
     }
     const body = prBody({
-      job, spec, plan, summary, gates: lastGates, gateAttempts: run.gates.length, fixRounds: run.fix_rounds, reviewRounds, open: failed ? open : [],
+      job, spec, plan, summary, ...(sliced ? { slices: sliced } : {}), gates: lastGates, gateAttempts: run.gates.length, fixRounds: run.fix_rounds, reviewRounds, open: failed ? open : [],
       protectedTouched: run.protected_touched, escalations: run.escalations, models, cost_usd: run.cost_usd,
       ...(notes ? { notes } : {}), ...(review ? { review } : {}), ...(shots ? { shots } : {}), ...(failed && reason ? { failure: reason } : {}),
     });
@@ -416,11 +498,33 @@ function implementPrompt(p: { job: string; spec: Spec; ws: Workspace; repo: stri
   ].filter(Boolean).join('\n\n');
 }
 
+/** What a slice's session is told: the job, its slice and the criteria it finishes, what is done and what is left to others, the planner's brief, then the spec. */
+function slicePrompt(p: { job: string; spec: Spec; ws: Workspace; repo: string; notes?: string | undefined; gates: string[]; ui?: string | undefined; slicing: Slicing; index: number; done: readonly string[] }): string {
+  const { slices, brief } = p.slicing;
+  const mine = slices[p.index]!;
+  const later = slices.slice(p.index + 1);
+  const criterion = (n: number) => { const c = p.spec.criteria[n - 1]!; return `${n}. ${c.text}${c.commands.map((cmd) => `\n   $ ${cmd}`).join('')}`; };
+  return [
+    `Job ${p.job}. You are in a worktree of ${basename(p.repo)} on the branch ${p.ws.branch}, started from ${p.ws.baseBranch}. Its dependencies are installed.`,
+    `The job's profile is ${p.spec.size}, ${p.spec.difficulty}, ${p.spec.type}.`,
+    `This job is done in ${slices.length} slices, in order, on this one branch, each by a fresh session. You do slice ${p.index + 1}, and only that one.`,
+    `Your slice: ${mine.title}\nWhen it is done: ${mine.delivers}${mine.prefactor ? '\nIt changes no behaviour: it makes the code ready for the slices after it, and the existing tests must still pass.' : ''}`,
+    mine.criteria.length ? `The acceptance criteria your slice finishes, with their numbers in the spec:\n${mine.criteria.map(criterion).join('\n')}` : '',
+    p.index ? `Done by the sessions before you. Read their work before you change anything (\`git log --oneline ${p.ws.base}..HEAD\`, \`git diff ${p.ws.base}...HEAD\`) and build on it:\n${slices.slice(0, p.index).map((s, i) => `${i + 1}. ${s.title}${p.done[i] ? `: ${p.done[i]}` : ''}`).join('\n')}` : '',
+    later.length ? `Left to the sessions after you. Do not build these or write their tests:\n${later.map((s, i) => `${p.index + 2 + i}. ${s.title}${s.criteria.length ? ` (criteria ${s.criteria.join(', ')})` : ''}`).join('\n')}` : '',
+    brief ? `What the planner worked out for every slice, from reading the spec and the code:\n${brief}` : '',
+    p.notes ? `This project's notes for unattended work:\n${p.notes.trim()}` : '',
+    p.ui ?? '',
+    `When you finish, Animus runs these gates, and sends failures back to you. They cover the slices so far and not the later ones. Run them yourself first with \`${animusCommand()} check\` (foreground, Bash timeout 600000):\n${p.gates.map((g) => `  $ ${g}`).join('\n') || '  (the project names no check commands)'}`,
+    `The whole spec follows, for its decisions and what is out of scope. The criteria not listed above belong to other slices.\n\n${p.spec.text.trim()}`,
+  ].filter(Boolean).join('\n\n');
+}
+
 /** For a session that starts in the middle of a job: the brief a first session gets, what the sessions before it left, then what is asked now. */
-function handoffPrompt(p: { brief: string; base: string; summary: string; notes?: string | undefined; asked: string }): string {
+function handoffPrompt(p: { brief: string; base: string; summary: string; notes?: string | undefined; asked: string; over?: boolean }): string {
   return [
     p.brief,
-    `This job is already under way. Earlier sessions did the work that is on this branch, and the last one was ended because its context had grown long. You are a fresh session picking the job up, so read what is there before you change anything: \`git log --oneline ${p.base}..HEAD\` and \`git diff ${p.base}...HEAD\`.`,
+    `This job is already under way. Earlier sessions did the work that is on this branch${p.over ? ', and the last one was ended because its context had grown long' : ''}. You are a fresh session picking the job up, so read what is there before you change anything: \`git log --oneline ${p.base}..HEAD\` and \`git diff ${p.base}...HEAD\`.`,
     p.summary ? `The last session's summary: ${p.summary}` : '',
     p.notes ? `Its notes: ${p.notes}` : '',
     `What is asked of you now:\n\n${p.asked}`,

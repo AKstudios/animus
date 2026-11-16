@@ -82,13 +82,14 @@ Each list item under "Acceptance criteria" is one criterion. A `$ command` line 
 ## What a job does
 
 1. **Set up.** A worktree at `../.worktrees/<repo>/<job>` on branch `animus/<job>`, started from `origin/<base>`. The profile's installs are cloned from a cache, then its `setup` runs.
-2. **Implement.** One session plans, writes the code and its tests, and commits at each step.
-3. **Gates.** The profile's commands for the type, then every criterion's command. Failures go back to the same session, one model tier up, at most twice.
+2. **Plan.** A medium spec is cut into slices first: a read-only session proposes the cut and a script takes or refuses it (`animus plan --slices` shows the same thing). A small or trivial spec is one slice, with no session. If the cut is refused twice the job runs as one slice.
+3. **Implement.** One session per slice, in order, on the job's branch. Each is fresh: it gets its slice, the criteria that slice finishes, a line on the slices before and after it, the planner's brief and the spec. It writes the code and its tests and commits at each step. Before the next slice starts, the gates run with the acceptance commands of the slices so far, and failures go back to that slice's session, at most twice. A job of one slice is one session, as before.
+4. **Gates.** On the finished branch: the profile's commands for the type, then every criterion's command. Failures go back to the same session, one model tier up, at most twice.
 
    Sessions are kept short. After each one, Animus reads from its transcript how full its context was. A session that ended over `limits.context_budget` in `profiles.yaml` (100k tokens) is not resumed for the next round: a fresh one starts with the job's brief, where to read the work so far, and the round's own ask. While a session runs, its context is compacted at `context_cap` (160k), and it may spend at most `session_usd` for its tier.
-4. **Review.** A fresh read-only session gets the spec and the diff, and answers with a verdict per criterion and graded findings. Blockers go back once, the gates run again, and a second review settles it. A UI job's reviewer also gets screenshots a script took of the running app.
-5. **Evidence.** The last gate run's output is each criterion's proof. A UI job, and any job that changed files under a UI target's `paths`, also gets screenshots of the running app.
-6. **PR.** The branch is pushed and the PR opened, its body built by script from what the job recorded, so every PR has the same sections: Review here, Acceptance criteria, the evidence, Screenshots when there are any, Follow-ups, Run. Screenshots go on a branch of their own (`animus-evidence/<job>`) and show as images in the body. A job that fails after its fix rounds opens a draft with the failure report.
+5. **Review.** A fresh read-only session gets the spec and the diff, and answers with a verdict per criterion and graded findings. Blockers go back once, the gates run again, and a second review settles it. A UI job's reviewer also gets screenshots a script took of the running app.
+6. **Evidence.** The last gate run's output is each criterion's proof. A UI job, and any job that changed files under a UI target's `paths`, also gets screenshots of the running app.
+7. **PR.** The branch is pushed and the PR opened, its body built by script from what the job recorded, so every PR has the same sections: the slices when there was more than one, Review here, Acceptance criteria, the evidence, Screenshots when there are any, Follow-ups, Run. Screenshots go on a branch of their own (`animus-evidence/<job>`) and show as images in the body. A job that fails after its fix rounds opens a draft with the failure report.
 
 A job that cannot proceed stops as `needs-input` with one question. `animus resume <job> --answer "..."` continues it.
 

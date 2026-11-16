@@ -53,7 +53,8 @@ Scripts do everything that needs no judgment, one agent implements, a fresh agen
 | Shape the spec | You, with an agent | The agent interviews you and writes `spec.md` with acceptance criteria. For Slack and issue triggers, the message or issue is the spec. |
 | Queue the job | Script | Office mode only. Records the job, checks the allow list, waits for a free slot. |
 | Set up workspace | Script | Fresh container, clone, database, storage, migrations, seed. |
-| Implement | Agent | One session plans, writes the code and checks its own work. It splits large specs itself. |
+| Plan | Agent proposes, script decides | A medium spec is cut into slices: a read-only session proposes the cut, and a script takes it only if every criterion is held by exactly one slice. |
+| Implement | Agent | One fresh session per slice writes the code and checks its own work. The gates for the slices so far run before the next slice starts. |
 | Run the gates | Script | Lint, type-check, tests, build. Failures go back to the same agent. |
 | Review | Fresh agent | Sees only the spec and the diff, and checks the change and its tests against the criteria. |
 | Open the PR | Script | Pushes the branch and opens the PR with evidence for each criterion, then deletes the container. |

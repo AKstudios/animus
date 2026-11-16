@@ -26,12 +26,22 @@ Take the conversation and your understanding of the codebase and write the spec.
 
 ## Large work
 
-One job is one session, and no agent breaks a spec down while it runs. So work that is multi-module or changes a schema is split here, with the person, into several medium specs, each run as its own job with its own pull request.
+The factory cuts a medium spec into slices itself and does each in a fresh session, toward one pull request. It does not yet do that for a large one. So work that is multi-module or changes a schema is split here, with the person, into several medium specs, each run as its own job with its own pull request.
 
 - Cut by behaviour, not by layer. Each spec goes through every layer it needs (schema, logic, UI) for one piece of what the person asked for, leaves the app working, and can merge by itself. A spec that only "adds the table" proves nothing until a later one lands.
 - Each spec is complete: its own labels (none `large`), its own acceptance criteria and check commands. It must make sense to an agent that has read nothing else.
 - Name them in order, `docs/specs/<slug>-1-<part>.md`, `-2-`, and so on. A job starts from the base branch as the remote has it, so a spec that needs an earlier one names it in its header: `after: docs/specs/<slug>-1-<part>.md`. Its job then waits until the earlier spec's pull request is merged and starts from the base that holds it. Prefer specs that do not depend on each other: those can run at once.
 - Run `animus plan` on each, then start every spec with `animus run <file>` in the background, the waiting ones too. Tell the person the list: one line per spec with its title, labels and what it waits for. A waiting job starts by itself once they merge the earlier pull request, and stops if they close it unmerged. The session has to stay open for it.
+
+## Acceptance criteria
+
+Write each criterion as something a person using the product can do or see, and that the product could not do before. The factory cuts a medium spec into slices along its criteria and grades each slice by the criteria it holds, so the criteria decide the shape of the work:
+
+- A criterion goes through every layer it needs. "A note typed on a planned meal is still there after a reload" is one criterion; "notes can be stored", "notes are loaded at start" and "the meal card has a note field" are the same behaviour cut by layer, and each of them alone shows nobody anything.
+- A function, a table, a type or a module that has to exist is a decision, and goes under Decisions. It is a criterion only when the thing the person asked for is itself an interface (a library, a CLI, an API), and then the criterion is a call and what it returns.
+- Put the thinnest path that works first: the one behaviour the rest build on. Later criteria each add one behaviour to it (an edge, a second place it shows, what happens on delete).
+- The check command proves the behaviour at the highest seam the repo's tests reach. A unit test of a helper is fine as proof only when that is where the behaviour lives.
+- Test each criterion: if only this one were built, could the person see something new? If not, fold it into the criterion that uses it.
 
 Every acceptance criterion is one list item. A line under it starting with `$ ` is the command that proves it, run from the repo root; the factory runs it as a gate and puts its output in the pull request as that criterion's evidence. A test file that does not exist yet is fine: the implementer writes it. A criterion with no command is judged by the reviewer alone, and the pull request says so.
 

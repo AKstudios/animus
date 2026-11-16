@@ -139,7 +139,7 @@ function planPrompt(spec: Spec, maxSlices: number): string {
  * Otherwise the planner proposes, the check decides, and a refused plan goes
  * back to the same session once with the reasons.
  */
-export function planSlices(p: { factory: Factory; agent: Agent; spec: Spec; cwd: string; log?: (line: string) => void }): Planned {
+export function planSlices(p: { factory: Factory; agent: Agent; spec: Spec; cwd: string; log?: (line: string) => void; record?: (stage: string, result: AgentResult) => void }): Planned {
   const { factory, spec } = p;
   const planner = factory.planner;
   if (!planner || !isPlanned(factory, spec.size)) return { slicing: oneSlice(spec), by: 'script', sessions: [] };
@@ -158,6 +158,7 @@ export function planSlices(p: { factory: Factory; agent: Agent; spec: Spec; cwd:
       ...(factory.limits.context_cap ? { compactAt: factory.limits.context_cap } : {}), ...(factory.limits.session_usd?.[planner.tier] ? { maxUsd: factory.limits.session_usd[planner.tier]! } : {}),
     });
     sessions.push({ stage: `plan-${attempt}`, result: r });
+    p.record?.(`plan-${attempt}`, r);
     if (!r.ok) throw new AnimusError(`the planner's session ended with ${r.status}${r.text ? `: ${r.text.slice(0, 300)}` : ''}`);
     const slicing = asSlicing(r.output);
     problems = slicing ? checkSlicing(spec, slicing, planner.max_slices) : ['the answer was not a plan: it needs `brief` and `slices`, each slice with title, delivers, criteria and after'];
@@ -167,6 +168,16 @@ export function planSlices(p: { factory: Factory; agent: Agent; spec: Spec; cwd:
     prompt = `A script checked your plan and refused it. Answer again with the whole plan, changed so that none of these holds:\n\n${problems.map((x) => `- ${x}`).join('\n')}`;
   }
   throw new AnimusError(`the planner's plan was refused twice:\n${problems.map((x) => `  ${x}`).join('\n')}`);
+}
+
+/**
+ * The criteria a job part-way through its slices is held to: those of the
+ * slices done and of the one being worked on. Undefined once every slice is
+ * done, or for a job of one slice: then the whole spec holds.
+ */
+export function criteriaSoFar(slicing: Slicing | undefined, done: number): Set<number> | undefined {
+  if (!slicing || slicing.slices.length < 2 || done >= slicing.slices.length) return undefined;
+  return new Set(slicing.slices.slice(0, done + 1).flatMap((s) => s.criteria));
 }
 
 export function describeSlicing(spec: Pick<Spec, 'criteria'>, planned: Pick<Planned, 'slicing' | 'by'>): string {

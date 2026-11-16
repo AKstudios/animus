@@ -30,6 +30,8 @@ export type PrInput = {
   /** Screenshot files and the folder they are in; urls once they are pushed, by file. */
   shots?: { dir: string; files: readonly string[]; urls?: Record<string, string>; branch?: string };
   escalations: readonly { size?: string; difficulty?: string; why: string }[];
+  /** A job done in more than one slice: each slice's title, and its session's summary once its gates passed. */
+  slices?: readonly { title: string; summary?: string }[];
   /** Why the job failed; makes this a failure report. */
   failure?: string;
   models: string;
@@ -49,7 +51,11 @@ function tail(output: string): string {
 export function prBody(p: PrInput): string {
   const out: string[] = [];
   if (p.failure) out.push(`**This job failed and needs you.** ${p.failure.split('\n')[0]}`, '');
-  if (p.summary) out.push(p.summary, '');
+  if (p.slices?.length) {
+    out.push('Done in this order, each slice by a fresh session and gated before the next began:', '');
+    p.slices.forEach((x, i) => out.push(`${i + 1}. **${cell(x.title)}**: ${x.summary ? cell(x.summary) : '*not finished*'}`));
+    out.push('');
+  } else if (p.summary) out.push(p.summary, '');
 
   const here: string[] = [];
   if (p.failure && p.failure.includes('\n')) here.push(`- The failure in full:\n\n\`\`\`\n${tail(p.failure)}\n\`\`\``);
