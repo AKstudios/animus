@@ -44,7 +44,8 @@ id "$NEW_USER" >/dev/null 2>&1 || adduser --disabled-password --gecos '' "$NEW_U
 usermod -aG sudo "$NEW_USER"
 NEW_HOME="$(getent passwd "$NEW_USER" | cut -d: -f6)"
 install -d -m 700 -o "$NEW_USER" -g "$NEW_USER" "$NEW_HOME/.ssh"
-install -m 600 -o "$NEW_USER" -g "$NEW_USER" "$KEYS" "$NEW_HOME/.ssh/authorized_keys"
+# Run again from the new account itself, its keys are already its own.
+[[ $KEYS -ef "$NEW_HOME/.ssh/authorized_keys" ]] || install -m 600 -o "$NEW_USER" -g "$NEW_USER" "$KEYS" "$NEW_HOME/.ssh/authorized_keys"
 if [[ "$(passwd -S "$NEW_USER" | awk '{print $2}')" != P ]]; then
   echo "Choose $NEW_USER's password. sudo will ask for it; SSH never takes it."
   passwd "$NEW_USER"
