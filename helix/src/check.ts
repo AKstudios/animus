@@ -63,7 +63,7 @@ export function claudeToken(env: Record<string, string>, agent: Agent): Finding 
     const r = agent({ role: 'check', tier: 'fast', effort: 'low', prompt: 'Reply with the single word ok.', cwd: dir, readOnly: true, timeoutMs: 120_000, env: { ...env, CLAUDE_CONFIG_DIR: join(dir, 'config') } });
     return r.ok
       ? { what, ok: true, detail: `${env.CLAUDE_CODE_OAUTH_TOKEN ? 'the subscription token' : 'the API key'} answered (${r.model}, $${r.cost_usd.toFixed(4)})` }
-      : { what, ok: false, detail: `no answer: ${r.status}${r.text ? `: ${r.text.slice(0, 200)}` : ''}` };
+      : { what, ok: false, detail: `no answer: ${r.text ? r.text.slice(0, 200) : r.status}` };
   } catch (err) {
     return { what, ok: false, detail: (err as Error).message };
   } finally {
