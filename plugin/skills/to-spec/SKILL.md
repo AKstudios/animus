@@ -1,6 +1,6 @@
 ---
 name: to-spec
-description: Turn the design agreed in the conversation into an Animus spec file, with the size, difficulty and type labels in its header and a check command under each acceptance criterion, or into several spec files when the person wants parts of the work to merge separately. No interview, just synthesis. Use after grilling, once the person has confirmed the design.
+description: Turn the design agreed in the conversation into an Animus spec file, with the size, difficulty and type labels in its header and a check command under each acceptance criterion, or into several spec files when the person wants parts of the work to merge separately. No interview, just synthesis. Use after grill-with-docs, once the person has confirmed the design.
 ---
 <!-- From mattpocock/skills, skills/engineering/to-spec at 49dd158 (MIT, see ../NOTICE.md), adapted for Animus. -->
 

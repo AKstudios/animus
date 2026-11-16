@@ -1,9 +1,10 @@
 # Third-party notices
 
-The `grilling` and `to-spec` skills are adapted from skills in
+The `to-spec` skill is adapted from a skill in
 [mattpocock/skills](https://github.com/mattpocock/skills) (commit 49dd158),
-and `grill-with-docs` and `domain-modeling` from the same repository
-(commit 5863806), under the MIT License:
+`grill-with-docs` from its `grilling` (49dd158) and `grill-with-docs`
+(5863806) skills, and `domain-modeling` from the same repository (5863806),
+under the MIT License:
 
 ```
 MIT License

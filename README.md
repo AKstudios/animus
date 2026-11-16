@@ -14,7 +14,7 @@ plugin/bin/animus run path/to/spec.md      # from inside the target repo
 
 `run` prints progress on stderr and a JSON result on stdout. It needs `claude`, `git` and `gh` on PATH, Node 24, and a `.animus/animus.yaml` in the target repo.
 
-From a Claude Code session with the plugin installed, you talk and the factory does the rest. `/animus:grill-with-docs` (or `/animus:grilling`) interviews you, `/animus:to-spec` writes the spec, checks it and starts the job in the background. The session has to stay open until the job ends: compacting is fine, closing or clearing it stops the job. All of a job's state is in files, so one that was cut off is picked up with `animus resume <job>`. A large design is still one spec and one PR: the factory cuts it into slices and does each in a fresh session.
+From a Claude Code session with the plugin installed, you talk and the factory does the rest. `/animus:grill-with-docs` interviews you and writes the glossary and ADRs as it goes, `/animus:to-spec` writes the spec, checks it and starts the job in the background. The session has to stay open until the job ends: compacting is fine, closing or clearing it stops the job. All of a job's state is in files, so one that was cut off is picked up with `animus resume <job>`. A large design is still one spec and one PR: the factory cuts it into slices and does each in a fresh session.
 
 | Command | What it does |
 | --- | --- |
@@ -197,7 +197,7 @@ Keys only orbit's epics used (`commits`, `max_parallel`, `review`, `outside_touc
 | `src/workspace.ts` | `ensureSetup`, `branches.ts` | One worktree per job instead of one per stage |
 | `src/review.ts`, `prompts/` | `REVIEW_SCHEMA`, `agents/*.md` | A verdict per criterion added; agents are prompt files, so no stage depends on the plugin being installed |
 | `src/pr.ts` | `pr.ts` | Body built from the run, not from Beads |
-| `skills/grilling`, `skills/to-spec` | the same skills | They end in a spec file with labels, not an epic |
+| `skills/grill-with-docs`, `skills/to-spec` | the same skills | They end in a spec file with labels, not an epic |
 | `src/skills.ts`, `vendor/` | the old Orbit's `lib/skills.ts` and `skills/vendor/` | Same idea: pinned copies, granted per role, put in the role's prompt |
 
 Left behind: Beads, epics, tickets and waves, the Workflow script, the test-writer stage, the stop and guard hooks, land, the view, retro and the eval.
