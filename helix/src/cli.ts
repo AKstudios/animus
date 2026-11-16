@@ -5,7 +5,7 @@ import { claudeAgent } from '../../plugin/src/agent.ts';
 import { loadFactory } from '../../plugin/src/profiles.ts';
 import { AnimusError } from '../../plugin/src/proc.ts';
 import { checkPerson, describeFindings, githubToken } from './check.ts';
-import { addPerson, addRepo, configFile, helixHome, identityEnv, loadConfig, setDisplayPassword } from './config.ts';
+import { addPerson, addRepo, configFile, helixHome, identityEnv, loadConfig } from './config.ts';
 import { serve } from './server.ts';
 import { openStore } from './store.ts';
 import { supervise } from './supervisor.ts';
@@ -20,10 +20,6 @@ const USAGE = `helix: runs Animus jobs for several people on one machine
         Let a person submit, and print their token once. The file holds
         KEY=VALUE lines set for their jobs only (CLAUDE_CODE_OAUTH_TOKEN, GH_TOKEN).
         Run again to give them a new token.
-  helix display-password [<password>]
-        Set the password the display at / is opened with, and print it. It
-        only reads what the display shows; it cannot submit, cancel or answer.
-        With none given, six characters are made. Restart helix serve after.
   helix check [<name>]
         Try each person's credentials against GitHub and Claude: who the
         GitHub token is, when it ends, whether it may push to each repository,
@@ -82,12 +78,6 @@ function main(argv: string[]): number | undefined {
       if (!positionals[0]) throw new AnimusError('usage: helix add-person <name> [--env-file <file>]');
       const token = addPerson(positionals[0], values['env-file']);
       console.log(`${positionals[0]}'s token, shown this once:\n\n  ${token}\n\nThey set HELIX_URL and HELIX_TOKEN, then: animus submit <spec.md>`);
-      return 0;
-    }
-    case 'display-password': {
-      // Only the password on stdout, so it can be sent to a file unseen.
-      console.log(setDisplayPassword(positionals[0]));
-      console.error('the display\'s password is set. Restart helix serve for it to take.');
       return 0;
     }
     case undefined: case 'help': case '--help': case '-h':

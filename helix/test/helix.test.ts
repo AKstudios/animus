@@ -7,7 +7,7 @@ import { test } from 'node:test';
 import { saveProgress } from '../../plugin/src/log.ts';
 import * as client from '../../plugin/src/remote.ts';
 import { write } from '../../plugin/test/helpers.ts';
-import { hashToken, loadConfig, setDisplayPassword, type Config } from '../src/config.ts';
+import { hashToken, type Config } from '../src/config.ts';
 import type { Display } from '../src/display.ts';
 import { serve } from '../src/server.ts';
 import { openStore } from '../src/store.ts';
@@ -42,7 +42,7 @@ async function helix(home = mkdtempSync(join(tmpdir(), 'helix-'))) {
   mkdirSync(repo, { recursive: true });
   const secrets = join(home, 'ana.env');
   writeFileSync(secrets, 'SECRET=anas\n');
-  const config: Config = { host: '127.0.0.1', port: 0, slots: 1, repos: { app: repo }, people: { ana: { token_sha256: hashToken('ana-token'), env_file: secrets }, ben: { token_sha256: hashToken('ben-token') } }, display_sha256: hashToken('wall') };
+  const config: Config = { host: '127.0.0.1', port: 0, slots: 1, repos: { app: repo }, people: { ana: { token_sha256: hashToken('ana-token'), env_file: secrets }, ben: { token_sha256: hashToken('ben-token') } } };
   const release = join(home, 'release');
   const launch: Launch = (job) => ({ command: process.execPath, args: ['-e', FAKE, job.title, job.answer ?? '', release] });
   const store = openStore(join(home, 'helix.db'));
@@ -115,7 +115,7 @@ test('a job that asks a question waits for its answer, then resumes with it', as
   h.stop();
 });
 
-test('the display\'s page and scripts need no token, what it shows does, and no path climbs out of its folder', async () => {
+test('the display\'s page and scripts need no token, and no path climbs out of its folder', async () => {
   const h = await helix();
   const get = (path: string, token?: string) => fetch(new URL(path, process.env.HELIX_URL), token ? { headers: { authorization: `Bearer ${token}` } } : {});
 
@@ -131,35 +131,22 @@ test('the display\'s page and scripts need no token, what it shows does, and no 
   for (const path of ['/ui/../src/server.ts', '/ui/%2e%2e/src/server.ts', '/ui/fonts/../../src/server.ts', '/ui/nothing.css', '/ui/fonts/OFL-TitilliumWeb.txt']) {
     assert.equal((await get(path)).status, 401, path);
   }
-  assert.equal((await get('/display')).status, 401);
-  assert.equal((await get('/display', 'wrong')).status, 401);
   h.stop();
 });
 
-test('the display\'s password opens what the display shows and nothing else', async () => {
+test('what the display shows needs no token, and everything else still does', async () => {
   const h = await helix();
-  const as = (path: string, init: RequestInit = {}) => fetch(new URL(path, process.env.HELIX_URL), { ...init, headers: { authorization: 'Bearer wall', 'content-type': 'application/json' } });
+  const bare = (path: string, init: RequestInit = {}) => fetch(new URL(path, process.env.HELIX_URL), init);
   const job = await h.submit('Shown');
-  assert.equal((await as('/display')).status, 200);
-  assert.equal((await as('/jobs')).status, 401);
-  assert.equal((await as(`/jobs/${job.id}`)).status, 401);
-  assert.equal((await as('/jobs', { method: 'POST', body: JSON.stringify({ repo: 'app', spec: SPEC('No'), name: 'spec.md' }) })).status, 401);
-  assert.equal((await as(`/jobs/${job.id}/cancel`, { method: 'POST', body: '{}' })).status, 401);
+  assert.equal((await bare('/display')).status, 200);
+  assert.equal((await bare('/jobs')).status, 401);
+  assert.equal((await bare(`/jobs/${job.id}`)).status, 401);
+  assert.equal((await bare('/jobs', { method: 'POST', body: JSON.stringify({ repo: 'app', spec: SPEC('No'), name: 'spec.md' }) })).status, 401);
+  assert.equal((await bare(`/jobs/${job.id}/cancel`, { method: 'POST', body: '{}' })).status, 401);
+  assert.equal((await bare('/display', { method: 'POST', body: '{}' })).status, 401);
   writeFileSync(h.release, '');
   await h.ended(job.id);
   h.stop();
-
-  // A password is made short when none is given, and one that is given is kept as its hash only.
-  const before = process.env.HELIX_HOME;
-  process.env.HELIX_HOME = mkdtempSync(join(tmpdir(), 'helix-home-'));
-  try {
-    assert.match(setDisplayPassword(), /^[a-z2-9]{6}$/);
-    assert.equal(setDisplayPassword('abstergo'), 'abstergo');
-    assert.equal(loadConfig().display_sha256, hashToken('abstergo'));
-    assert.throws(() => setDisplayPassword('abc'), /4 or more characters/);
-  } finally {
-    if (before === undefined) delete process.env.HELIX_HOME; else process.env.HELIX_HOME = before;
-  }
 });
 
 test('the display is told every job, where a running one is, and why a queued one is back in the queue', async () => {

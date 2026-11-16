@@ -1,10 +1,9 @@
-// The display in the browser: asks Helix for /display every two seconds with
-// the token kept in this browser, and draws what view.ts makes of the answer.
+// The display in the browser: asks Helix for /display every two seconds and
+// draws what view.ts makes of the answer. It needs no sign-in.
 // It only reads. Sent to the browser with its types stripped (helix/src/ui.ts).
 import type { Display } from '../src/display.ts';
 import { view, type Live, type Project, type Recent, type View, type Waiting } from './view.ts';
 
-const TOKEN = 'helix-token';
 const POLL_MS = 2000;
 const RETRY_MS = 5000;
 /** Past these many working agents the cards get narrower, then become rows. */
@@ -15,23 +14,14 @@ const root = document.getElementById('helix')!;
 const theme = new URLSearchParams(location.search).get('theme');
 if (theme === 'light' || theme === 'dark') document.documentElement.dataset.theme = theme;
 
-/** The token, kept in this browser only. A browser that refuses storage keeps it for the page's life. */
-const saved = {
-  get: () => { try { return localStorage.getItem(TOKEN) ?? ''; } catch { return ''; } },
-  set: (token: string) => { try { if (token) localStorage.setItem(TOKEN, token); else localStorage.removeItem(TOKEN); } catch { /* kept in memory */ } },
-};
-
 const state: {
-  token: string;
-  /** Helix said no to the last token. */
-  refused: boolean;
   display?: Display;
   /** Helix's clock minus this browser's, in ms. */
   skew: number;
   offline: boolean;
   /** When Helix last answered, by this browser's clock. */
   heard?: Date;
-} = { token: saved.get(), refused: false, skew: 0, offline: false };
+} = { skew: 0, offline: false };
 
 const esc = (s: string | number) => String(s).replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`);
 const pad = (n: number) => String(n).padStart(2, '0');
@@ -55,7 +45,7 @@ const EMPTY_MARK = `<svg width="96" height="96" viewBox="0 0 96 96" fill="none" 
 
 function header(v: View | undefined): string {
   const squares = v && v.slots <= 16 ? `<div class="squares">${Array.from({ length: v.slots }, (_, i) => `<span${i < v.running ? ' class="on"' : ''}></span>`).join('')}</div>` : '';
-  const slots = v ? `${v.running}/${v.slots}` : state.token ? 'connecting' : 'not connected';
+  const slots = v ? `${v.running}/${v.slots}` : 'connecting';
   return `<header class="head">
     <div class="brand">${LOGO}<div class="wordmark">HELIX</div>${v ? `<div class="machine">${esc(v.name)}</div>` : ''}</div>
     <div class="stats">
@@ -72,18 +62,6 @@ const offline = () => `<div class="offline" role="status">
   <span class="dot"></span><span class="what">CANNOT REACH HELIX</span>
   <span>${state.heard ? `This is the last state it reported, at ${wall(state.heard)}.` : 'It has not answered since this page was opened.'} Trying again every ${RETRY_MS / 1000} seconds.</span>
 </div>`;
-
-const signin = () => `<main class="signin">
-  <form data-signin>
-    <span class="corner-a" aria-hidden="true"></span><span class="corner-b" aria-hidden="true"></span>
-    <h1>This display is not signed in</h1>
-    <p>Helix answers only to a token. Type the display's password, or paste a person's token. It is kept in this browser and nowhere else.</p>
-    <label class="label" for="hx-token">PASSWORD OR TOKEN</label>
-    <input id="hx-token" name="token" type="password" autocomplete="off" required>
-    ${state.refused ? '<div class="refused" role="alert">Helix refused that (401). Check it and try again.</div>' : ''}
-    <button type="submit">CONNECT</button>
-  </form>
-</main>`;
 
 const project = (p: Project) => `<button type="button" class="project${p.busy ? ' busy' : ''}" data-key="p-${esc(p.id)}" data-pick="${esc(p.id)}" aria-pressed="${p.on}">
   <span class="project-top"><span class="project-name">${esc(p.id)}</span><span class="project-sum">${esc(p.summary)}</span></span>
@@ -167,7 +145,7 @@ function page(): string {
   return [
     header(v),
     state.offline ? offline() : '',
-    !state.token ? signin() : v ? `<div class="body">${nav(v)}${main(v)}</div>` : '',
+    v ? `<div class="body">${nav(v)}${main(v)}</div>` : '',
   ].join('');
 }
 
@@ -178,7 +156,7 @@ const keyOf = (n: Node) => (n instanceof Element ? n.getAttribute('data-key') : 
 /**
  * Makes `from` the same as `to` by changing only what differs, so an element
  * that is still on the page keeps its place: its animation does not start
- * again, and the token being typed is not lost. Children that carry
+ * again. Children that carry
  * data-key are matched by it; the rest by position.
  */
 function morph(from: Element, to: Element): void {
@@ -215,37 +193,17 @@ let timer = 0;
 
 async function poll(): Promise<void> {
   window.clearTimeout(timer);
-  const token = state.token;
-  if (!token) return draw();
   try {
-    const res = await fetch('/display', { headers: { authorization: `Bearer ${token}` }, cache: 'no-store' });
-    if (token !== state.token) return;
-    if (res.status === 401) {
-      saved.set('');
-      Object.assign(state, { token: '', refused: true, offline: false });
-      delete state.display;
-      return draw();
-    }
+    const res = await fetch('/display', { cache: 'no-store' });
     if (!res.ok) throw new Error(`Helix answered ${res.status}`);
     const display = (await res.json()) as Display;
     Object.assign(state, { display, skew: Date.parse(display.at) - Date.now(), offline: false, heard: new Date() });
   } catch {
-    if (token !== state.token) return;
     state.offline = true;
   }
   draw();
   timer = window.setTimeout(() => { void poll(); }, state.offline ? RETRY_MS : POLL_MS);
 }
-
-root.addEventListener('submit', (event) => {
-  event.preventDefault();
-  const token = String(new FormData(event.target as HTMLFormElement).get('token') ?? '').trim();
-  // A token is printable ASCII; anything else cannot be sent in a header at all.
-  if (!/^[\x21-\x7e]+$/.test(token)) { state.refused = true; return draw(); }
-  saved.set(token);
-  Object.assign(state, { token, refused: false });
-  void poll();
-});
 
 root.addEventListener('click', (event) => {
   const button = (event.target as Element).closest('[data-pick]');

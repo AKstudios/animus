@@ -1,7 +1,7 @@
 // The display's own files (helix/ui), served as they are: no build step.
 // Its scripts are TypeScript like everything else here, with their types
 // stripped as they are sent. They hold no data: every number on the display
-// comes from /display, which needs a token.
+// comes from /display.
 import { existsSync, readFileSync, statSync } from 'node:fs';
 import { stripTypeScriptTypes } from 'node:module';
 import { dirname, extname, join } from 'node:path';

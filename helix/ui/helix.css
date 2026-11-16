@@ -89,13 +89,6 @@ h1, h2, p { margin: 0; }
 .is-offline .rule span, .is-offline .seg.on, .is-offline .cursor, .is-offline .pulse { animation: none; }
 
 /* ------------------------------------------------------------ sign-in */
-.signin { flex-grow: 1; display: flex; align-items: center; justify-content: center; padding: 48px 16px; }
-.signin form { position: relative; width: 100%; max-width: 480px; box-sizing: border-box; background: var(--panel); border: 1px solid var(--line); padding: 32px; display: flex; flex-direction: column; gap: 16px; }
-.signin h1 { font-size: 28px; font-weight: 300; letter-spacing: 0.06em; }
-.signin p { font-size: 16px; line-height: 1.5; color: var(--note); }
-.signin input { min-height: 48px; box-sizing: border-box; padding: 0 12px; font-family: var(--mono); font-size: 16px; background: var(--bg); color: var(--ink); border: 1px solid var(--ink); border-radius: 0; }
-.signin .refused { font-size: 15px; color: var(--fail-ink); }
-.signin button { min-height: 48px; background: var(--ink); color: var(--inv); border: 0; cursor: pointer; font-weight: 700; letter-spacing: 0.14em; font-size: 14px; }
 
 .corner-a, .corner-b { position: absolute; width: 14px; height: 14px; }
 .corner-a { top: -1px; left: -1px; border-top: 2px solid var(--accent); border-left: 2px solid var(--accent); }

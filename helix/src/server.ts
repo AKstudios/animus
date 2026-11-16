@@ -1,5 +1,5 @@
 // Helix's HTTP API: five actions (submit, status, result, cancel, answer)
-// over JSON, for the private network only. Every request carries a person's
+// over JSON, for the private network only. Each of those carries a person's
 // token; a job can be cancelled or answered only by whoever submitted it.
 // It also serves the display: its page at /, and what it shows at /display.
 import { timingSafeEqual } from 'node:crypto';
@@ -24,15 +24,6 @@ function whoIs(config: Config, req: IncomingMessage): string | undefined {
   })?.[0];
 }
 
-/** Whether the request carries the display's password: enough to read what the display shows, and nothing else. */
-function isDisplay(config: Config, req: IncomingMessage): boolean {
-  const given = /^Bearer (.+)$/.exec(req.headers.authorization ?? '')?.[1];
-  if (!given || !config.display_sha256) return false;
-  const a = Buffer.from(hashToken(given));
-  const b = Buffer.from(String(config.display_sha256));
-  return a.length === b.length && timingSafeEqual(a, b);
-}
-
 async function body(req: IncomingMessage): Promise<Record<string, unknown>> {
   let text = '';
   for await (const chunk of req) {
@@ -55,17 +46,17 @@ export function serve(opts: { config: Config; store: Store; supervisor: Supervis
     };
     void (async () => {
       const url = new URL(req.url ?? '/', 'http://helix');
-      // The display's page, scripts and fonts need no token: they hold nothing until one is given.
+      // The display's page, scripts and fonts need no token.
       const file = req.method === 'GET' ? asset(url.pathname) : undefined;
       if (file) {
         res.writeHead(200, { 'content-type': file.type, 'cache-control': file.cache, 'content-security-policy': CSP, 'x-content-type-options': 'nosniff' });
         return res.end(file.body);
       }
+      // What the display shows needs no token either: Helix listens on a private network only, and this only reads.
+      if (req.method === 'GET' && url.pathname === '/display') return send(200, display(opts));
       const person = whoIs(config, req);
-      if (!person && req.method === 'GET' && url.pathname === '/display' && isDisplay(config, req)) return send(200, display(opts));
       if (!person) return send(401, { error: 'a valid token is needed: Authorization: Bearer <token>' });
       const [, root, id, action] = url.pathname.split('/');
-      if (root === 'display' && !id && req.method === 'GET') return send(200, display(opts));
       if (root !== 'jobs') return send(404, { error: `nothing at ${url.pathname}` });
       if (!id) {
         if (req.method === 'GET') return send(200, { slots: config.slots, jobs: store.list() });
