@@ -1,6 +1,8 @@
 // Helix's HTTP API: five actions (submit, status, result, cancel, answer)
 // over JSON, for the private network only. Each of those carries a person's
 // token; a job can be cancelled or answered only by whoever submitted it.
+// Joining (invite, join) carries a one-time code instead, and leave the
+// person's own token (join.ts).
 // It also serves the display: its page at /, and what it shows at /display.
 import { timingSafeEqual } from 'node:crypto';
 import { createServer, type IncomingMessage, type Server } from 'node:http';
@@ -8,6 +10,7 @@ import { VERSION_HEADER } from '../../plugin/src/remote.ts';
 import { animusVersion, compatible } from '../../plugin/src/version.ts';
 import { hashToken, type Config } from './config.ts';
 import { display } from './display.ts';
+import { inviteDetails, joinHelix, takeOff, verifyInChild, type Verify } from './join.ts';
 import type { Store } from './store.ts';
 import { Refused, type Submission, type Supervisor } from './supervisor.ts';
 import { asset } from './ui.ts';
@@ -39,8 +42,15 @@ async function body(req: IncomingMessage): Promise<Record<string, unknown>> {
   throw new Refused(400, 'the request body must be a JSON object');
 }
 
-export function serve(opts: { config: Config; store: Store; supervisor: Supervisor }): Server {
+export function serve(opts: {
+  config: Config; store: Store; supervisor: Supervisor;
+  /** How a joining person's tokens are tried; by default in a `helix verify` process. */
+  verify?: Verify;
+  /** Ends what a job leaves outside its process tree (its container), for a person who leaves. */
+  reap?: (id: number) => void;
+}): Server {
   const { config, store, supervisor } = opts;
+  const verify = opts.verify ?? verifyInChild;
   const version = animusVersion();
   return createServer((req, res) => {
     const send = (status: number, value: unknown) => {
@@ -59,12 +69,24 @@ export function serve(opts: { config: Config; store: Store; supervisor: Supervis
       if (req.method === 'GET' && url.pathname === '/display') return send(200, display(opts));
       // Which release this is, for `animus doctor`; it says no more than the display does.
       if (req.method === 'GET' && url.pathname === '/version') return send(200, { version });
-      const person = whoIs(config, req);
-      if (!person) return send(401, { error: 'a valid token is needed: Authorization: Bearer <token>' });
       // A client from a release this one cannot work with is told how to catch up, before anything is done for it.
       const theirs = req.headers[VERSION_HEADER];
-      if (typeof theirs !== 'string' || !compatible(theirs, version)) {
-        return send(426, { error: `this Helix runs Animus ${version} and your animus is ${typeof theirs === 'string' ? theirs : 'from before versioned releases'}. Update the animus plugin in Claude Code (/plugin), or pull your clone of it, then try again` });
+      const outdated = () => send(426, { error: `this Helix runs Animus ${version} and your animus is ${typeof theirs === 'string' ? theirs : 'from before versioned releases'}. Update the animus plugin in Claude Code (/plugin), or pull your clone of it, then try again` });
+      const current = typeof theirs === 'string' && compatible(theirs, version);
+      // Someone joining has a code and no token yet.
+      if (req.method === 'POST' && (url.pathname === '/invite' || url.pathname === '/join')) {
+        if (!current) return outdated();
+        const b = await body(req);
+        return url.pathname === '/invite' ? send(200, inviteDetails(config, store, b.code)) : send(201, await joinHelix({ config, store, verify }, b));
+      }
+      const person = whoIs(config, req);
+      if (!person) return send(401, { error: 'a valid token is needed: Authorization: Bearer <token>' });
+      if (!current) return outdated();
+      if (req.method === 'POST' && url.pathname === '/leave') {
+        // Off at once in this process; config.yaml says the same for the next start.
+        delete config.people[person];
+        const { cancelled, kept } = takeOff(person, store, opts.reap);
+        return send(200, { name: person, cancelled: cancelled.map((j) => j.id), ...(kept ? { kept } : {}) });
       }
       const [, root, id, action] = url.pathname.split('/');
       if (root !== 'jobs') return send(404, { error: `nothing at ${url.pathname}` });

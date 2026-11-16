@@ -7,7 +7,7 @@ import { join } from 'node:path';
 import { animusHome } from './log.ts';
 import { onPath } from './pipeline.ts';
 import { PROFILE_PATH, loadProfile } from './profile.ts';
-import { helixVersion } from './remote.ts';
+import { helixLogin, helixVersion } from './remote.ts';
 import { animusVersion, atLeast, compatible, MIN_CLAUDE } from './version.ts';
 
 export type Finding = { level: 'ok' | 'warn' | 'fail' | 'info'; what: string; detail: string };
@@ -47,7 +47,8 @@ export function gitFindings(read: (key: string) => string): Finding[] {
   return found;
 }
 
-export async function doctor(cwd: string, env = process.env): Promise<Finding[]> {
+/** helixUrl: a Helix being joined, which this machine has no token for yet. */
+export async function doctor(cwd: string, env = process.env, opts: { helixUrl?: string } = {}): Promise<Finding[]> {
   const found: Finding[] = [];
   const add = (level: Finding['level'], what: string, detail: string) => found.push({ level, what, detail });
 
@@ -91,14 +92,17 @@ export async function doctor(cwd: string, env = process.env): Promise<Finding[]>
   }
   add('info', 'isolation', 'jobs load only the project\'s Claude settings and rules, start no MCP server, and get no skills or slash commands of yours');
 
-  const url = env.HELIX_URL;
-  if (!url) add('info', 'helix', 'HELIX_URL is not set: jobs run on this machine only');
+  const login = helixLogin(env);
+  const url = opts.helixUrl ?? login?.url ?? env.HELIX_URL;
+  if (!url) add('info', 'helix', 'this machine has not joined a Helix (animus join <url> <code>): jobs run here only');
   else {
     try {
       const theirs = await helixVersion(url);
       add(compatible(theirs, animusVersion()) ? 'ok' : 'fail', 'helix', compatible(theirs, animusVersion()) ? `${url} runs ${theirs}` : `${url} runs ${theirs} and this is ${animusVersion()}: update whichever is older`);
     } catch (err) { add('fail', 'helix', (err as Error).message); }
-    if (!env.HELIX_TOKEN) add('fail', 'helix token', 'HELIX_TOKEN is not set: it comes from helix add-person');
+    // Joining: the token comes at the end.
+    if (opts.helixUrl) { /* nothing to say yet */ } else if (login) add('ok', 'helix token', `${login.name ? `${login.name}'s, ` : ''}from ${login.from}`);
+    else add('fail', 'helix token', 'HELIX_URL is set and HELIX_TOKEN is not: animus join gives this machine one');
   }
   return found;
 }

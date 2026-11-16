@@ -7,10 +7,11 @@ import { parseArgs } from 'node:util';
 import { claudeAgent } from '../../plugin/src/agent.ts';
 import { loadFactory } from '../../plugin/src/profiles.ts';
 import { AnimusError } from '../../plugin/src/proc.ts';
-import { checkPerson, describeFindings, githubToken } from './check.ts';
+import { checkEnv, checkPerson, describeFindings, githubToken } from './check.ts';
 import { animusVersion } from '../../plugin/src/version.ts';
 import { containerLaunch, containerProblem, imageName, personDirs, removeContainer } from './container.ts';
-import { addPerson, addRepo, configFile, helixHome, identityEnv, loadConfig, removePerson, removeRepo } from './config.ts';
+import { addPerson, addRepo, configFile, helixHome, identityEnv, loadConfig, removeRepo } from './config.ts';
+import { INVITE_HOURS, invite, takeOff } from './join.ts';
 import { serve } from './server.ts';
 import { openStore } from './store.ts';
 import { cancelJobsOf, pauseFile, supervise, UNTIL_RESTART } from './supervisor.ts';
@@ -18,6 +19,7 @@ import { cancelJobsOf, pauseFile, supervise, UNTIL_RESTART } from './supervisor.
 /** This checkout of Animus: what `helix upgrade` moves to another release. */
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..', '..');
 const pidFile = () => join(helixHome(), 'serve.pid');
+const dbFile = () => join(helixHome(), 'helix.db');
 const uid = () => process.getuid?.() ?? 1000;
 const gid = () => process.getgid?.() ?? 1000;
 
@@ -36,6 +38,13 @@ const USAGE = `helix: runs Animus jobs for several people on one machine
         Listen for submissions and run them, as many at once as config.yaml's slots.
   helix add-repo <name> <dir>
         A clone on this machine that jobs may be submitted for.
+  helix invite <name> [--github <login>]
+        Let a person join from their own machine: prints a one-time code that
+        ends in ${INVITE_HOURS} hours. They run animus join <this Helix's address> <code>,
+        which sends their Claude and GitHub tokens; Helix tries both, keeps
+        them under ${helixHome()}/credentials and gives them their Helix token.
+        --github: only a GitHub token that signs in as this login is taken.
+        Run again for a new code; the earlier one stops working.
   helix add-person <name> [--env-file <file>]
         Let a person submit, and print their token once. The file holds
         KEY=VALUE lines set for their jobs only (CLAUDE_CODE_OAUTH_TOKEN, GH_TOKEN).
@@ -64,13 +73,14 @@ slots are read again whenever config.yaml changes; host and port need a restart.
 
 function main(argv: string[]): number | undefined {
   const [command, ...rest] = argv;
-  const { values, positionals } = parseArgs({ args: rest, allowPositionals: true, options: { 'env-file': { type: 'string' } } });
+  const { values, positionals } = parseArgs({ args: rest, allowPositionals: true, options: { 'env-file': { type: 'string' }, github: { type: 'string' } } });
   switch (command) {
     case 'serve': {
       const config = loadConfig();
-      if (!Object.keys(config.people).length || !Object.keys(config.repos).length) throw new AnimusError(`${configFile()} names no ${Object.keys(config.repos).length ? 'people' : 'repositories'} yet: helix add-repo and helix add-person come first`);
+      // People can join once it runs (helix invite); a job needs a repository first.
+      if (!Object.keys(config.repos).length) throw new AnimusError(`${configFile()} names no repositories yet: helix add-repo comes first`);
       const home = helixHome();
-      const store = openStore(join(home, 'helix.db'));
+      const store = openStore(dbFile());
       // A GitHub token that ended fails the job before it starts, with the reason.
       const preflight = (_person: string, env: Record<string, string>) => {
         if (!env.GH_TOKEN && !env.GITHUB_TOKEN) return {};
@@ -101,7 +111,7 @@ function main(argv: string[]): number | undefined {
         };
       }
       const supervisor = supervise({ store, config, home, preflight, say, ...isolation });
-      const server = serve({ config, store, supervisor });
+      const server = serve({ config, store, supervisor, ...(config.container ? { reap: removeContainer } : {}) });
       server.listen(config.port, config.host, () => console.error(`helix ${animusVersion()}: listening on http://${config.host}:${config.port}, ${config.slots} job(s) at once${config.container ? ', each in a container' : ''}, repositories: ${Object.keys(config.repos).join(', ')}`));
       // Someone added or removed a person or a repository, or changed the slots: the same config object, so everything sees it at once.
       watchFile(configFile(), { interval: 2000 }, () => {
@@ -140,16 +150,14 @@ function main(argv: string[]): number | undefined {
       const name = positionals[0];
       if (!name) throw new AnimusError('usage: helix remove-person <name>');
       const contained = Boolean(loadConfig().container);
-      const { kept } = removePerson(name);
-      const store = openStore(join(helixHome(), 'helix.db'));
-      const cancelled = cancelJobsOf(store, name, contained ? removeContainer : undefined);
-      store.close();
-      // Their clones, job state and Claude config: theirs alone, and no use to anyone once they are gone.
-      rmSync(personDirs(helixHome(), name).root, { recursive: true, force: true });
+      const store = openStore(dbFile());
+      let gone: ReturnType<typeof takeOff>;
+      try { gone = takeOff(name, store, contained ? removeContainer : undefined); } finally { store.close(); }
+      const { kept, cancelled, folder } = gone;
       console.log([
         `${name} is off Helix: their token no longer works${cancelled.length ? `, and job(s) ${cancelled.map((j) => j.id).join(', ')} were cancelled` : ''}.`,
         kept ? `Their credentials file is outside ${helixHome()}, so it was left: delete ${kept}` : 'Their credentials file is deleted.',
-        `Their folder ${personDirs(helixHome(), name).root} (clones, job state, Claude config) is deleted.`,
+        `Their folder ${folder} (clones, job state, Claude config) is deleted.`,
         '',
         'Left to do elsewhere:',
         '  - GitHub: revoke the token they gave Helix (they can, or an org owner under the org\'s personal access tokens), and take them off the organisation or repositories.',
@@ -159,10 +167,33 @@ function main(argv: string[]): number | undefined {
       ].join('\n'));
       return 0;
     }
+    case 'invite': {
+      const name = positionals[0];
+      if (!name) throw new AnimusError('usage: helix invite <name> [--github <login>]');
+      const store = openStore(dbFile());
+      let made: ReturnType<typeof invite>;
+      try { made = invite(loadConfig(), store, name, values.github ? { github: values.github } : {}); } finally { store.close(); }
+      console.log([
+        `${name}'s code, shown this once, good until ${made.expires.slice(0, 16).replace('T', ' ')} UTC:`,
+        '',
+        `  ${made.code}`,
+        '',
+        'They install the animus plugin in Claude Code, then run:',
+        '',
+        `  animus join ${loadConfig().url ?? '<the address they reach Helix at; url: in config.yaml fills it in here>'} ${made.code}`,
+      ].join('\n'));
+      return 0;
+    }
+    case 'verify': {
+      // Run by helix serve for someone joining: their tokens on stdin, the findings on stdout.
+      const env = JSON.parse(readFileSync(0, 'utf8')) as Record<string, string>;
+      console.log(JSON.stringify(checkEnv(loadConfig(), env, { agent: claudeAgent(loadFactory()) })));
+      return 0;
+    }
     case 'remove-repo': {
       const name = positionals[0];
       if (!name) throw new AnimusError('usage: helix remove-repo <name>');
-      const store = openStore(join(helixHome(), 'helix.db'));
+      const store = openStore(dbFile());
       const busy = [...store.inState('queued'), ...store.inState('running')].filter((j) => j.repo === name);
       store.close();
       if (busy.length) throw new AnimusError(`job(s) ${busy.map((j) => j.id).join(', ')} are queued or running for ${name}: wait for them, or cancel them, first`);

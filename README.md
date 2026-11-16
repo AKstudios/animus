@@ -68,7 +68,8 @@ On the machine, with its files under `~/.helix` (`HELIX_HOME`):
 
 ```sh
 helix/bin/helix add-repo meal-planner /srv/repos/meal-planner   # a clone with a .animus/animus.yaml
-helix/bin/helix add-person ajmal --env-file /srv/helix/ajmal.env   # prints their token once
+helix/bin/helix invite ajmal [--github <login>]   # a one-time code for them to join with
+helix/bin/helix add-person ajmal --env-file /srv/helix/ajmal.env   # or by hand: prints their token once
 helix/bin/helix check          # each person's credentials, tried against GitHub and Claude
 helix/bin/helix serve
 helix/bin/helix remove-person ajmal     # token off, their jobs cancelled, their credentials file deleted
@@ -90,6 +91,19 @@ checks out the tag and runs the tests; if they fail it goes back. It then
 stops `helix serve` for its service manager to start again. Moving Helix to
 another machine is [helix/deploy/README.md](helix/deploy/README.md).
 
+Someone joins from their own machine with `animus join <url> <code>` and the
+code from `helix invite`, which works once and ends after 24 hours. It runs
+`animus doctor`, then `claude setup-token`, then opens GitHub's page for a
+fine-grained token with contents and pull requests (write) filled in, and
+sends both tokens. Helix tries them as `helix check` does, and refuses them
+with the reason, leaving the code usable, if either fails. Otherwise it keeps them in
+`~/.helix/credentials/<name>.env` (outside the person's folder, which their
+containers mount) and gives back a Helix token, which the laptop keeps in
+`~/.animus/helix.json`. With `--github`, only a token that signs in as that
+login is taken. `animus leave` is the person's own `helix remove-person`. Set
+`url` in `config.yaml` to the address people reach Helix at, and `helix
+invite` prints the whole join command.
+
 `config.yaml` there sets `host` (default 127.0.0.1; set it to the machine's address on your private network, never a public one), `port` (7420) and `slots` (2). A person's `--env-file` holds `KEY=VALUE` lines set for their jobs only, such as `CLAUDE_CODE_OAUTH_TOKEN` and `GH_TOKEN`, so the PR appears as them. Without one, their jobs use the machine's own logins. With a `GH_TOKEN`, git uses that token for https remotes for the job's processes only, so clone the repositories over https.
 
 `helix check [<name>]` asks the services themselves: who GitHub says the token is and when it ends, whether it may push to each repository (a push that sends nothing), and whether the Claude token answers, in one small session that has no login kept on the machine to fall back on. It exits 1 if anything fails. `helix serve` runs the GitHub part when it starts and again before each job, so a token that ended fails the job at once with the reason.
@@ -98,7 +112,7 @@ To keep Helix running with nobody signed in, [helix/deploy/ubuntu/setup.sh](heli
 
 Helix also serves a display at its own address (`http://127.0.0.1:7420/`, or the tailnet address). It shows the slots, the agents working now with each job's stage, the queue, the jobs that wait for an answer, and the jobs that ended. It needs no sign-in: anyone who can reach Helix's address can see it, so keep that address on a private network. Submitting, answering and cancelling still need a person's token. The display only reads, so answering and cancelling stay with the commands below. Click a project to narrow the page to it. The page follows the system's light or dark theme, and `?theme=dark` or `?theme=light` fixes one. Set `name` in `config.yaml` to change what the display calls the machine (default: its hostname).
 
-From a laptop, with `HELIX_URL` and `HELIX_TOKEN` set:
+From a laptop that has joined (or with `HELIX_URL` and `HELIX_TOKEN` set, which win):
 
 | Command | What it does |
 | --- | --- |

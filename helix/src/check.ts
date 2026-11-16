@@ -82,11 +82,16 @@ export function checkPerson(config: Config, name: string, deps: { agent?: Agent;
   let env: Record<string, string>;
   try { env = personEnv(config.people[name]); } catch (err) { return [{ what: 'env file', ok: false, detail: (err as Error).message }]; }
   if (!config.people[name]?.env_file) return [{ what: 'env file', ok: false, detail: 'none was given (helix add-person <name> --env-file <file>), so their jobs would run with the machine\'s own sign-ins' }];
+  return checkEnv(config, env, deps).findings;
+}
+
+/** Tries a set of credentials against every repository: what `helix check` and joining both ask. login: who the GitHub token is. */
+export function checkEnv(config: Config, env: Record<string, string>, deps: { agent?: Agent; runner?: Runner } = {}): { findings: Finding[]; login?: string } {
   const token = githubToken(env, deps.runner);
-  const out = [token];
-  if (token.ok) for (const [repo, dir] of Object.entries(config.repos)) out.push(githubPush(repo, dir, env, deps.runner));
-  if (deps.agent) out.push(claudeToken(env, deps.agent));
-  return out;
+  const findings: Finding[] = [token];
+  if (token.ok) for (const [repo, dir] of Object.entries(config.repos)) findings.push(githubPush(repo, dir, env, deps.runner));
+  if (deps.agent) findings.push(claudeToken(env, deps.agent));
+  return { findings, ...(token.identity ? { login: token.identity.name } : {}) };
 }
 
 export const describeFindings = (person: string, findings: readonly Finding[]) =>

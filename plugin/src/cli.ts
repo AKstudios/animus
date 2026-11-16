@@ -6,6 +6,7 @@ import { claudeAgent } from './agent.ts';
 import { cleanup, describeCleanup, KEEP_DAYS } from './cleanup.ts';
 import { describeFindings, doctor } from './doctor.ts';
 import { initProfile } from './init.ts';
+import { joinHelix, leaveHelix } from './join.ts';
 import { describe, failsOnBase, jobChecks, runChecks } from './gates.ts';
 import { mainCheckout, touchedFiles } from './git.ts';
 import { describeRuns, jobDir, loadState, readRuns, type Run } from './log.ts';
@@ -60,7 +61,15 @@ const USAGE = `animus: a spec goes in, a pull request with proof comes out
         setup reaches a job (orbit's plugin, git hooks, commit signing).
         Exits 1 if something would stop a job.
 
-With Helix, the machine that runs jobs for everyone (HELIX_URL, HELIX_TOKEN):
+With Helix, the machine that runs jobs for everyone:
+  animus join <url> <code>
+        Join a Helix with the one-time code from helix invite: checks this
+        machine, has you make a Claude token and a GitHub token, and sends
+        both. Helix tries them, and the Helix token it gives back is kept in
+        ANIMUS_HOME/helix.json. (HELIX_URL and HELIX_TOKEN, when set, win.)
+  animus leave [--yes]
+        Take yourself off it: your jobs there are cancelled, and it deletes
+        your tokens.
   animus submit <spec.md> [--repo <dir>] [--draft]
         Queue the spec there, for the repository of this name.
   animus status [<id>]      Its queue, or one job with the end of its log.
@@ -90,7 +99,7 @@ async function main(argv: string[]): Promise<number> {
     args: rest, allowPositionals: true,
     options: {
       repo: { type: 'string' }, 'dry-run': { type: 'boolean' }, keep: { type: 'boolean' }, draft: { type: 'boolean' }, answer: { type: 'string' },
-      json: { type: 'boolean' }, n: { type: 'string', short: 'n' }, again: { type: 'boolean' }, days: { type: 'string' }, force: { type: 'boolean' }, slices: { type: 'boolean' },
+      json: { type: 'boolean' }, n: { type: 'string', short: 'n' }, again: { type: 'boolean' }, days: { type: 'string' }, force: { type: 'boolean' }, slices: { type: 'boolean' }, yes: { type: 'boolean' },
     },
   });
   const cwd = process.cwd();
@@ -135,6 +144,13 @@ async function main(argv: string[]): Promise<number> {
       console.log(`job ${j.id} is ${j.state} on Helix: ${j.title}\nfollow it with: animus status ${j.id}`);
       return 0;
     }
+    case 'join':
+      if (!positionals[0] || !positionals[1]) throw new AnimusError('usage: animus join <url> <code>');
+      await joinHelix(positionals[0], positionals[1], cwd);
+      return 0;
+    case 'leave':
+      console.log(await leaveHelix(Boolean(values.yes)));
+      return 0;
     case 'status':
       console.log(positionals[0] ? helix.describeJob(await helix.job(positionals[0])) : helix.describeJobs((await helix.jobs()).jobs));
       return 0;

@@ -202,16 +202,16 @@ Each developer registers once, and Helix stores two credentials per person: a Cl
 
 **Registration steps**
 
-1. You invite: `helix invite <github-login>` adds the person to the allow list and prints a one-time code.
-2. The developer runs `animus register` on their laptop, over the private network, with the code.
-3. A GitHub device login confirms their GitHub username, which becomes their identity in Helix.
-4. The command runs `claude setup-token` and sends the token to Helix.
-5. It collects the GitHub credential for the chosen option.
-6. They link Slack, if that trigger is used, so a Slack user maps to the same record.
-7. Helix verifies: in a throwaway container it makes one small Claude call with the token and checks that the GitHub credential belongs to the same username.
-8. Helix issues a personal Helix token, which `animus submit` uses from then on.
+1. You invite: `helix invite <name> [--github <login>]` prints a one-time code that ends after 24 hours. Only its hash is kept.
+2. The developer runs `animus join <url> <code>` on their laptop, over the private network. It runs `animus doctor` first.
+3. The command runs `claude setup-token` and asks for the token it printed.
+4. It opens GitHub's page for a fine-grained token with contents and pull requests (write) and the repositories' owner filled in, and asks for the token.
+5. Helix verifies both, as `helix check` does, in a process of its own: who GitHub says the token is, a push that sends nothing to each repository, and one small Claude session with no sign-in to fall back on. A token that fails is refused with the reason, and the code still works.
+6. The GitHub login the token signs in as is recorded as theirs. With `--github` on the invite, a token for any other login is refused. That is what a GitHub device login would have confirmed, without a second sign-in.
+7. Only then is the code used up. Helix keeps the tokens in `~/.helix/credentials/<name>.env`, outside the person's folder that their containers mount, and returns a personal Helix token. The laptop keeps it in `~/.animus/helix.json`, so nobody sets `HELIX_URL` or `HELIX_TOKEN`.
+8. Later: they link Slack, if that trigger is used, so a Slack user maps to the same record.
 
-`animus unregister` removes a person, and Helix warns a developer a month before their Claude token expires.
+Invite codes and not Tailscale's identity headers: anything on the machine can send those headers to 127.0.0.1, so they prove nothing. `animus leave` removes a person, as `helix remove-person` does. Not built: a warning a month before their Claude token expires.
 
 **How Helix holds credentials**
 

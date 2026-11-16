@@ -27,15 +27,19 @@ works as it is. Otherwise edit those paths in `config.yaml`.
    runs: `git checkout v<version> && npm ci`.
 4. Clone each repository over https into `~/repos/<name>`, then run
    `helix/bin/helix add-repo <name> ~/repos/<name>` for each one.
-5. For each person: write their `~/.helix/<name>.env` (mode 600, with
+5. Set `url` in `config.yaml` to the address people will reach Helix at
+   (`https://abstergo.<tailnet>.ts.net`). For each person run `helix invite
+   <name>` and send them the command it prints; they run it on their laptop
+   once Helix is up (step 7). By hand instead: write their
+   `~/.helix/credentials/<name>.env` (mode 600, with
    `CLAUDE_CODE_OAUTH_TOKEN` and `GH_TOKEN`) and run `helix add-person <name>
-   --env-file ~/.helix/<name>.env`. Each gets a new Helix token.
+   --env-file` with it; each gets a new Helix token.
 6. For jobs in containers (recommended once more than one person submits):
    install Docker, run setup.sh again for the docker group, run `helix/bin/helix
    image`, and add `container: {memory: 6g, cpus: 2}` to `config.yaml`.
 7. Run `helix/bin/helix check`. Then `sudo systemctl start helix.service` and
    `tailscale serve --bg 7420`.
-8. From a laptop, run `animus doctor` with the new `HELIX_URL`.
+8. From a laptop, `animus join <url> <code>`, then `animus doctor`.
 
 ## Moving abstergo to new hardware, keeping everything
 
@@ -48,7 +52,7 @@ works as it is. Otherwise edit those paths in `config.yaml`.
    credentials files stay mode 600.
 4. In Tailscale's admin console, rename or remove the old machine, then name
    the new one `abstergo`. The URL stays
-   `https://abstergo.<tailnet>.ts.net`, so nobody's `HELIX_URL` changes, and
+   `https://abstergo.<tailnet>.ts.net`, so the address each laptop kept when it joined still works, and
    their Helix tokens still work because the hashes came across.
 5. On the new machine: `helix check`, start the service, and run
    `tailscale serve --bg 7420`. A job that was waiting for an answer resumes

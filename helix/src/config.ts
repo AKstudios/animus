@@ -13,12 +13,18 @@ import { AnimusError } from '../../plugin/src/proc.ts';
 export const helixHome = () => process.env.HELIX_HOME ?? join(homedir(), '.helix');
 export const configFile = () => join(helixHome(), 'config.yaml');
 
-/** env_file: KEY=VALUE lines set for that person's jobs only: their Claude token and GitHub credential. */
-export type Person = { token_sha256: string; env_file?: string };
+/**
+ * env_file: KEY=VALUE lines set for that person's jobs only: their Claude
+ * token and GitHub credential. github: the login their GitHub token signed in
+ * as when they joined.
+ */
+export type Person = { token_sha256: string; env_file?: string; github?: string };
 
 export type Config = {
   /** What the display calls this machine; its hostname when unset. */
   name?: string;
+  /** The address people reach Helix at, such as its Tailscale Serve address: what helix invite tells them to join. */
+  url?: string;
   /** The address to listen on: one on the private network, never a public one. */
   host: string;
   port: number;
@@ -56,14 +62,20 @@ export function saveConfig(config: Config, file = configFile()): void {
   chmodSync(file, 0o600);
 }
 
+/** A person's name names their folder and credentials file, so it is kept to safe characters. */
+export function checkName(name: string): void {
+  if (!/^[A-Za-z0-9._-]+$/.test(name) || /^\.+$/.test(name)) throw new AnimusError('a person\'s name may hold letters, digits, dot, dash and underscore');
+}
+
 /** Adds a person, or gives one a new token. Returns the token: the only time it exists in the clear. */
-export function addPerson(name: string, envFile?: string): string {
-  if (!/^[A-Za-z0-9._-]+$/.test(name)) throw new AnimusError('a person\'s name may hold letters, digits, dot, dash and underscore');
+export function addPerson(name: string, envFile?: string, github?: string): string {
+  checkName(name);
   if (envFile && !existsSync(envFile)) throw new AnimusError(`no file at ${envFile}`);
   const config = loadConfig();
   const token = randomBytes(24).toString('base64url');
   const env = envFile ? resolve(envFile) : config.people[name]?.env_file;
-  config.people[name] = { token_sha256: hashToken(token), ...(env ? { env_file: env } : {}) };
+  const login = github ?? config.people[name]?.github;
+  config.people[name] = { token_sha256: hashToken(token), ...(env ? { env_file: env } : {}), ...(login ? { github: login } : {}) };
   saveConfig(config);
   return token;
 }

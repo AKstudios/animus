@@ -8,6 +8,19 @@ clients with how to update.
 
 ## Unreleased
 
+- Inviting and joining: `helix invite <name> [--github <login>]` prints a
+  one-time code that ends after 24 hours, and `animus join <url> <code>` on
+  the person's laptop runs `animus doctor`, then `claude setup-token`, then
+  opens GitHub's page for a fine-grained token with the permissions filled
+  in, and sends both tokens with the code (`POST /invite`, `POST /join`).
+  Helix tries them, as `helix check` does, before it takes the code, and
+  keeps them in `~/.helix/credentials/<name>.env`. The Helix token comes back
+  and is kept in `~/.animus/helix.json` (mode 600), which the client uses
+  when `HELIX_URL` and `HELIX_TOKEN` are not set. `animus leave` (`POST
+  /leave`) takes the person off as `helix remove-person` does. `url` in
+  `config.yaml` puts the whole join command in what `helix invite` prints.
+  `helix serve` now starts with nobody on it yet.
+
 ## 0.3.1 (2026-11-16)
 
 - One interview skill: `/animus:grilling` is gone and `/animus:grill-with-docs`
