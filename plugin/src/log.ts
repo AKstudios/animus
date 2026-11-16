@@ -30,6 +30,8 @@ export type Run = {
   submitter: string;
   trigger: string;
   title: string;
+  /** The spec file the job was started from, as a path on the machine that ran it. */
+  spec_file?: string;
   size: string;
   difficulty: string;
   type: string;
@@ -71,6 +73,8 @@ export type JobState = {
   job: string;
   repo: string;
   spec: string;
+  /** The spec file the job was started from; spec is the job's own copy of it. */
+  source?: string;
   workspace: Workspace;
   plan: Plan;
   session?: string;

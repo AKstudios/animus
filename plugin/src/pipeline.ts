@@ -8,12 +8,13 @@ import { spawnSync } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
 import { copyFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { userInfo } from 'node:os';
-import { basename, join } from 'node:path';
+import { basename, join, resolve } from 'node:path';
+import { resolveAfter, waitForMerged } from './after.ts';
 import type { Agent, AgentResult } from './agent.ts';
 import { describe, failsOnBase, jobChecks, runChecks, type CheckResult } from './gates.ts';
 import { commitAll, mainCheckout, matchesAny, touchedFiles } from './git.ts';
 import { appendRun, jobDir, saveState, writeJson, type JobState, type Outcome, type Run } from './log.ts';
-import { evidenceBranch, prBody, type Evidence, type Publish } from './pr.ts';
+import { evidenceBranch, prBody, prState, type Evidence, type PrLookup, type Publish } from './pr.ts';
 import { loadProfile } from './profile.ts';
 import { describePlan, escalate, modelFor, PLUGIN_ROOT, raise, resolvePlan, type Factory, type Tier } from './profiles.ts';
 import { animusCommand, git, AnimusError, tryGit } from './proc.ts';
@@ -32,6 +33,9 @@ export type Deps = {
   evidence?: Evidence;
   /** Takes a UI job's screenshots; replaced in tests. */
   shots?: typeof takeShots;
+  /** How a spec with `after:` learns the earlier pull request merged, and how it waits between looks; replaced in tests. */
+  prState?: PrLookup;
+  sleep?: (ms: number) => Promise<void>;
 };
 
 export type RunOptions = {
@@ -123,8 +127,16 @@ export async function runJob(opts: RunOptions, deps: Deps): Promise<Run> {
     try { return await fn(); } finally { run.ms[stage] += Date.now() - t; }
   };
 
+  const source = prior ? prior.source : resolve(opts.specFile!);
+  if (source) run.spec_file = source;
+
   log(`job ${job}: ${spec.title}`);
   log(describePlan(factory, plan));
+  // A spec that builds on another waits for it, then starts from a base that holds it.
+  if (!prior && spec.after.length) {
+    const files = resolveAfter(repo, source!, spec.after);
+    await timed('queue', () => waitForMerged({ repo, files, lookup: deps.prState ?? prState, log, ...(deps.sleep ? { sleep: deps.sleep } : {}) }));
+  }
   if (spec.defaulted.length) log(`the spec's header has no ${spec.defaulted.join(', ')}: the default ran`);
 
   // ---------------------------------------------------------------- setup
@@ -142,7 +154,7 @@ export async function runJob(opts: RunOptions, deps: Deps): Promise<Run> {
   const wt = ws.worktree;
   run.branch = ws.branch;
   run.base = ws.base;
-  const state: JobState = { job, repo, spec: specCopy, workspace: ws, plan, ...(prior?.session ? { session: prior.session } : {}) };
+  const state: JobState = { job, repo, spec: specCopy, ...(source ? { source } : {}), workspace: ws, plan, ...(prior?.session ? { session: prior.session } : {}) };
   saveState(state);
 
   let summary = '';

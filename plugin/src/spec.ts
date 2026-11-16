@@ -17,6 +17,8 @@ export type Spec = Labels & {
   base?: string;
   /** For a ui spec: the profile's target and the pages to show. */
   ui: { target?: string; pages: string[] };
+  /** Spec files whose pull requests must be merged before this job starts. */
+  after: string[];
   /** Design references, repo-relative. */
   design: string[];
   criteria: Criterion[];
@@ -61,7 +63,7 @@ export function parseSpec(text: string, name = 'spec.md'): Spec {
   const title = typeof header.title === 'string' ? header.title.trim() : heading;
   if (!title) throw bad('needs a title: `title:` in the header, or a first-level heading');
 
-  const spec: Spec = { title, size, difficulty, type, ui: { pages: [] }, design: [], criteria: criteria(body), text, defaulted };
+  const spec: Spec = { title, size, difficulty, type, ui: { pages: [] }, after: [], design: [], criteria: criteria(body), text, defaulted };
   if (header.base !== undefined) {
     if (typeof header.base !== 'string') throw bad('base must be a branch name');
     spec.base = header.base;
@@ -72,6 +74,11 @@ export function parseSpec(text: string, name = 'spec.md'): Spec {
     const pages = typeof header.ui.pages === 'string' ? [header.ui.pages] : header.ui.pages ?? [];
     if (!isStrings(pages)) throw bad('ui.pages must list page names from the profile');
     spec.ui.pages = pages;
+  }
+  if (header.after !== undefined) {
+    const after = typeof header.after === 'string' ? [header.after] : header.after;
+    if (!isStrings(after)) throw bad('after must name the spec file (or files) this one runs after');
+    spec.after = after;
   }
   if (header.design !== undefined) {
     const design = typeof header.design === 'string' ? [header.design] : header.design;

@@ -287,3 +287,26 @@ test('a bug spec with no acceptance command is refused before anything starts', 
   await assert.rejects(runJob({ repo: makeRepo(), specFile: writeSpec(BUG, '1. The feature says done.\n') }, deps(agent)), /needs a `\$ command`/);
   assert.equal(calls.length, 0);
 });
+
+test('a spec with after: waits until the earlier spec\'s pull request is merged, and fails if it was closed unmerged', async () => {
+  const repo = makeRepo();
+  const first = writeSpec(SMALL);
+  const a = fakeAgent([say('done'), () => clean()]);
+  await runJob({ repo, specFile: first }, deps(a.agent, { publish: () => 'https://example.test/first' }));
+
+  const states = ['OPEN', undefined, 'MERGED'] as const;
+  let looks = 0;
+  let sleeps = 0;
+  const b = fakeAgent([say('done'), () => clean()]);
+  const d = deps(b.agent, { prState: (url) => { assert.equal(url, 'https://example.test/first'); return states[looks++]; }, sleep: async () => { sleeps += 1; } });
+  const run = await runJob({ repo, specFile: writeSpec(`${SMALL}\nafter: ${first}`) }, d);
+  assert.equal(run.outcome, 'pr');
+  assert.deepEqual([looks, sleeps], [3, 2]);
+  assert.match(d.lines.join('\n'), /waiting: this spec runs after .*first is open[\s\S]*could not be read[\s\S]*is merged/);
+  // Nothing started while it waited.
+  assert.ok(d.lines.findIndex((l) => /is merged/.test(l)) < d.lines.findIndex((l) => /^implement:/.test(l)));
+
+  const c = fakeAgent([]);
+  await assert.rejects(runJob({ repo, specFile: writeSpec(`${SMALL}\nafter: ${first}`) }, deps(c.agent, { prState: () => 'CLOSED' })), /closed without merging/);
+  await assert.rejects(runJob({ repo, specFile: writeSpec(`${SMALL}\nafter: docs/specs/none.md`) }, deps(c.agent)), /is not a spec file/);
+});

@@ -3,6 +3,7 @@ import { resolve } from 'node:path';
 import { parseArgs } from 'node:util';
 import { claudeAgent } from './agent.ts';
 import { cleanup, describeCleanup, KEEP_DAYS } from './cleanup.ts';
+import { initProfile } from './init.ts';
 import { describe, failsOnBase, jobChecks, runChecks } from './gates.ts';
 import { touchedFiles } from './git.ts';
 import { describeRuns, jobDir, loadState, readRuns, type Run } from './log.ts';
@@ -23,8 +24,13 @@ const USAGE = `animus: a spec goes in, a pull request with proof comes out
         Run one job: set up a worktree, implement, gates, review, open the PR.
         --dry-run stops before the push; --draft opens the PR as a draft;
         --keep leaves the worktree.
+        A spec with \`after: <spec.md>\` in its header waits until that spec's
+        pull request is merged, then starts.
   animus plan <spec.md>
         Check a spec and print what its labels would run. Starts nothing.
+  animus init [--repo <dir>] [--force]
+        Draft .animus/animus.yaml from the repo's package.json, pyproject.toml,
+        go.mod or Cargo.toml. Runs nothing; --force replaces a profile.
   animus resume <job> [--answer <text>] [--dry-run] [--keep]
         Pick up a job that asked a question or was interrupted.
   animus runs [-n <count>] [--json]
@@ -64,7 +70,7 @@ async function main(argv: string[]): Promise<number> {
     args: rest, allowPositionals: true,
     options: {
       repo: { type: 'string' }, 'dry-run': { type: 'boolean' }, keep: { type: 'boolean' }, draft: { type: 'boolean' }, answer: { type: 'string' },
-      json: { type: 'boolean' }, n: { type: 'string', short: 'n' }, again: { type: 'boolean' }, days: { type: 'string' },
+      json: { type: 'boolean' }, n: { type: 'string', short: 'n' }, again: { type: 'boolean' }, days: { type: 'string' }, force: { type: 'boolean' },
     },
   });
   const cwd = process.cwd();
@@ -89,8 +95,17 @@ async function main(argv: string[]): Promise<number> {
       const plan = resolvePlan(factory, spec);
       console.log(`${spec.title}\n${describePlan(factory, plan)}`);
       for (const role of ['implementer', ...(plan.review ? [plan.review.role] : [])]) console.log(`  skills     ${role}: ${grantsFor(factory, role, plan.type).map((g) => g.name).join(', ') || 'none'}`);
+      if (spec.after.length) console.log(`  waits for  ${spec.after.join(', ')} to be merged`);
       if (spec.defaulted.length) console.log(`  (no ${spec.defaulted.join(', ')} in the header: the default)`);
       spec.criteria.forEach((c, i) => console.log(`  ${i + 1}. ${c.text}${c.commands.map((x) => `\n       $ ${x}`).join('') || '\n       (no check command: only the reviewer judges it)'}`));
+      return 0;
+    }
+    case 'init': {
+      const r = initProfile(git(resolve(values.repo ?? cwd), ['rev-parse', '--show-toplevel']), Boolean(values.force));
+      say(`wrote ${r.file}`);
+      for (const line of r.said) say(`not found: ${line}`);
+      say('Read it and correct it before the first job: its commands are the gates.');
+      console.log(r.text);
       return 0;
     }
     case 'resume': {
