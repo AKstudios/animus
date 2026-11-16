@@ -1,6 +1,6 @@
 ---
 name: to-spec
-description: Turn the design agreed in the conversation into an Animus spec file, with the size, difficulty and type labels in its header and a check command under each acceptance criterion, or into several spec files when the work is too large for one job. No interview, just synthesis. Use after grilling, once the person has confirmed the design.
+description: Turn the design agreed in the conversation into an Animus spec file, with the size, difficulty and type labels in its header and a check command under each acceptance criterion, or into several spec files when the person wants parts of the work to merge separately. No interview, just synthesis. Use after grilling, once the person has confirmed the design.
 ---
 <!-- From mattpocock/skills, skills/engineering/to-spec at 49dd158 (MIT, see ../NOTICE.md), adapted for Animus. -->
 
@@ -12,7 +12,7 @@ Take the conversation and your understanding of the codebase and write the spec.
 
 2. Propose the three labels. They decide what the factory runs, so pick them from what the work is, not from how important it feels:
 
-   - **size**: `trivial` (a typo, copy, a config value, one or two files), `small` (a few files, follows a known pattern), `medium` (a feature across layers, roughly 5 to 20 files), `large` (multi-module work or a schema change). The factory refuses `large`: write several specs instead of one, as "Large work" below says.
+   - **size**: `trivial` (a typo, copy, a config value, one or two files), `small` (a few files, follows a known pattern), `medium` (a feature across layers, roughly 5 to 20 files), `large` (multi-module work or a schema change). A medium or large spec is cut into slices by the factory and still ends as one pull request: see "Large work" below.
    - **difficulty**: `routine` (follows an existing pattern in the repo), `hard` (unfamiliar area, cross-cutting change, unclear root cause), `risky` (auth, payments, migrations, data deletion). They are separate from size: a ten-line concurrency bug is small but hard.
    - **type**: `feature`, `backend`, `ui` or `bug` run today. A `bug` spec needs a `$ command` under at least one criterion that runs the test reproducing the bug: the factory checks that it fails without the fix. `refactor`, `upgrade`, `migration`, `performance`, `docs`, `tests` and `investigation` are defined but not built; `animus plan` says so. A `ui` spec may name the profile's target and pages (`ui: { target: app, pages: [home] }`) and design files (`design: [design/shop.png]`).
 
@@ -26,12 +26,11 @@ Take the conversation and your understanding of the codebase and write the spec.
 
 ## Large work
 
-The factory cuts a medium spec into slices itself and does each in a fresh session, toward one pull request. It does not yet do that for a large one. So work that is multi-module or changes a schema is split here, with the person, into several medium specs, each run as its own job with its own pull request.
+Large work is still one spec, one job and one pull request. The factory cuts a medium or large spec into slices itself, along the acceptance criteria, and does each slice in a fresh session on the job's branch. Do not split the work into several specs to make it fit, and do not write the slices yourself.
 
-- Cut by behaviour, not by layer. Each spec goes through every layer it needs (schema, logic, UI) for one piece of what the person asked for, leaves the app working, and can merge by itself. A spec that only "adds the table" proves nothing until a later one lands.
-- Each spec is complete: its own labels (none `large`), its own acceptance criteria and check commands. It must make sense to an agent that has read nothing else.
-- Name them in order, `docs/specs/<slug>-1-<part>.md`, `-2-`, and so on. A job starts from the base branch as the remote has it, so a spec that needs an earlier one names it in its header: `after: docs/specs/<slug>-1-<part>.md`. Its job then waits until the earlier spec's pull request is merged and starts from the base that holds it. Prefer specs that do not depend on each other: those can run at once.
-- Run `animus plan` on each, then start every spec with `animus run <file>` in the background, the waiting ones too. Tell the person the list: one line per spec with its title, labels and what it waits for. A waiting job starts by itself once they merge the earlier pull request, and stops if they close it unmerged. The session has to stay open for it.
+- Label it `large` when it is multi-module or changes a schema. A large spec is reviewed at the deep tier and runs only as slices, so it needs enough criteria to cut along: one per behaviour, as "Acceptance criteria" below says.
+- Write several specs only when the person wants the parts to merge separately: different outcomes that happen to be asked for together, or a first part they want in use before the rest is built. Each is then complete by itself, with its own labels and criteria. Name them in order, `docs/specs/<slug>-1-<part>.md`, `-2-`, and so on.
+- A job starts from the base branch as the remote has it, so a spec that needs an earlier one names it in its header: `after: docs/specs/<slug>-1-<part>.md`. Its job waits until the earlier spec's pull request is merged and starts from the base that holds it. Run `animus plan` on each, start every one with `animus run <file>` in the background, the waiting ones too, and tell the person the list: one line per spec with its title, labels and what it waits for. The session has to stay open for them.
 
 ## Acceptance criteria
 

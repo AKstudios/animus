@@ -312,7 +312,9 @@ export async function runJob(opts: RunOptions, deps: Deps): Promise<Run> {
           return planned.slicing;
         } catch (err) {
           if (!(err instanceof AnimusError)) throw err;
-          // The work a planner could not cut is done the way it was before there was a planner.
+          // A large spec does not fit one session, so with no cut there is no way to run it.
+          if (spec.size === 'large') throw new Stop('failed', `a large spec runs only as slices, and no cut was taken: ${err.message}`);
+          // Smaller work a planner could not cut is done the way it was before there was a planner.
           planFallback = err.message;
           log(`no plan was taken, so the job runs as one slice: ${err.message.split('\n')[0]}`);
           return oneSlice(spec);

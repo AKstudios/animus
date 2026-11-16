@@ -32,7 +32,9 @@ Size picks the stages, difficulty picks the model and effort, and type adds a sk
 | Trivial | Typo, copy, config value | Clone and dependencies only | Lint, types, affected tests | Skipped |
 | Small | A few files, known pattern | Services only if tests need them | Full | Fast-tier reviewer |
 | Medium | A feature across layers | Full stack | Full | Standard-tier reviewer |
-| Large | Multi-module or schema work | Not run as one job. Split into medium jobs with `to-issues` at spec time. |  |  |
+| Large | Multi-module or schema work | Full stack | Full | Deep-tier reviewer |
+
+A medium or large spec is cut into slices before any code is written, and each slice is done by a fresh session on the job's branch. It is still one job and one pull request.
 
 | Difficulty | Signals | Model tier | Effort |
 | --- | --- | --- | --- |

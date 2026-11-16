@@ -14,7 +14,7 @@ plugin/bin/animus run path/to/spec.md      # from inside the target repo
 
 `run` prints progress on stderr and a JSON result on stdout. It needs `claude`, `git` and `gh` on PATH, Node 24, and a `.animus/animus.yaml` in the target repo.
 
-From a Claude Code session with the plugin installed, you talk and the factory does the rest. `/animus:grill-with-docs` (or `/animus:grilling`) interviews you, `/animus:to-spec` writes the spec, checks it and starts the job in the background. The session has to stay open until the job ends: compacting is fine, closing or clearing it stops the job. All of a job's state is in files, so one that was cut off is picked up with `animus resume <job>`. A design too large for one job becomes several specs, each its own job and PR. No agent breaks a spec down mid-run.
+From a Claude Code session with the plugin installed, you talk and the factory does the rest. `/animus:grill-with-docs` (or `/animus:grilling`) interviews you, `/animus:to-spec` writes the spec, checks it and starts the job in the background. The session has to stay open until the job ends: compacting is fine, closing or clearing it stops the job. All of a job's state is in files, so one that was cut off is picked up with `animus resume <job>`. A large design is still one spec and one PR: the factory cuts it into slices and does each in a fresh session.
 
 | Command | What it does |
 | --- | --- |
@@ -64,7 +64,7 @@ A job that was running when Helix stopped or died is queued again when it comes 
 
 ```markdown
 ---
-size: small          # trivial | small | medium (large is refused)
+size: small          # trivial | small | medium | large (medium and large are cut into slices)
 difficulty: routine  # routine | hard | risky
 type: feature        # feature | backend | ui
 ---
@@ -82,7 +82,7 @@ Each list item under "Acceptance criteria" is one criterion. A `$ command` line 
 ## What a job does
 
 1. **Set up.** A worktree at `../.worktrees/<repo>/<job>` on branch `animus/<job>`, started from `origin/<base>`. The profile's installs are cloned from a cache, then its `setup` runs.
-2. **Plan.** A medium spec is cut into slices first: a read-only session proposes the cut and a script takes or refuses it (`animus plan --slices` shows the same thing). A small or trivial spec is one slice, with no session. If the cut is refused twice the job runs as one slice.
+2. **Plan.** A medium or large spec is cut into slices first: a read-only session proposes the cut and a script takes or refuses it (`animus plan --slices` shows the same thing). A small or trivial spec is one slice, with no session. If the cut is refused twice a medium job runs as one slice and a large one fails.
 3. **Implement.** One session per slice, in order, on the job's branch. Each is fresh: it gets its slice, the criteria that slice finishes, a line on the slices before and after it, the planner's brief and the spec. It writes the code and its tests and commits at each step. Before the next slice starts, the gates run with the acceptance commands of the slices so far, and failures go back to that slice's session, at most twice. A job of one slice is one session, as before.
 4. **Gates.** On the finished branch: the profile's commands for the type, then every criterion's command. Failures go back to the same session, one model tier up, at most twice.
 

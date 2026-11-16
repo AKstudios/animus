@@ -71,9 +71,11 @@ Every job carries three labels: size, difficulty and type. Size picks the stages
 | Trivial | Typo, copy, config value, one or two files | Clone and dependencies only | Lint, types, affected tests | Skipped |
 | Small | A few files, follows a known pattern | Services only if the tests need them | Full | Fast-tier reviewer |
 | Medium | A feature across layers, roughly 5 to 20 files | Full stack | Full | Standard-tier reviewer |
-| Large | Multi-module work or schema changes | Not run as one job |  |  |
+| Large | Multi-module work or schema changes | Full stack | Full | Deep-tier reviewer |
 
-A large spec is split with `to-issues` into medium jobs at spec time. The factory rejects a spec labelled large.
+A medium or large spec is cut into slices before any code is written. A read-only planner session, with the `to-tickets` skill, reads the spec and the repo and proposes the cut and a brief the slices share. A script takes the cut only if every acceptance criterion is held by exactly one slice, each slice says what it delivers, the order is sound and there are no more slices than criteria; a refused cut goes back once. Each slice is then done by a fresh session on the job's branch, and the gates run with the criteria of the slices so far before the next one starts. After the last slice the whole spec is gated and one reviewer reads the whole diff. The job is still one pull request.
+
+This keeps every session short, which is where a model works best, and it is why acceptance criteria are written by behaviour: the cut follows them. A medium spec whose cut is refused twice runs as one session. A large one fails before any code is written.
 
 **Difficulty picks the model and effort**
 
@@ -250,8 +252,8 @@ Keep the set small and name must-use skills in the spec or the workflow prompt. 
 | Where it lives | Skills | Why there |
 | --- | --- | --- |
 | Each repo (`.claude/skills/`, plus `CLAUDE.md`) | How to run and verify the app, code conventions, your design system components | Knowledge no model upgrade can supply; arrives with every clone |
-| The factory | A reviewer skill; `tdd`, named only in bug-fix specs; one UI design skill, only for UI repos | They work with nobody answering |
-| Your laptop | `grill-me` and `to-prd` for shaping specs; `to-issues` when a spec is too big for one job | They need a conversation with you |
+| The factory | `to-tickets`, for the planner that cuts a spec into slices; a reviewer skill; `tdd`, named only in bug-fix specs; one UI design skill, only for UI repos | They work with nobody answering |
+| Your laptop | `grill-me` and `to-prd` for shaping specs | They need a conversation with you |
 
 Re-test each public skill when a new model ships: run the same few specs with and without it, and delete it if the PRs are no better.
 

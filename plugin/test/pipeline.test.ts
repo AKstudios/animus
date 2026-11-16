@@ -188,14 +188,6 @@ test('a change under a protected path is flagged at the top of the PR', async ()
   assert.match(d.published[0]!.body, /Changes under protected paths: `\.github\/workflows\/ci\.yml`/);
 });
 
-test('a large spec is refused before anything starts', async () => {
-  const repo = makeRepo();
-  const { agent, calls } = fakeAgent([]);
-  await assert.rejects(runJob({ repo, specFile: writeSpec('size: large\ndifficulty: routine\ntype: feature') }, deps(agent)), AnimusError);
-  assert.equal(calls.length, 0);
-  assert.equal(git(repo, ['branch', '--list', 'animus/*']), '');
-});
-
 test('a ui job hands the reviewer the screenshots a script took, and lists them in the PR', async () => {
   const repo = makeRepo();
   write(repo, '.animus/animus.yaml', 'commands:\n  test: grep -q done src/feature.txt\nui:\n  targets:\n    app: { url: "http://127.0.0.1:$PORT", serve: "true" }\n');

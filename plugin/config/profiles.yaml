@@ -53,7 +53,10 @@ sizes:
     review: standard
   large:
     looks_like: Multi-module work or schema changes
-    reject: a large spec is not run as one job. Split it into medium specs, each run as its own job (/animus:to-spec, "Large work")
+    setup: full
+    gates: full
+    review: deep       # one reviewer reads the whole diff of every slice
+    # Run only as slices: a large spec whose cut is not taken fails before any code is written.
 
 difficulties:
   routine:

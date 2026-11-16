@@ -32,8 +32,8 @@ test('a ui job gets the full stack, the ui reviewer and screenshots', () => {
   assert.deepEqual(p.evidence, ['commands', 'screenshots']);
 });
 
-test('a large spec and a type not built yet are refused with the reason', () => {
-  assert.throws(() => plan('large', 'routine'), /Split it into medium specs/);
+test('a large spec runs with the deep reviewer, and a type not built yet is refused with the reason', () => {
+  assert.deepEqual([plan('large', 'routine').review?.tier, plan('large', 'routine').gates], ['deep', 'full']);
   assert.throws(() => plan('small', 'routine', 'refactor'), /does not run yet.*Types that run: feature, backend, ui, bug/s);
   assert.throws(() => plan('small', 'routine', 'poetry'), /not one of/);
 });

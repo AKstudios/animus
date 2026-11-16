@@ -118,3 +118,18 @@ test('a cut the check refuses twice does not stop the job: it runs as one slice,
   assert.match(calls[2]!.prompt, /^Job [^\n]*You are in a fresh worktree/);
   assert.doesNotMatch(d.published[0]!.body, /Done in this order/);
 });
+
+test('a large spec runs as slices, and with no cut taken it fails before any code is written', async () => {
+  const LARGE = 'size: large\ndifficulty: routine\ntype: feature';
+  const ok = fakeAgent([planner, one, two, three, () => clean(3)]);
+  const run = await runJob({ repo: makeRepo(), specFile: writeSpec(LARGE, CRITERIA) }, deps(ok.agent));
+  assert.deepEqual([run.outcome, run.slices?.done, ok.calls.at(-1)!.tier], ['pr', 3, 'deep']);
+
+  const bad = { brief: 'b', slices: [{ title: 'Half', delivers: 'Half of it.', criteria: [1], after: [] }] };
+  const none = fakeAgent([() => ({ output: bad }), () => ({ output: bad })]);
+  const d = deps(none.agent);
+  const failed = await runJob({ repo: makeRepo(), specFile: writeSpec(LARGE, CRITERIA) }, d);
+  assert.equal(failed.outcome, 'failed');
+  assert.match(failed.reason!, /a large spec runs only as slices, and no cut was taken: [\s\S]*refused twice/);
+  assert.deepEqual([none.calls.length, d.published.length], [2, 0]);
+});
