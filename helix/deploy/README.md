@@ -28,7 +28,7 @@ works as it is. Otherwise edit those paths in `config.yaml`.
 4. Clone each repository over https into `~/repos/<name>`, then run
    `helix/bin/helix add-repo <name> ~/repos/<name>` for each one.
 5. Set `url` in `config.yaml` to the address people will reach Helix at
-   (`https://abstergo.<tailnet>.ts.net`). For each person run `helix invite
+   (`https://helix.<tailnet>.ts.net`, step 7). For each person run `helix invite
    <name>` and send them the command it prints; they run it on their laptop
    once Helix is up (step 7). By hand instead: write their
    `~/.helix/credentials/<name>.env` (mode 600, with
@@ -38,7 +38,10 @@ works as it is. Otherwise edit those paths in `config.yaml`.
    install Docker, run setup.sh again for the docker group, run `helix/bin/helix
    image`, and add `container: {memory: 6g, cpus: 2}` to `config.yaml`.
 7. Run `helix/bin/helix check`. Then `sudo systemctl start helix.service` and
-   `tailscale serve --bg 7420`.
+   `tailscale serve --service=svc:helix --https=443 127.0.0.1:7420`, which gives Helix
+   its own name on the tailnet, `https://helix.<tailnet>.ts.net`, apart from
+   the machine's. The machine needs a tag, and the service needs approving
+   once in Tailscale's admin console (Services).
 8. From a laptop, `animus join <url> <code>`, then `animus doctor`.
 
 ## Moving abstergo to new hardware, keeping everything
@@ -50,12 +53,13 @@ works as it is. Otherwise edit those paths in `config.yaml`.
 3. Copy the state across: `rsync -a ~/.helix ~/.animus ~/repos NEW:`. Do it
    as that account on both machines, so the files keep their owner and the
    credentials files stay mode 600.
-4. In Tailscale's admin console, rename or remove the old machine, then name
-   the new one `abstergo`. The URL stays
-   `https://abstergo.<tailnet>.ts.net`, so the address each laptop kept when it joined still works, and
-   their Helix tokens still work because the hashes came across.
+4. On the old machine: `tailscale serve clear svc:helix`.
 5. On the new machine: `helix check`, start the service, and run
-   `tailscale serve --bg 7420`. A job that was waiting for an answer resumes
+   `tailscale serve --service=svc:helix --https=443 127.0.0.1:7420`. Give it the old
+   machine's tag and approve it as `svc:helix`'s host in the admin console.
+   The address stays `https://helix.<tailnet>.ts.net`, so what each laptop
+   kept when it joined still works, and their Helix tokens still work because
+   the hashes came across. A job that was waiting for an answer resumes
    there when it is answered.
 
 ## Another system
