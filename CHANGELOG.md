@@ -8,6 +8,35 @@ clients with how to update.
 
 ## Unreleased
 
+- The installers take `join <url> <code>`: after setup they run `animus join`
+  with them, so one line installs Animus and joins a Helix
+  (`curl -fsSL …/install.sh | bash -s -- join <url> <code>`).
+- `helix slack setup` tries the Slack app's bot and app tokens against Slack,
+  keeps them in `~/.helix/credentials/slack.env` and turns the bot on in
+  `config.yaml` (`slack: {enabled, owner}`). A refused token is reported with
+  Slack's reason and nothing is written.
+- With `slack.enabled` in `config.yaml`, `helix serve` connects to Slack over
+  Socket Mode: every envelope is acknowledged at once, and a socket Slack
+  drops is replaced. With it off, Helix opens no connection to Slack.
+- The Slack bot answers a Slack user with no Slack link, whatever they send,
+  with a private "You're not on this Helix. Ask <owner> for an invite.", and
+  keeps nothing. An invite may carry a Slack user, linked to the person when
+  they join; the owner's `/helix link @user <person>` links someone who joined
+  before. Leaving Helix, or `helix remove-person`, removes the link.
+- The owner invites someone from Slack with `/helix invite @user
+  <github-login>`, or on the machine with `helix invite <name> --github
+  <login> --slack <member-id>`: the bot DMs them to connect Tailscale first,
+  and one line that installs Animus and joins. An invite sent on Slack must
+  name a GitHub login, and only the owner may send one.
+- A linked person's Helix jobs, however submitted, post to them on Slack, one
+  DM thread per job: started (or resumed), needs input with the question, the
+  pull request's link, or failed with the reason. `/helix notify off` stops
+  these for that person and `/helix notify on` starts them again; they are on
+  by default.
+- The Slack app's manifest is in `helix/deploy/slack/manifest.yaml`;
+  docs/helix-deploy.md walks from creating the app to `helix slack setup`,
+  and docs/helix.md describes the bot's commands.
+
 ## 0.3.8 (2026-11-17)
 
 - The installers and `animus setup` find Animus's marketplace by its GitHub

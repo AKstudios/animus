@@ -15,6 +15,7 @@ import { fileURLToPath } from 'node:url';
 import { failing, type Finding } from './check.ts';
 import { addPerson, checkName, hashToken, helixHome, removePerson } from './config.ts';
 import { personDirs } from './container.ts';
+import { SLACK_USER } from './slack-api.ts';
 import type { Invite, Store } from './store.ts';
 import { cancelJobsOf, Refused } from './supervisor.ts';
 import type { HelixJob } from './store.ts';
@@ -33,17 +34,23 @@ export type Verify = (env: Record<string, string>) => Promise<{ findings: Findin
 /** What the person is told about an invite before they make their tokens. */
 export type InviteDetails = { name: string; github?: string; expires: string; repos: { name: string; url: string }[] };
 
-/** Makes an invite and returns its code: the only time it exists in the clear. */
-export function invite(store: Store, name: string, opts: { github?: string; at?: Date } = {}): { code: string; expires: string } {
+/**
+ * Makes an invite and returns its code: the only time it exists in the clear.
+ * With a Slack user, joining with it links that user to the person.
+ */
+export function invite(store: Store, name: string, opts: { github?: string; slack?: string; at?: Date } = {}): { code: string; expires: string } {
   checkName(name);
   if (store.person(name)) throw new Refused(409, `${name} is already on Helix: helix remove-person ${name} first, or helix add-person ${name} for a new token`);
   if (opts.github !== undefined && !/^[A-Za-z0-9-]{1,39}$/.test(opts.github)) throw new Refused(400, `${opts.github} is not a GitHub login`);
+  if (opts.slack !== undefined && !SLACK_USER.test(opts.slack)) throw new Refused(400, `${opts.slack} is not a Slack user id: one starts with U, as in U0123ABCD`);
+  // A code sent on Slack could be read by someone else: the login keeps it to one GitHub account.
+  if (opts.slack !== undefined && !opts.github) throw new Refused(400, 'an invite sent on Slack names their GitHub login, so only a token that signs in as it is taken');
   // Four groups of four from an alphabet with no look-alikes: easy to read out, close to 80 bits to guess.
   const alphabet = 'abcdefghjkmnpqrstuvwxyz23456789';
   const bytes = randomBytes(16);
   const code = Array.from(bytes, (b) => alphabet[b % alphabet.length]).join('').replace(/(.{4})(?!$)/g, '$1-');
   const expires = new Date((opts.at ?? new Date()).getTime() + INVITE_HOURS * 3_600_000).toISOString();
-  store.invite({ code_sha256: hashToken(normalise(code)), name, expires, ...(opts.github ? { github: opts.github } : {}) });
+  store.invite({ code_sha256: hashToken(normalise(code)), name, expires, ...(opts.github ? { github: opts.github } : {}), ...(opts.slack ? { slack: opts.slack } : {}) });
   return { code, expires };
 }
 
@@ -93,6 +100,7 @@ export async function joinHelix(opts: { store: Store; verify: Verify; at?: Date 
   writeFileSync(file, Object.entries(env).map(([k, v]) => `${k}=${v}\n`).join(''), { mode: 0o600 });
   chmodSync(file, 0o600);
   const token = addPerson(store, i.name, file, login);
+  if (i.slack) store.linkSlack(i.name, i.slack);
   const cannot = findings.filter((f) => !f.ok && f.optional).map((f) => f.what.replace(/^push to /, ''));
   return { name: i.name, token, ...(login ? { github: login } : {}), cannot_push: cannot };
 }
