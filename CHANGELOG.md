@@ -18,6 +18,11 @@ clients with how to update.
 - With `slack.enabled` in `config.yaml`, `helix serve` connects to Slack over
   Socket Mode: every envelope is acknowledged at once, and a socket Slack
   drops is replaced. With it off, Helix opens no connection to Slack.
+- The Slack bot answers a Slack user with no Slack link, whatever they send,
+  with a private "You're not on this Helix. Ask <owner> for an invite.", and
+  keeps nothing. An invite may carry a Slack user, linked to the person when
+  they join; the owner's `/helix link @user <person>` links someone who joined
+  before. Leaving Helix, or `helix remove-person`, removes the link.
 
 ## 0.3.8 (2026-11-17)
 

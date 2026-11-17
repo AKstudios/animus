@@ -1,10 +1,12 @@
 // A fake Slack for the Socket Mode client: apps.connections.open hands out a
 // ws:// URL on this same server, whose upgrade speaks just enough WebSocket
 // (RFC 6455, unfragmented text frames) to say hello, send envelopes and read
-// acks. No test talks to Slack.
+// acks. The bot's core is driven through a fake transport instead, which
+// records what it posts. No test talks to Slack.
 import { createHash } from 'node:crypto';
 import { createServer } from 'node:http';
 import type { AddressInfo, Socket } from 'node:net';
+import type { SlackEvent, Transport } from '../src/slack-api.ts';
 
 export type FakeSlack = {
   api: string;
@@ -85,6 +87,25 @@ export async function fakeSlack(tokens = { app: 'xapp-good' }): Promise<FakeSlac
       return new Promise((r) => { server.close(() => r()); });
     },
   };
+}
+
+/** What the bot's core sent through the fake transport. */
+export type Sent =
+  | { method: 'post'; channel: string; text: string; thread?: string }
+  | { method: 'dm'; user: string }
+  | { method: 'ephemeral'; channel: string; user: string; text: string };
+
+/** A transport for the bot's core that records what it sends; deliver hands it an event as Slack would. */
+export function fakeTransport() {
+  let handle: ((event: SlackEvent) => Promise<void>) | undefined;
+  const sent: Sent[] = [];
+  const transport: Transport = {
+    onEvent: (h) => { handle = h; },
+    post: async (channel, text, thread) => { sent.push({ method: 'post', channel, text, ...(thread ? { thread } : {}) }); return `ts-${sent.length}`; },
+    dm: async (user) => { sent.push({ method: 'dm', user }); return `D-${user}`; },
+    ephemeral: async (channel, user, text) => { sent.push({ method: 'ephemeral', channel, user, text }); },
+  };
+  return { transport, sent, deliver: (event: SlackEvent) => handle!(event) };
 }
 
 /** Waits for what a test expects to happen, failing after a while instead of hanging. */

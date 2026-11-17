@@ -9,6 +9,9 @@ import { helixHome, updateConfig } from './config.ts';
 
 export const SLACK_API = 'https://slack.com/api';
 
+/** A Slack user id, as in U0123ABCD. */
+export const SLACK_USER = /^[UW][A-Z0-9]{2,}$/;
+
 /** The bot token (xoxb-) and the app token (xapp-), out of config.yaml. */
 export const slackEnvFile = () => join(helixHome(), 'credentials', 'slack.env');
 
@@ -47,7 +50,7 @@ export async function slackCall(token: string, method: string, body: Record<stri
  */
 export async function slackSetup(answers: { bot: string; app: string; owner: string }, api = SLACK_API): Promise<{ team?: string }> {
   const owner = answers.owner.trim();
-  if (!/^[UW][A-Z0-9]{2,}$/.test(owner)) throw new AnimusError(`${owner} is not a Slack user id: one starts with U, as in U0123ABCD (in Slack, your profile, ⋮, Copy member ID)`);
+  if (!SLACK_USER.test(owner)) throw new AnimusError(`${owner} is not a Slack user id: one starts with U, as in U0123ABCD (in Slack, your profile, ⋮, Copy member ID)`);
   const tokens = { bot: answers.bot.trim(), app: answers.app.trim() };
   const tried = async (what: keyof typeof tokens, method: string) => {
     // One line in slack.env each: anything but printable characters is no token.

@@ -1,5 +1,5 @@
 // Helix's record: the queue (one row per submitted job), the people who may
-// submit, the projects they may submit for, and open invites, all in one
+// submit and their Slack links, the projects they may submit for, and open invites, all in one
 // SQLite file. It is kept apart from the supervisor, so a supervisor that dies
 // is started again and carries on from what the tables say, and the helix
 // command changes it beside a running `helix serve`, which sees the change on
@@ -61,8 +61,11 @@ export type Project = {
   added: string; added_by?: string; reason?: string;
 };
 
-/** A one-time code given to someone to join with (`helix invite`). Only the code's hash is kept. */
-export type Invite = { code_sha256: string; name: string; github?: string; expires: string };
+/**
+ * A one-time code given to someone to join with (`helix invite`). Only the
+ * code's hash is kept. slack: the Slack user joining with it links to the person.
+ */
+export type Invite = { code_sha256: string; name: string; github?: string; slack?: string; expires: string };
 
 /** One try at moving this machine to a release (`helix upgrade`): when, and whether it went on. */
 export type Upgrade = { tag: string; at: string; ok: boolean; detail?: string };
@@ -85,8 +88,12 @@ export type Store = {
   /** Who holds a token with this hash. */
   personByToken(tokenSha256: string): string | undefined;
   putPerson(name: string, person: Person): void;
-  /** Removes a person; whether there was one. */
+  /** Removes a person and their Slack link; whether there was one. */
   dropPerson(name: string): boolean;
+  /** Links a Slack user (U…) to a person, replacing either's earlier link. */
+  linkSlack(name: string, slackUser: string): void;
+  /** The person a Slack user is linked to. */
+  personBySlack(slackUser: string): string | undefined;
   project(name: string): Project | undefined;
   /** Every project, by name. */
   projects(): Project[];
@@ -110,6 +117,8 @@ export function openStore(file: string): Store {
   db.exec('create table if not exists people (name text primary key, token_sha256 text not null, data text not null)');
   db.exec('create table if not exists projects (name text primary key, data text not null)');
   db.exec('create table if not exists upgrades (tag text primary key, data text not null)');
+  // One Slack user per person and one person per Slack user: the Slack link.
+  db.exec('create table if not exists slack_links (slack text primary key, name text not null unique)');
   const data = <T>(r: unknown): T => JSON.parse((r as { data: string }).data) as T;
   const asInvite = (r: unknown): Invite => JSON.parse((r as { data: string }).data) as Invite;
   const live = (i: Invite, at: Date) => Date.parse(i.expires) > at.getTime();
@@ -142,7 +151,15 @@ export function openStore(file: string): Store {
     people: () => Object.fromEntries(db.prepare('select name, data from people order by name').all().map((r) => [(r as { name: string }).name, data<Person>(r)])),
     personByToken: (hash) => (db.prepare('select name from people where token_sha256 = ?').get(hash) as { name: string } | undefined)?.name,
     putPerson(name, p) { db.prepare('insert into people (name, token_sha256, data) values (?, ?, ?) on conflict (name) do update set token_sha256 = excluded.token_sha256, data = excluded.data').run(name, p.token_sha256, JSON.stringify(p)); },
-    dropPerson: (name) => Number(db.prepare('delete from people where name = ?').run(name).changes) > 0,
+    dropPerson(name) {
+      db.prepare('delete from slack_links where name = ?').run(name);
+      return Number(db.prepare('delete from people where name = ?').run(name).changes) > 0;
+    },
+    linkSlack(name, slack) {
+      db.prepare('delete from slack_links where name = ? or slack = ?').run(name, slack);
+      db.prepare('insert into slack_links (slack, name) values (?, ?)').run(slack, name);
+    },
+    personBySlack: (slack) => (db.prepare('select name from slack_links where slack = ?').get(slack) as { name: string } | undefined)?.name,
     project: (name) => { const r = db.prepare('select data from projects where name = ?').get(name); return r ? data<Project>(r) : undefined; },
     projects: () => db.prepare('select data from projects order by name').all().map((r) => data<Project>(r)),
     putProject(p) { db.prepare('insert into projects (name, data) values (?, ?) on conflict (name) do update set data = excluded.data').run(p.name, JSON.stringify(p)); },

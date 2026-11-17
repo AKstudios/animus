@@ -20,6 +20,7 @@ import { INVITE_HOURS, invite, takeOff } from './join.ts';
 import { ask } from '../../plugin/src/join.ts';
 import { slackEnvFile, slackSetup } from './slack-api.ts';
 import { startSlack } from './slack-socket.ts';
+import { slackBot } from './slack.ts';
 import { serve } from './server.ts';
 import { openStore, type Store } from './store.ts';
 import { releaseToFollow } from './upgrade.ts';
@@ -160,7 +161,8 @@ function main(argv: string[]): number | undefined | Promise<number> {
       const supervisor = supervise({ store, config, home, preflight, say, ...isolation });
       // Only with slack.enabled in config.yaml; turning it on or off takes a restart.
       const slack = startSlack(config, { say });
-      const server =serve({ config, store, supervisor, home, startCheck: checkInChild(store, home, say), ...(config.container ? { reap: removeContainer } : {}) });
+      if (slack) slackBot(slack, { store, config });
+      const server = serve({ config, store, supervisor, home, startCheck: checkInChild(store, home, say), ...(config.container ? { reap: removeContainer } : {}) });
       server.listen(config.port, config.host, () => console.error(`helix ${animusVersion()}: listening on http://${config.host}:${config.port}, ${config.slots} job(s) at once${config.container ? ', each in a container' : ''}, projects: ${Object.keys(readyRepos(store)).join(', ') || 'none yet'}`));
       // Someone changed the slots or the container limits: the same config object, so everything sees it at once.
       watchFile(configFile(), { interval: 2000 }, () => {
