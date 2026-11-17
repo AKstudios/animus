@@ -22,5 +22,3 @@
 - [development.md](development.md): tests, code conventions, what came from
   orbit
 - [releases.md](releases.md): cutting a release and moving Helix to it
-- [handoff.md](handoff.md): what is built, what is next, what has not been
-  tried

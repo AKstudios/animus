@@ -1,6 +1,8 @@
 {
-  "name": "animus",
-  "owner": { "name": "Ajmal Ali" },
+  "name": "akstudios",
+  "owner": {
+    "name": "Ajmal Ali"
+  },
   "description": "Animus, a software factory on Claude Code.",
   "plugins": [
     {

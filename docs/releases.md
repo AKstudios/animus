@@ -42,6 +42,17 @@ tag, including one that failed before or an older one. A second upgrade
 while one is under way is refused. Claude Code on the machine is not
 updated by either; update it by hand after an upgrade.
 
+## How people get a release
+
+Claude Code updates a marketplace that is not Anthropic's only when told
+to. `animus setup` asks each person, and sets `autoUpdate` for them; then
+Claude Code checks `stable` shortly after each session starts and installs a
+new release. Without it, `claude plugin update animus@akstudios` does the
+same by hand. Commits to `main` reach nobody until a release moves `stable`.
+
+The install scripts, `install.sh` and `install.ps1`, are fetched from
+`stable` too, so a change to them reaches new people with the next release.
+
 ## Keeping a team repository on the latest release
 
 To have Claude Code offer Animus in a repository and keep it up to date, put
@@ -50,8 +61,8 @@ this in its `.claude/settings.json`:
 ```json
 {
   "extraKnownMarketplaces": {
-    "animus": { "source": { "source": "github", "repo": "AKstudios/animus", "ref": "stable" }, "autoUpdate": true }
+    "akstudios": { "source": { "source": "github", "repo": "AKstudios/animus", "ref": "stable" }, "autoUpdate": true }
   },
-  "enabledPlugins": { "animus@animus": true }
+  "enabledPlugins": { "animus@akstudios": true }
 }
 ```

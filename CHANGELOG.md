@@ -8,6 +8,21 @@ clients with how to update.
 
 ## Unreleased
 
+- The marketplace is now called `akstudios`, so the plugin is
+  `animus@akstudios`; existing installs move once. `animus setup` removes the one called `animus` and
+  its plugin; by hand, `claude plugin marketplace remove animus`, then add
+  `akstudios/animus#stable` and install `animus@akstudios`. `animus doctor`
+  warns while the old one is there.
+- One command installs Animus: `install.sh` (macOS, Linux) and `install.ps1`
+  (Windows) install git, Node 24 and Claude Code where missing, asking
+  first, add the marketplace, and run `animus setup`.
+- `animus setup`: `gh` installed and signed in, Claude Code signed in,
+  Animus updating itself if the person agrees, Animus turned on in every
+  project or in the checkouts they pick, and the `animus` command in
+  `~/.local/bin`, which runs the newest installed copy of the plugin.
+- `animus enable [<dir>]` turns Animus on in one more checkout, for that
+  person only.
+
 ## 0.3.5 (2026-11-17)
 
 - `helix cleanup` removes what finished jobs leave on a Helix machine, and

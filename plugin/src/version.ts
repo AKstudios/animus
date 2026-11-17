@@ -4,26 +4,13 @@
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { PLUGIN_ROOT } from './profiles.ts';
+import { parseVersion } from './semver.ts';
 
-/** The oldest Claude Code a real job has run on. Jobs use its newer flags (--autocompact, --max-budget-usd, --json-schema). */
-export const MIN_CLAUDE = '2.1.322';
+export { atLeast, MIN_CLAUDE, parseVersion } from './semver.ts';
 
 export function animusVersion(): string {
   const manifest = JSON.parse(readFileSync(join(PLUGIN_ROOT, '.claude-plugin', 'plugin.json'), 'utf8')) as { version?: string };
   return manifest.version ?? '0.0.0';
-}
-
-/** The numbers of a version such as 1.2.3 or 2.1.322 (Claude Code), or undefined. */
-export function parseVersion(v: string): [number, number, number] | undefined {
-  const m = /(\d+)\.(\d+)\.(\d+)/.exec(v);
-  return m ? [Number(m[1]), Number(m[2]), Number(m[3])] : undefined;
-}
-
-export function atLeast(v: string, min: string): boolean {
-  const a = parseVersion(v), b = parseVersion(min);
-  if (!a || !b) return false;
-  for (let i = 0; i < 3; i++) if (a[i] !== b[i]) return a[i]! > b[i]!;
-  return true;
 }
 
 /**

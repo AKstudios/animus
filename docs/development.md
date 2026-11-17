@@ -31,9 +31,9 @@ The rules about agents, skills, state and releases are in
 
 ## Where things stand
 
-[handoff.md](handoff.md) lists what is built, what is next, and what has
-never run against a real session. Update it in the same change that builds,
-tries or drops something it lists. User-facing changes go in
+The maintainer keeps what is built, what is next and what has never run
+against a real session in `notes/handoff.md`, outside git, since it names
+their machines and network. User-facing changes go in
 `CHANGELOG.md`'s Unreleased section ([releases.md](releases.md)).
 
 ## From orbit

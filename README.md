@@ -5,14 +5,32 @@ it into a pull request, with proof for every acceptance criterion. You merge.
 
 ## Install
 
-1. Have [Claude Code](https://code.claude.com) signed in, Node 24, git, and
-   `gh` signed in.
-2. Add the plugin:
-   ```sh
-   claude plugin marketplace add AKstudios/animus#stable
-   claude plugin install animus@animus
-   ```
-3. Ask Claude to run `animus doctor`. It lists anything missing.
+On macOS or Linux:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/AKstudios/animus/stable/install.sh | bash
+```
+
+On Windows, in PowerShell:
+
+```powershell
+irm https://raw.githubusercontent.com/AKstudios/animus/stable/install.ps1 | iex
+```
+
+It installs what is missing (git, Node 24, Claude Code, GitHub's `gh`),
+asking first, signs you in, and then asks two things: whether Animus may
+update itself, and which of your projects to turn it on in. To turn it on in
+another project later, run `animus enable` inside it.
+
+Already have Claude Code, Node 24, git and `gh`, all signed in? In Claude
+Code:
+
+```
+/plugin marketplace add akstudios/animus#stable
+/plugin install animus@akstudios
+```
+
+Then ask Claude to run `animus doctor`. It lists anything missing.
 
 ## Enter the Animus
 

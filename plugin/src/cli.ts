@@ -5,6 +5,7 @@ import { parseArgs } from 'node:util';
 import { claudeAgent } from './agent.ts';
 import { cleanup, describeCleanup, KEEP_DAYS } from './cleanup.ts';
 import { describeFindings, doctor } from './doctor.ts';
+import { enable, realRun, setup, terminalIo, thisMachine } from './setup.ts';
 import { initProfile } from './init.ts';
 import { joinHelix, leaveHelix } from './join.ts';
 import { addProject } from './project.ts';
@@ -65,6 +66,13 @@ const USAGE = `animus: a spec goes in, a pull request with proof comes out
         --dry-run only says what would go.
   animus skills
         The vendored skills, where each came from, and which role gets it.
+  animus setup
+        Get this machine ready, asking as it goes: Claude Code and gh signed
+        in, Animus updating itself, the projects Animus is on in, and the
+        animus command in ~/.local/bin for a terminal.
+  animus enable [<dir>]
+        Turn Animus on in one more checkout (this one by default), for you
+        only: Claude Code keeps it in the checkout's .claude/settings.local.json.
   animus doctor
         Whether this machine can run and submit jobs: Node, Claude Code, git,
         gh, the repo's profile, Helix and its version, and what in your own
@@ -327,6 +335,12 @@ async function main(argv: string[]): Promise<number> {
     case 'skills':
       console.log(describeSkills(loadFactory()));
       return 0;
+    case 'setup': {
+      const io = terminalIo();
+      return await setup(io, thisMachine(), cwd) ? 0 : 1;
+    }
+    case 'enable':
+      return enable({ ask: async () => '', say, run: realRun }, resolve(positionals[0] ?? cwd)) ? 0 : 1;
     case 'doctor': {
       const found = await doctor(cwd);
       console.log(describeFindings(found));

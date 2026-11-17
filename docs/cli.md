@@ -94,6 +94,30 @@ last hour.
 
 ### This machine
 
+#### `animus setup`
+
+Gets this machine ready, asking as it goes. The install scripts end with it;
+run it again in a terminal at any time. It checks Claude Code (and updates
+it when older than the oldest a job has run on) and `gh`, installing `gh`
+with brew, winget, apt or dnf if you agree, signs both in, and has git use
+`gh` for GitHub. It removes the marketplace Animus had before it was called
+`akstudios`, if you still have it. Then it asks whether Claude Code may
+update Animus by itself (`autoUpdate` on the `akstudios` entry under
+`extraKnownMarketplaces` in your `~/.claude/settings.json`), and whether to
+turn Animus on in every project (installed for your user) or in the
+checkouts you pick from those it finds under `~/Dev`, `~/code`, `~/src`,
+`~/projects` and the like. Last, it writes the `animus` command to
+`~/.local/bin` (it runs the newest installed copy of the plugin, so updates
+need nothing more) and offers to put that folder on your PATH.
+
+#### `animus enable [<dir>]`
+
+Turns Animus on in one checkout, this one unless named, for you only:
+`claude plugin install animus@akstudios --scope local`, which Claude Code
+keeps in the checkout's `.claude/settings.local.json`. That file is kept out
+of git through the checkout's `.git/info/exclude` when nothing ignores it
+already, so the repository is unchanged.
+
 #### `animus doctor`
 
 Checks that this machine can run and submit jobs: Node, Claude Code, git,

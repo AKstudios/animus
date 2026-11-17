@@ -39,6 +39,17 @@ export function orbitMarketplace(claudeDir: string): string | undefined {
   return undefined;
 }
 
+/**
+ * Animus's own marketplace as it was called up to 0.3.5. Beside akstudios it
+ * loads the same skills twice.
+ */
+export function oldAnimusMarketplace(claudeDir: string): boolean {
+  try {
+    const known = JSON.parse(readFileSync(join(claudeDir, 'plugins', 'known_marketplaces.json'), 'utf8')) as Record<string, { source?: { repo?: string } }>;
+    return /^akstudios\/animus$/i.test(known.animus?.source?.repo ?? '');
+  } catch { return false; }
+}
+
 /** Git settings of the person's that reach a job's own commits. */
 export function gitFindings(read: (key: string) => string): Finding[] {
   const found: Finding[] = [];
@@ -69,9 +80,11 @@ export async function doctor(cwd: string, env = process.env, opts: { helixUrl?: 
   }
 
   // In a Claude Code session the plugin puts animus on the Bash tool's PATH; a terminal needs a link.
-  if (!onPath('animus')) add('warn', 'animus on PATH', `only inside Claude Code. For a terminal: ln -s "${env.ANIMUS_BIN ?? 'path/to/plugin/bin/animus'}" ~/.local/bin/animus`);
+  if (!onPath('animus')) add('warn', 'animus on PATH', `only inside Claude Code. In a terminal, run "${env.ANIMUS_BIN ?? 'path/to/plugin/bin/animus'}" setup: it puts animus in ~/.local/bin`);
 
-  const orbit = orbitMarketplace(env.CLAUDE_CONFIG_DIR ?? join(homedir(), '.claude'));
+  const claudeDir = env.CLAUDE_CONFIG_DIR ?? join(homedir(), '.claude');
+  if (oldAnimusMarketplace(claudeDir)) add('warn', 'old marketplace', 'Animus\'s marketplace is called akstudios now, and the one called animus loads Animus a second time: run animus setup, which removes it, or claude plugin marketplace remove animus and claude plugin install animus@akstudios');
+  const orbit = orbitMarketplace(claudeDir);
   if (orbit) add('fail', 'orbit', `the marketplace called animus is orbit's (${orbit}), whose plugin is also called animus. Remove it in Claude Code (/plugin, Marketplaces) and add Animus's`);
 
   const home = animusHome();

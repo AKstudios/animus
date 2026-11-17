@@ -6,8 +6,10 @@ installs (skills and the `animus` CLI); `helix/` is the supervisor for a
 shared machine and is never shipped in the plugin. Docs index:
 docs/README.md.
 
-Read docs/handoff.md before starting work, and update it in the same change
-whenever something there is built, tried or dropped.
+Read notes/handoff.md before starting work, and update it in the same change
+whenever something there is built, tried or dropped. It is the maintainer's
+own, kept out of git (it names their machines and network); where it is
+missing, there is nothing to read or update.
 
 ## Rules
 
