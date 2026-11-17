@@ -11,6 +11,10 @@ clients with how to update.
 - The installers take `join <url> <code>`: after setup they run `animus join`
   with them, so one line installs Animus and joins a Helix
   (`curl -fsSL …/install.sh | bash -s -- join <url> <code>`).
+- `helix slack setup` tries the Slack app's bot and app tokens against Slack,
+  keeps them in `~/.helix/credentials/slack.env` and turns the bot on in
+  `config.yaml` (`slack: {enabled, owner}`). A refused token is reported with
+  Slack's reason and nothing is written.
 
 ## 0.3.8 (2026-11-17)
 

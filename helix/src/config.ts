@@ -31,6 +31,8 @@ export type Config = {
    * Left out, jobs run on the machine as Helix's account, sharing it.
    */
   container?: { memory?: string; cpus?: number };
+  /** The Slack bot, set by helix slack setup; its tokens are in credentials/slack.env. owner is a Slack user id (U…). */
+  slack?: { enabled: boolean; owner: string };
 };
 
 const DEFAULTS: Config = { host: '127.0.0.1', port: 7420, slots: 2 };
@@ -60,6 +62,11 @@ export function saveConfig(config: Config, file = configFile()): void {
   mkdirSync(helixHome(), { recursive: true });
   writeFileSync(file, stringify(config));
   chmodSync(file, 0o600);
+}
+
+/** Sets some of config.yaml's keys and leaves the others as written, defaults left out. */
+export function updateConfig(patch: Partial<Config>, file = configFile()): void {
+  saveConfig({ ...readRaw(file), ...patch } as Config, file);
 }
 
 /**

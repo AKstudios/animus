@@ -38,7 +38,7 @@ function openPage(url: string): void {
 }
 
 /** Asks on the terminal; a hidden answer is not echoed, since it is a token. */
-function ask(prompt: string, hidden = false): Promise<string> {
+export function ask(prompt: string, hidden = false): Promise<string> {
   return new Promise((resolve) => {
     const rl = createInterface({ input: process.stdin, output: process.stderr, terminal: true });
     let muted = false;

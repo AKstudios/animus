@@ -17,6 +17,8 @@ import { ensureSetup } from '../../plugin/src/workspace.ts';
 import { loadProfile } from '../../plugin/src/profile.ts';
 import { checkInChild, checkProject, failInterruptedChecks, forgetProject, setupHere, setupInContainer } from './projects.ts';
 import { INVITE_HOURS, invite, takeOff } from './join.ts';
+import { ask } from '../../plugin/src/join.ts';
+import { slackEnvFile, slackSetup } from './slack-api.ts';
 import { serve } from './server.ts';
 import { openStore, type Store } from './store.ts';
 import { releaseToFollow } from './upgrade.ts';
@@ -99,6 +101,11 @@ const USAGE = `helix: runs Animus jobs for several people on one machine
         closed pull request's worktree at once, its branches --days after,
         default ${KEEP_DAYS}), and the job images of other releases. Job folders,
         logs and transcripts are kept. helix serve runs it once a day.
+  helix slack setup
+        Turn on the Slack bot: asks for the Slack app's bot token (xoxb-),
+        its app token (xapp-) and your own Slack member ID (U…), the bot's
+        owner. Both tokens are tried against Slack, then kept in
+        ${helixHome()}/credentials/slack.env; config.yaml gets slack: {enabled, owner}.
   helix check [<name>]
         Try each person's credentials against GitHub and Claude: who the
         GitHub token is, when it ends, whether it may push to each repository,
@@ -108,7 +115,7 @@ Its files are under ${helixHome()} (HELIX_HOME). People, projects and the
 queue are in helix.db; config.yaml holds the rest, and its slots are read
 again whenever it changes. Host and port need a restart.`;
 
-function main(argv: string[]): number | undefined {
+function main(argv: string[]): number | undefined | Promise<number> {
   const [command, ...rest] = argv;
   const { values, positionals } = parseArgs({ args: rest, allowPositionals: true, options: { 'env-file': { type: 'string' }, github: { type: 'string' }, follow: { type: 'boolean' }, days: { type: 'string' }, 'dry-run': { type: 'boolean' } } });
   switch (command) {
@@ -283,6 +290,9 @@ function main(argv: string[]): number | undefined {
       console.log(gone?.added_by ? `${name} is off Helix, and the clones Helix made of it are deleted.` : `${name} is off Helix, and people's clones of it are deleted. Its clone is still at ${gone?.dir}; delete it when you no longer want it.`);
       return 0;
     }
+    case 'slack':
+      if (positionals[0] !== 'setup') throw new AnimusError('usage: helix slack setup');
+      return setupSlack();
     case 'image':
       return buildImage() ? 0 : 1;
     case 'upgrade':
@@ -300,6 +310,17 @@ function main(argv: string[]): number | undefined {
     default:
       throw new AnimusError(`unknown command ${command}\n\n${USAGE}`);
   }
+}
+
+/** helix slack setup: the tokens are asked for, never taken on the command line. */
+async function setupSlack(): Promise<number> {
+  if (!process.stdin.isTTY) throw new AnimusError('helix slack setup asks for two tokens, so it runs in a terminal');
+  const bot = await ask('Bot User OAuth Token (xoxb-..., under OAuth & Permissions): ', true);
+  const app = await ask('App-Level Token (xapp-..., under Basic Information, with connections:write): ', true);
+  const owner = await ask('Your Slack member ID (U..., in your profile under ⋮, Copy member ID): ');
+  const { team } = await slackSetup({ bot, app, owner });
+  console.log(`Slack works${team ? ` for ${team}` : ''}: the tokens are in ${slackEnvFile()}, and config.yaml has slack: {enabled: true, owner: ${owner.trim()}}. Restart helix serve to connect.`);
+  return 0;
 }
 
 /** Runs a command in this checkout; its output goes to the terminal. */
@@ -386,7 +407,7 @@ function upgrade(ref: string | undefined, follow: boolean): number {
 }
 
 try {
-  const code = main(process.argv.slice(2));
+  const code = await main(process.argv.slice(2));
   if (code !== undefined) process.exit(code);
 } catch (err) {
   if (!(err instanceof AnimusError)) throw err;
