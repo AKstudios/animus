@@ -8,6 +8,8 @@ clients with how to update.
 
 ## Unreleased
 
+## 0.3.3 (2026-11-17)
+
 - A person's own settings in `~/.animus/config.yaml` (`ANIMUS_HOME`), never in
   a repository: `run: local | helix` and `skills:` at the top for every
   repository, and under `repos:` for one (named `owner/repo`, by any form of
