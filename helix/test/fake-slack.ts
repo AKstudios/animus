@@ -14,6 +14,9 @@ export type FakeSlack = {
   calls: string[];
   /** Every message the client sent over a socket, parsed. */
   received: Record<string, unknown>[];
+  /** A command's response_url on this server; what is posted to it lands in responses. */
+  responseUrl: string;
+  responses: Record<string, unknown>[];
   /** How many sockets the client has opened. */
   connections(): number;
   /** Sends a message on the newest socket. */
@@ -55,8 +58,15 @@ function readFrames(socket: Socket, onText: (text: string) => void): void {
 export async function fakeSlack(tokens = { app: 'xapp-good' }): Promise<FakeSlack> {
   const calls: string[] = [];
   const received: Record<string, unknown>[] = [];
+  const responses: Record<string, unknown>[] = [];
   const sockets: Socket[] = [];
   const server = createServer((req, res) => {
+    if (req.url === '/respond') {
+      let body = '';
+      req.on('data', (c: Buffer) => { body += c; });
+      req.on('end', () => { responses.push(JSON.parse(body) as Record<string, unknown>); res.end('ok'); });
+      return;
+    }
     const method = req.url!.replace('/api/', '');
     const token = req.headers.authorization?.replace('Bearer ', '');
     calls.push(`${method} ${token}`);
@@ -79,6 +89,8 @@ export async function fakeSlack(tokens = { app: 'xapp-good' }): Promise<FakeSlac
     api: `http://127.0.0.1:${(server.address() as AddressInfo).port}/api`,
     calls,
     received,
+    responseUrl: `http://127.0.0.1:${(server.address() as AddressInfo).port}/respond`,
+    responses,
     connections: () => sockets.length,
     send: (message) => sockets.at(-1)!.write(frame(JSON.stringify(message))),
     drop: () => sockets.at(-1)!.destroy(),
@@ -93,7 +105,8 @@ export async function fakeSlack(tokens = { app: 'xapp-good' }): Promise<FakeSlac
 export type Sent =
   | { method: 'post'; channel: string; text: string; thread?: string }
   | { method: 'dm'; user: string }
-  | { method: 'ephemeral'; channel: string; user: string; text: string };
+  | { method: 'ephemeral'; channel: string; user: string; text: string }
+  | { method: 'respond'; url: string; text: string };
 
 /** A transport for the bot's core that records what it sends; deliver hands it an event as Slack would. */
 export function fakeTransport() {
@@ -104,6 +117,7 @@ export function fakeTransport() {
     post: async (channel, text, thread) => { sent.push({ method: 'post', channel, text, ...(thread ? { thread } : {}) }); return `ts-${sent.length}`; },
     dm: async (user) => { sent.push({ method: 'dm', user }); return `D-${user}`; },
     ephemeral: async (channel, user, text) => { sent.push({ method: 'ephemeral', channel, user, text }); },
+    respond: async (url, text) => { sent.push({ method: 'respond', url, text }); },
   };
   return { transport, sent, deliver: (event: SlackEvent) => handle!(event) };
 }

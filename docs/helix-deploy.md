@@ -76,7 +76,8 @@ apps to the workspace.
    `slack: {enabled: true, owner: U…}` to `config.yaml`. A token Slack
    refuses is reported with Slack's reason, and nothing is written.
 7. `sudo systemctl restart helix.service`. Its log says `Slack: connected`.
-8. In the bot's DM (**Apps**, Helix), send `/helix invite @alex alex-gh`.
+8. Anywhere in Slack, send `/helix invite @alex alex-gh`; only you see the
+   bot's reply.
    Alex gets a DM to connect Tailscale, then one line that installs Animus
    and joins. Someone who joined before the bot was there is linked with
    `/helix link @alex alex`.

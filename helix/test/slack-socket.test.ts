@@ -6,6 +6,8 @@ import { test } from 'node:test';
 import type { Config } from '../src/config.ts';
 import { slackEnvFile, type SlackEvent } from '../src/slack-api.ts';
 import { startSlack } from '../src/slack-socket.ts';
+import { slackBot } from '../src/slack.ts';
+import { openStore } from '../src/store.ts';
 import { fakeSlack, until } from './fake-slack.ts';
 
 const ON: Config = { host: '127.0.0.1', port: 0, slots: 1, slack: { enabled: true, owner: 'U0OWNER' } };
@@ -16,7 +18,8 @@ function home() {
   writeFileSync(slackEnvFile(), 'SLACK_BOT_TOKEN=xoxb-good\nSLACK_APP_TOKEN=xapp-good\n', { mode: 0o600 });
 }
 
-const command = (id: string, text: string) => ({ envelope_id: id, type: 'slash_commands', accepts_response_payload: true, payload: { command: '/helix', text, user_id: 'U0ALEX', channel_id: 'D0ALEX' } });
+const URL = 'https://hooks.slack.com/commands/T0/1/x';
+const command = (id: string, text: string, url = URL) => ({ envelope_id: id, type: 'slash_commands', accepts_response_payload: true, payload: { command: '/helix', text, user_id: 'U0ALEX', channel_id: 'D0ALEX', response_url: url } });
 const acks = (slack: { received: Record<string, unknown>[] }) => slack.received.map((m) => m.envelope_id);
 
 // Protects: criterion 7, off means off. Fails when: serve opens a Slack connection the owner did not turn on.
@@ -54,7 +57,7 @@ test('with Slack on, the bot connects with the app token, acks each envelope bef
   assert.deepEqual(fake.calls, ['apps.connections.open xapp-good']);
   assert.deepEqual(acks(fake), ['e1', 'e2', 'e3']);
   assert.deepEqual(events, [
-    { kind: 'command', user: 'U0ALEX', channel: 'D0ALEX', text: 'invite <@U0SAM|sam> sam-gh' },
+    { kind: 'command', user: 'U0ALEX', channel: 'D0ALEX', text: 'invite <@U0SAM|sam> sam-gh', responseUrl: URL },
     { kind: 'message', user: 'U0ALEX', channel: 'D0ALEX', text: 'hello' },
   ]);
 });
@@ -80,6 +83,25 @@ for (const [what, end] of [
     await fake.close();
 
     assert.deepEqual(fake.calls, ['apps.connections.open xapp-good', 'apps.connections.open xapp-good']);
-    assert.deepEqual(events, [{ kind: 'command', user: 'U0ALEX', channel: 'D0ALEX', text: 'notify off' }]);
+    assert.deepEqual(events, [{ kind: 'command', user: 'U0ALEX', channel: 'D0ALEX', text: 'notify off', responseUrl: URL }]);
   });
 }
+
+// Protects: criteria 2 and 5, a command's reply reaches its sender wherever they sent it. Fails when: the reply goes out as chat.postEphemeral,
+// which Slack refuses in a DM between two people or a channel the bot is not in, so the sender hears nothing.
+test('a /helix command is answered privately at its response_url, not with chat.postEphemeral', async (t) => {
+  home();
+  const fake = await fakeSlack();
+  const store = openStore(join(process.env.HELIX_HOME!, 'helix.db'));
+  const bot = startSlack(ON, { api: fake.api, say: () => {} })!;
+  t.after(async () => { bot.close(); store.close(); await fake.close(); });
+  slackBot(bot, { store, config: ON });
+  await until('a socket', () => fake.connections() === 1);
+
+  fake.send(command('e1', 'notify off', fake.responseUrl));
+  // A reply at the response_url, or a Web API call besides the connect.
+  await until('a reply', () => fake.responses.length + fake.calls.length > 1);
+
+  assert.deepEqual(fake.responses, [{ response_type: 'ephemeral', text: 'You\'re not on this Helix. Ask <@U0OWNER> for an invite.' }]);
+  assert.deepEqual(fake.calls, ['apps.connections.open xapp-good']);
+});

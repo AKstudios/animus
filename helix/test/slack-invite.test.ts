@@ -11,6 +11,7 @@ import { fakeTransport } from './fake-slack.ts';
 
 const CONFIG: Config = { host: '127.0.0.1', port: 0, slots: 1, url: 'https://helix.example.ts.net', slack: { enabled: true, owner: 'U0OWNER' } };
 const NOT_ON = 'You\'re not on this Helix. Ask <@U0OWNER> for an invite.';
+const URL = 'https://hooks.slack.com/commands/T0/1/x';
 
 /** A Helix with ana on it, and the bot's core listening on a fake transport. */
 function helix() {
@@ -31,7 +32,7 @@ const JOIN_LINE = /^curl -fsSL https:\/\/raw\.githubusercontent\.com\/AKstudios\
 test('the owner\'s /helix invite @user <login> DMs them Tailscale first and one install.sh join line whose code lets them in', async () => {
   const { store, slack } = helix();
 
-  await slack.deliver({ kind: 'command', user: 'U0OWNER', channel: 'C0TEAM', text: 'invite <@U0ALEX|alex> alex-gh' });
+  await slack.deliver({ kind: 'command', user: 'U0OWNER', channel: 'C0TEAM', text: 'invite <@U0ALEX|alex> alex-gh', responseUrl: URL });
 
   assert.deepEqual(slack.sent.slice(0, 1), [{ method: 'dm', user: 'U0ALEX' }]);
   const dm = slack.sent[1] as { method: string; channel: string; text: string };
@@ -39,7 +40,7 @@ test('the owner\'s /helix invite @user <login> DMs them Tailscale first and one 
   assert.match(dm.text, /Tailscale first/);
   const code = JOIN_LINE.exec(dm.text)?.[1];
   assert.ok(code, dm.text);
-  assert.deepEqual(slack.sent.slice(2), [{ method: 'ephemeral', channel: 'C0TEAM', user: 'U0OWNER', text: 'Sent <@U0ALEX> an invite to join as alex with the GitHub login alex-gh.' }]);
+  assert.deepEqual(slack.sent.slice(2), [{ method: 'respond', url: URL, text: 'Sent <@U0ALEX> an invite to join as alex with the GitHub login alex-gh.' }]);
   const joined = await joinHelix({ store, verify: works }, { code, ...TOKENS });
   assert.equal(joined.name, 'alex');
   assert.equal(store.personBySlack('U0ALEX'), 'alex');
@@ -62,14 +63,14 @@ test('a /helix invite without a GitHub login, or from anyone but the owner, is r
   const { store, slack } = helix();
   store.linkSlack('ana', 'U0ANA');
 
-  await slack.deliver({ kind: 'command', user: 'U0OWNER', channel: 'C0TEAM', text: 'invite <@U0ALEX|alex>' });
-  await slack.deliver({ kind: 'command', user: 'U0ANA', channel: 'C0TEAM', text: 'invite <@U0ALEX|alex> alex-gh' });
+  await slack.deliver({ kind: 'command', user: 'U0OWNER', channel: 'C0TEAM', text: 'invite <@U0ALEX|alex>', responseUrl: URL });
+  await slack.deliver({ kind: 'command', user: 'U0ANA', channel: 'C0TEAM', text: 'invite <@U0ALEX|alex> alex-gh', responseUrl: URL });
   await assert.rejects(slackInvite(slack.transport, { store, config: CONFIG }, 'alex', { slack: 'U123' }), /GitHub login/);
 
   store.close();
   assert.deepEqual(slack.sent, [
-    { method: 'ephemeral', channel: 'C0TEAM', user: 'U0OWNER', text: 'An invite sent on Slack names their GitHub login, so only a token that signs in as it is taken: /helix invite @user <github-login>' },
-    { method: 'ephemeral', channel: 'C0TEAM', user: 'U0ANA', text: 'Only <@U0OWNER> invites people to this Helix.' },
+    { method: 'respond', url: URL, text: 'An invite sent on Slack names their GitHub login, so only a token that signs in as it is taken: /helix invite @user <github-login>' },
+    { method: 'respond', url: URL, text: 'Only <@U0OWNER> invites people to this Helix.' },
   ]);
 });
 
@@ -79,7 +80,7 @@ test('joining with an invite that carries a Slack user links that user to the pe
   const { code } = invite(store, 'alex', { github: 'alex-gh', slack: 'U0ALEX' });
 
   await joinHelix({ store, verify: works }, { code, ...TOKENS });
-  await slack.deliver({ kind: 'command', user: 'U0ALEX', channel: 'D0ALEX', text: 'nonsense' });
+  await slack.deliver({ kind: 'command', user: 'U0ALEX', channel: 'D0ALEX', text: 'nonsense', responseUrl: URL });
 
   assert.equal(store.personBySlack('U0ALEX'), 'alex');
   store.close();
@@ -94,17 +95,17 @@ test('the owner\'s /helix link @user <person> links someone who joined before; a
   store.putPerson('alex', { token_sha256: hashToken('alex-token') });
   store.linkSlack('alex', 'U0ALEX');
 
-  await slack.deliver({ kind: 'command', user: 'U0ALEX', channel: 'C0TEAM', text: 'link <@U0SAM|sam> ana' });
-  await slack.deliver({ kind: 'command', user: 'U0OWNER', channel: 'C0TEAM', text: 'link <@U0ANA|ana> nobody' });
-  await slack.deliver({ kind: 'command', user: 'U0OWNER', channel: 'C0TEAM', text: 'link <@U0ANA|ana> ana' });
+  await slack.deliver({ kind: 'command', user: 'U0ALEX', channel: 'C0TEAM', text: 'link <@U0SAM|sam> ana', responseUrl: URL });
+  await slack.deliver({ kind: 'command', user: 'U0OWNER', channel: 'C0TEAM', text: 'link <@U0ANA|ana> nobody', responseUrl: URL });
+  await slack.deliver({ kind: 'command', user: 'U0OWNER', channel: 'C0TEAM', text: 'link <@U0ANA|ana> ana', responseUrl: URL });
 
   assert.equal(store.personBySlack('U0SAM'), undefined);
   assert.equal(store.personBySlack('U0ANA'), 'ana');
   store.close();
   assert.deepEqual(slack.sent, [
-    { method: 'ephemeral', channel: 'C0TEAM', user: 'U0ALEX', text: 'Only <@U0OWNER> links Slack users to people on this Helix.' },
-    { method: 'ephemeral', channel: 'C0TEAM', user: 'U0OWNER', text: 'Helix has no person named nobody.' },
-    { method: 'ephemeral', channel: 'C0TEAM', user: 'U0OWNER', text: 'Linked <@U0ANA> to ana.' },
+    { method: 'respond', url: URL, text: 'Only <@U0OWNER> links Slack users to people on this Helix.' },
+    { method: 'respond', url: URL, text: 'Helix has no person named nobody.' },
+    { method: 'respond', url: URL, text: 'Linked <@U0ANA> to ana.' },
   ]);
 });
 

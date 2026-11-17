@@ -21,7 +21,8 @@ export function slackBot(transport: Transport, opts: Core): void {
   const { store, config } = opts;
   transport.onEvent(async (event) => {
     const owner = config.slack?.owner ?? '';
-    const reply = (text: string) => transport.ephemeral(event.channel, event.user, text);
+    // A command may come from a channel the bot is not in, where Slack refuses postEphemeral; its response_url works anywhere.
+    const reply = (text: string) => event.kind === 'command' ? transport.respond(event.responseUrl, text) : transport.ephemeral(event.channel, event.user, text);
     const isOwner = event.user === owner;
     if (!isOwner && !store.personBySlack(event.user)) return reply(`You're not on this Helix. Ask <@${owner}> for an invite.`);
     if (event.kind !== 'command') return;

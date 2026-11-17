@@ -93,18 +93,18 @@ test('a job that asks posts its question and, once answered, carries on in its t
 test('/helix notify off stops a person\'s job posts and /helix notify on starts them again; an unlinked person\'s job posts nothing', async () => {
   const h = await helix();
 
-  await h.slack.deliver({ kind: 'command', user: 'U0ANA', channel: 'D0ANA', text: 'notify off' });
+  await h.slack.deliver({ kind: 'command', user: 'U0ANA', channel: 'D0ANA', text: 'notify off', responseUrl: 'https://hooks.slack.com/commands/T0/1/x' });
   const quiet = h.supervisor.submit('ana', { repo: 'app', spec: SPEC('quiet'), name: 'spec.md' });
   const bens = h.supervisor.submit('ben', { repo: 'app', spec: SPEC('bens'), name: 'spec.md' });
   await until('both jobs to end', () => h.store.get(bens.id)?.state === 'ended' && h.store.get(quiet.id)?.state === 'ended', 5000);
-  await h.slack.deliver({ kind: 'command', user: 'U0ANA', channel: 'D0ANA', text: 'notify on' });
+  await h.slack.deliver({ kind: 'command', user: 'U0ANA', channel: 'D0ANA', text: 'notify on', responseUrl: 'https://hooks.slack.com/commands/T0/1/y' });
   const loud = h.supervisor.submit('ana', { repo: 'app', spec: SPEC('loud'), name: 'spec.md' });
   await h.settled(loud.id, 2);
 
   h.stop();
-  assert.deepEqual(h.slack.sent.filter((s) => s.method === 'ephemeral'), [
-    { method: 'ephemeral', channel: 'D0ANA', user: 'U0ANA', text: 'Job notifications are off. /helix notify on starts them again.' },
-    { method: 'ephemeral', channel: 'D0ANA', user: 'U0ANA', text: 'Job notifications are on: each of your jobs posts its progress to a thread in our DM.' },
+  assert.deepEqual(h.slack.sent.filter((s) => s.method === 'respond'), [
+    { method: 'respond', url: 'https://hooks.slack.com/commands/T0/1/x', text: 'Job notifications are off. /helix notify on starts them again.' },
+    { method: 'respond', url: 'https://hooks.slack.com/commands/T0/1/y', text: 'Job notifications are on: each of your jobs posts its progress to a thread in our DM.' },
   ]);
   assert.deepEqual(h.posts().map((p) => p.text), [`Job ${loud.id} started: loud (app)`, `Job ${loud.id} opened a pull request: https://example.test/pr/loud`]);
 });

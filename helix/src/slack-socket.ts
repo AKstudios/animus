@@ -17,7 +17,7 @@ export type SlackBot = Transport & { close(): void };
 type Envelope = {
   envelope_id?: string; type?: string;
   payload?: {
-    user_id?: string; channel_id?: string; text?: string;
+    user_id?: string; channel_id?: string; text?: string; response_url?: string;
     event?: { type?: string; subtype?: string; bot_id?: string; channel_type?: string; user?: string; channel?: string; text?: string };
   };
 };
@@ -25,7 +25,7 @@ type Envelope = {
 /** The event an envelope carries for the core, if it is one the bot answers. */
 function eventOf(e: Envelope): SlackEvent | undefined {
   const p = e.payload;
-  if (e.type === 'slash_commands' && p?.user_id && p.channel_id) return { kind: 'command', user: p.user_id, channel: p.channel_id, text: p.text ?? '' };
+  if (e.type === 'slash_commands' && p?.user_id && p.channel_id && p.response_url) return { kind: 'command', user: p.user_id, channel: p.channel_id, text: p.text ?? '', responseUrl: p.response_url };
   const m = p?.event;
   // Only what a person writes in the bot's DM: never the bot's own posts, which would be answered forever, nor edits and joins.
   if (e.type === 'events_api' && m?.type === 'message' && m.channel_type === 'im' && !m.subtype && !m.bot_id && m.user && m.channel) return { kind: 'message', user: m.user, channel: m.channel, text: m.text ?? '' };

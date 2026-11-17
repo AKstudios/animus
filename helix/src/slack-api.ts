@@ -17,7 +17,7 @@ export const slackEnvFile = () => join(helixHome(), 'credentials', 'slack.env');
 
 /** What reaches the bot from Slack: a /helix command, or a message written to it. */
 export type SlackEvent =
-  | { kind: 'command'; user: string; channel: string; text: string }
+  | { kind: 'command'; user: string; channel: string; text: string; responseUrl: string }
   | { kind: 'message'; user: string; channel: string; text: string };
 
 /** How the bot's core talks to Slack. Tests give it a fake that records what is posted. */
@@ -28,8 +28,10 @@ export type Transport = {
   post(channel: string, text: string, thread?: string): Promise<string>;
   /** The DM channel with a Slack user. */
   dm(user: string): Promise<string>;
-  /** A reply in a channel that only this user sees. */
+  /** A reply in a channel that only this user sees. Slack refuses it where the bot is not a member, so only for the bot's own DMs. */
   ephemeral(channel: string, user: string, text: string): Promise<void>;
+  /** A private reply to a command, at the response_url Slack gave it, which works in any channel. */
+  respond(responseUrl: string, text: string): Promise<void>;
 };
 
 /** Calls a Web API method; Slack's refusal, such as invalid_auth, is the error's message. */
@@ -48,6 +50,11 @@ export const slackWeb = (bot: string, api = SLACK_API): Omit<Transport, 'onEvent
   post: async (channel, text, thread) => String((await slackCall(bot, 'chat.postMessage', { channel, text, ...(thread ? { thread_ts: thread } : {}) }, api)).ts),
   dm: async (user) => String(((await slackCall(bot, 'conversations.open', { users: user }, api)).channel as { id: string }).id),
   ephemeral: async (channel, user, text) => { await slackCall(bot, 'chat.postEphemeral', { channel, user, text }, api); },
+  respond: async (responseUrl, text) => {
+    // The URL is the authority, so no token goes with it; Slack answers plain text, not JSON.
+    const res = await fetch(responseUrl, { method: 'POST', headers: { 'content-type': 'application/json; charset=utf-8' }, body: JSON.stringify({ response_type: 'ephemeral', text }) });
+    if (!res.ok) throw new AnimusError(`Slack refused the reply: HTTP ${res.status} ${await res.text()}`);
+  },
 });
 
 /**
