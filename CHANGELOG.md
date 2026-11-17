@@ -18,6 +18,9 @@ clients with how to update.
   reviewer's findings, its questions and answers, and its log, which keeps
   to its end while the job runs. A gate run's file, `gates/run-<n>.txt`,
   now ends with all that each check printed.
+- A job page shows the job's latest screenshots. Helix serves each, to a
+  valid token only, at `GET /jobs/<id>/shots/<name>`, and only names the
+  job's `shots/manifest.json` lists, never a file outside its shots folder.
 
 ## 0.3.8 (2026-11-17)
 

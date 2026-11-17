@@ -136,9 +136,9 @@ A job page shows the job's project, person, state, outcome, pull request,
 cost and times; its spec as submitted; how long it spent in each stage,
 summed over its runs, and its slices when it was cut; the checks of its
 latest gate run, with what a failed one printed; every review round's
-findings; each question it asked with the answer it was given; and Helix's
-log of it. The checks, reviews and questions come from the job's Animus
-folder, which keeps each gate run as `gates/run-<n>.txt`. While the job is
+findings; each question it asked with the answer it was given; its latest
+screenshots, for a UI job; and Helix's log of it. The checks, reviews,
+questions and screenshots come from the job's Animus folder, which keeps each gate run as `gates/run-<n>.txt`. While the job is
 queued or running the page reads it again every two seconds and keeps the log
 at its end, unless you have scrolled up in it; once it has ended the log is
 there whole.
@@ -155,6 +155,7 @@ the display's own request for a job page's data sends none.
 | `GET /` | The display page |
 | `GET /jobs/<id>`, `/people`, `/people/<name>` | The display page, to a browser asking for HTML |
 | `GET /jobs/<id>/page-data` | What a job page shows, for any person |
+| `GET /jobs/<id>/shots/<name>` | One of a job's screenshots, by its name in `shots/manifest.json`; nothing outside its shots folder |
 | `GET /display` | What the display shows, as JSON |
 | `GET /version` | Helix's version |
 | `POST /invite` | Who an invite code is for, and the projects there |

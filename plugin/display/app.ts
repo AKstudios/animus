@@ -34,6 +34,10 @@ const state: {
   heard?: Date;
 } = { skew: 0, offline: false };
 
+/** A job's screenshots as this browser holds them, by where Helix serves each and when they were taken: retaken ones are read again. */
+const shotUrls = new Map<string, string>();
+const shotKey = (src: string) => `${src}@${state.job?.shots?.at ?? ''}`;
+
 const esc = (s: string | number) => String(s).replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`);
 const pad = (n: number) => String(n).padStart(2, '0');
 const wall = (d: Date) => `${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
@@ -167,12 +171,17 @@ function jobSections(v: JobPageView): string {
   const checks = v.checks.map((c) => `<div class="check"><span class="tag tone-${c.tone}">${esc(c.tag)}</span><span class="b">${esc(c.name)}</span><code>${esc(c.command)}</code><span class="mute">${esc(c.detail)}</span>${c.output !== undefined ? pre(c.output) : ''}</div>`).join('');
   const reviews = v.reviews.map((r) => `<div class="round"><div class="label">${esc(r.title.toUpperCase())}</div><p>${esc(r.summary)}</p>
     ${r.findings.map((f) => `<div class="finding"><span class="tag tone-${f.tone}">${esc(f.tag)}</span>${f.where ? `<code>${esc(f.where)}</code>` : ''}<p>${esc(f.problem)}</p>${f.fix ? `<p class="mute">${esc(f.fix)}</p>` : ''}</div>`).join('') || none('No findings.')}</div>`).join('');
+  const shots = v.shots.map((s) => {
+    const src = shotUrls.get(shotKey(s.src));
+    return `<figure class="shot" data-key="s-${esc(s.src)}">${src ? `<img src="${esc(src)}" alt="${esc(s.name)}">` : none('Loading…')}<figcaption>${esc(s.name)}</figcaption></figure>`;
+  }).join('');
   const questions = v.questions.map((q) => `<div class="qa"><p><span class="label">ASKED</span> ${esc(q.question)}</p><p${q.answered ? '' : ' class="tone-ask"'}><span class="label">ANSWERED</span> ${esc(q.answer)}</p></div>`).join('');
   return [
     v.reason ? `<pre class="text why">${esc(v.reason)}</pre>` : '',
     section('stages', 'STAGES', `${stages}${slices}`),
     section('checks', 'CHECKS', checks || none('No checks have run yet.')),
     section('review', 'REVIEW', reviews || none('Not reviewed yet.')),
+    shots ? section('screenshots', 'SCREENSHOTS', `<div class="shots">${shots}</div>`) : '',
     section('questions', 'QUESTIONS', questions || none('It has asked nothing.')),
     section('spec', 'SPEC', v.spec ? pre(v.spec) : none('Helix no longer has the spec.')),
     section('log', 'LOG', v.log ? pre(v.log, ' data-log') : none('It has printed nothing yet.'), v.follow),
@@ -259,7 +268,26 @@ async function readJob(id: number): Promise<void> {
   const res = await fetch(`/jobs/${id}/page-data`, { cache: 'no-store', headers: { authorization: `Bearer ${token}` } });
   state.jobStatus = res.status;
   if (res.status === 401) forgetToken(storage);
-  if (res.ok) state.job = (await res.json()) as JobPage;
+  if (!res.ok) return;
+  state.job = (await res.json()) as JobPage;
+  await readShots(state.job, token);
+}
+
+/** Fetches with the token each screenshot this browser does not hold yet, and lets go of the ones the job no longer has. */
+async function readShots(page: JobPage, token: string): Promise<void> {
+  const srcs = jobView(page, 0).shots.map((s) => s.src);
+  const keys = srcs.map(shotKey);
+  for (const [k, u] of shotUrls) if (!keys.includes(k)) { URL.revokeObjectURL(u); shotUrls.delete(k); }
+  await Promise.all(srcs.filter((src) => !shotUrls.has(shotKey(src))).map(async (src) => {
+    const res = await fetch(src, { cache: 'no-store', headers: { authorization: `Bearer ${token}` } });
+    // One that is being taken again is read on a later poll.
+    if (res.ok) shotUrls.set(shotKey(src), URL.createObjectURL(await res.blob()));
+  }));
+}
+
+function forgetShots(): void {
+  for (const u of shotUrls.values()) URL.revokeObjectURL(u);
+  shotUrls.clear();
 }
 
 async function poll(): Promise<void> {
@@ -288,6 +316,7 @@ root.addEventListener('submit', (event) => {
 root.addEventListener('click', (event) => {
   if ((event.target as Element).closest('[data-sign-out]')) {
     forgetToken(storage);
+    forgetShots();
     Object.assign(state, { job: undefined, jobStatus: undefined });
     draw();
     return;

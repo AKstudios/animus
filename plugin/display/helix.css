@@ -204,6 +204,10 @@ a.title:hover, a.card-title:hover, .back:hover { text-decoration: underline; }
 .check code, .finding code { font-family: var(--mono); font-size: 13px; color: var(--mute); overflow-wrap: anywhere; }
 .check .text, .finding p { flex-basis: 100%; }
 .round { display: flex; flex-direction: column; gap: 8px; }
+.shots { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); align-items: start; gap: 16px; }
+.shot { margin: 0; display: flex; flex-direction: column; gap: 6px; }
+.shot img { display: block; width: 100%; height: auto; background: var(--panel); border: 1px solid var(--line); }
+.shot figcaption { font-family: var(--mono); font-size: 13px; color: var(--mute); overflow-wrap: anywhere; }
 .qa { display: flex; flex-direction: column; gap: 6px; padding: 8px 4px; border-bottom: 1px solid var(--line); overflow-wrap: anywhere; }
 .tone-ink { color: var(--ink); }
 .tone-mute { color: var(--mute); }
