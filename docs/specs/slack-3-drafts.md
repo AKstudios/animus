@@ -54,6 +54,7 @@ complete.
 
 ## Decisions
 
+- What the bot does for a person is recorded as their activity.
 - Slack jobs start from a draft the person confirms, never from the message
   itself (docs/adr/0001).
 - Draft sessions see only references a script fetched; the job gets the
