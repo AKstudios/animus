@@ -9,7 +9,7 @@ import { uptime } from 'node:os';
 import { basename, dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { AnimusError } from '../../plugin/src/proc.ts';
-import { loadProgress, type Progress } from '../../plugin/src/log.ts';
+import { animusHome, loadProgress, type Progress } from '../../plugin/src/log.ts';
 import type { PersonalSkill } from '../../plugin/src/personal.ts';
 import { parseSpec } from '../../plugin/src/spec.ts';
 import { credentialEnv, personEnv, readyRepos, type Config } from './config.ts';
@@ -58,6 +58,8 @@ export type Supervisor = {
   log(id: number, lines?: number): string;
   /** Where a running job says it is, from the Animus state it writes. */
   progress(job: HelixJob): Progress | undefined;
+  /** The Animus home a person's jobs keep their folders and run log in. */
+  animusHome(person: string): string;
   /** Starts what the queue holds while slots are free: after the config changed, or a pause ended. */
   wake(): void;
   /** Stops starting jobs and ends the ones running. */
@@ -250,6 +252,7 @@ export function supervise(opts: {
     },
     wake: () => tick(),
     progress: (job) => (job.animus_job ? loadProgress(job.animus_job, opts.animusHomeOf?.(job.person)) : undefined),
+    animusHome: (person) => opts.animusHomeOf?.(person) ?? animusHome(),
     stop() {
       stopped = true;
       for (const [id, child] of children) {

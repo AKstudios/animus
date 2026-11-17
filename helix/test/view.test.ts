@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import type { Display, DisplayJob } from '../src/display.ts';
-import { clock, span, view } from '../ui/view.ts';
+import type { Display, DisplayJob } from '../../plugin/display/shape.ts';
+import { clock, span, view } from '../../plugin/display/view.ts';
 
 const NOW = Date.parse('2026-11-16T12:00:00Z');
 const ago = (minutes: number) => new Date(NOW - minutes * 60_000).toISOString();
@@ -19,7 +19,7 @@ test('a running job shows its stage, who is working, the last line it said and h
     job({ id: 7, state: 'running', title: 'Export to PDF', started: ago(12.5), progress: { stage: 'gates', who: 'gates · attempt 1', at: ago(1) }, now: 'ok   typecheck' }),
     job({ id: 8, state: 'running', started: ago(0.1) }),
   ]), null, NOW);
-  assert.deepEqual(v.live[0], { id: 7, repo: 'app', person: 'ana', title: 'Export to PDF', elapsed: '12:30', stage: 2, stageText: 'GATES', stepText: 'step 3 of 6', stepShort: '3/6', who: 'gates · attempt 1', now: 'ok   typecheck' });
+  assert.deepEqual(v.live[0], { id: 7, page: '/jobs/7', repo: 'app', person: 'ana', title: 'Export to PDF', elapsed: '12:30', stage: 2, stageText: 'GATES', stepText: 'step 3 of 6', stepShort: '3/6', who: 'gates · attempt 1', now: 'ok   typecheck' });
   // A job that has not said where it is yet has no stage on its track.
   assert.deepEqual([v.live[1]!.stage, v.live[1]!.stageText, v.live[1]!.stepText, v.live[1]!.who, v.live[1]!.elapsed], [-1, 'STARTING', '', 'starting', '00:06']);
   assert.deepEqual([v.running, v.slots, v.queued, v.asks], [2, 2, 0, 0]);

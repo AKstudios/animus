@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { stripTypeScriptTypes } from 'node:module';
 import type { AddressInfo } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -125,12 +126,17 @@ test('the display\'s page and scripts need no token, and no path climbs out of i
 
   const page = await get('/');
   assert.deepEqual([page.status, page.headers.get('content-type')], [200, 'text/html; charset=utf-8']);
-  assert.match(await page.text(), /<script type="module" src="\/ui\/app\.ts">/);
+  const html = await page.text();
+  assert.match(html, /<script type="module" src="\/ui\/app\.ts">/);
+  // The display is the plugin's (ADR 0004): Helix serves its files from there.
+  const DISPLAY = join(import.meta.dirname, '..', '..', 'plugin', 'display');
+  assert.equal(html, readFileSync(join(DISPLAY, 'index.html'), 'utf8'));
   // A script is sent as JavaScript: its types are gone.
   const script = await get('/ui/view.ts');
   const text = await script.text();
   assert.deepEqual([script.status, script.headers.get('content-type')], [200, 'text/javascript; charset=utf-8']);
   assert.ok(text.includes('export function view(') && !text.includes('import type') && !text.includes(': Display'));
+  assert.equal(text, stripTypeScriptTypes(readFileSync(join(DISPLAY, 'view.ts'), 'utf8')));
   assert.equal((await get('/ui/fonts/titillium-web-400.woff2')).headers.get('content-type'), 'font/woff2');
   for (const path of ['/ui/../src/server.ts', '/ui/%2e%2e/src/server.ts', '/ui/fonts/../../src/server.ts', '/ui/nothing.css', '/ui/fonts/OFL-TitilliumWeb.txt']) {
     assert.equal((await get(path)).status, 401, path);

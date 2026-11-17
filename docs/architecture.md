@@ -25,7 +25,7 @@ spec.md ──► animus start ──┬─► animus run  (this machine, in the
   the skills that shape a spec, and the `animus` command that runs a job.
 - **Helix** (`helix/`) is the supervisor for a shared machine: a queue in
   SQLite, an HTTP API, a display page, and one `animus run` process per job.
-  It imports from `plugin/src` and is never shipped in the plugin. It holds no
+  It imports from `plugin/` and is never shipped in the plugin. It holds no
   state of its own beyond `helix.db` and the job files, so a restart carries
   on from them. See [helix.md](helix.md).
 
@@ -114,7 +114,8 @@ A job leaves nothing in the target repository but its branch.
 Also in `plugin/`: `prompts/` (each role's instructions), `config/profiles.yaml`,
 `skills/` (the Claude Code skills a person uses: grill-with-docs, to-spec,
 domain-modeling, helix), `vendor/` (pinned copies of skills granted to job
-sessions), `bin/animus`.
+sessions), `display/` (the display's page, styles, fonts and scripts, which
+Helix serves; ADR 0004), `bin/animus`.
 
 ### helix/src
 
@@ -131,7 +132,7 @@ sessions), `bin/animus`.
 | `projects.ts` | Adding a project and its check |
 | `check.ts` | Trying a person's GitHub and Claude tokens |
 | `container.ts` | Running a job in its own container |
-| `display.ts`, `ui.ts` | What the display page shows, and serving it (`helix/ui/`) |
+| `display.ts`, `ui.ts` | What the display page shows, and serving it (`plugin/display/`) |
 
 `helix/deploy/` holds the job image's Dockerfile and the Ubuntu setup
 scripts.

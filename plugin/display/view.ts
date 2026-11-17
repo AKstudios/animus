@@ -1,22 +1,24 @@
 // What the display says, worked out from what Helix sent: which jobs go in
 // which section, and every label, note and count. No DOM here, so the
 // wording is tested without a browser (helix/test/view.test.ts).
-import type { Display, DisplayJob } from '../src/display.ts';
+import { jobPage } from './pages.ts';
+import type { Display, DisplayJob } from './shape.ts';
 
 export type Tone = 'ink' | 'mute' | 'ask' | 'fail';
 export type Tick = 'running' | 'ask' | 'failed' | 'queued' | 'ended';
 
 export type Project = { id: string; summary: string; on: boolean; busy: boolean; ticks: Tick[] };
 
+/** Every job on the overview links to its own page. */
 export type Live = {
-  id: number; repo: string; person: string; title: string; elapsed: string;
+  id: number; page: string; repo: string; person: string; title: string; elapsed: string;
   /** The stage's place in the track; -1 until the job has said where it is. */
   stage: number; stageText: string; stepText: string; stepShort: string; who: string; now: string;
 };
 
-export type Waiting = { id: number; ask: boolean; tag: string; title: string; repo: string; person: string; note: string };
+export type Waiting = { id: number; page: string; ask: boolean; tag: string; title: string; repo: string; person: string; note: string };
 
-export type Recent = { id: number; tag: string; tone: Tone; href?: string; title: string; meta: string; reason?: string };
+export type Recent = { id: number; page: string; tag: string; tone: Tone; href?: string; title: string; meta: string; reason?: string };
 
 export type View = {
   name: string;
@@ -72,7 +74,7 @@ function recent(j: DisplayJob): Recent {
     : ['FAILED', 'fail'];
   const took = j.started && j.ended ? span(Date.parse(j.ended) - Date.parse(j.started)) : '';
   return {
-    id: j.id, tag, tone, title: j.title,
+    id: j.id, page: jobPage(j.id), tag, tone, title: j.title,
     meta: [j.repo, j.person, took, j.cost_usd !== undefined ? usd(j.cost_usd) : ''].filter(Boolean).join(' · '),
     ...(j.pr && /^https?:\/\//.test(j.pr) ? { href: j.pr } : {}),
     ...(j.reason && j.outcome !== 'pr' ? { reason: firstLine(j.reason) } : {}),
@@ -90,7 +92,7 @@ export function view(d: Display, picked: string | null, now: number): View {
   const live = shown.filter((j) => j.state === 'running').map((j): Live => {
     const stage = j.progress ? d.stages.indexOf(j.progress.stage) : -1;
     return {
-      id: j.id, repo: j.repo, person: j.person, title: j.title,
+      id: j.id, page: jobPage(j.id), repo: j.repo, person: j.person, title: j.title,
       elapsed: j.started ? clock(now - Date.parse(j.started)) : '',
       stage,
       stageText: stage < 0 ? 'STARTING' : d.stages[stage]!.toUpperCase(),
@@ -102,13 +104,13 @@ export function view(d: Display, picked: string | null, now: number): View {
   });
 
   const waiting = [
-    ...shown.filter(isAsk).map((j): Waiting => ({ id: j.id, ask: true, tag: 'NEEDS INPUT', title: j.title, repo: j.repo, person: j.person, note: j.question ?? 'It stopped to ask, and did not say what.' })),
+    ...shown.filter(isAsk).map((j): Waiting => ({ id: j.id, page: jobPage(j.id), ask: true, tag: 'NEEDS INPUT', title: j.title, repo: j.repo, person: j.person, note: j.question ?? 'It stopped to ask, and did not say what.' })),
     ...shown.filter((j) => j.state === 'queued').map((j): Waiting => {
       const waited = now - Date.parse(j.queued ?? j.submitted);
       const why = j.resumed === 'answer' ? 'Has its answer and carries on from where it stopped. '
         : j.resumed === 'restart' ? 'Helix stopped while it ran, so it carries on from where it stopped. ' : '';
       return {
-        id: j.id, ask: false, tag: j.resumed ? 'QUEUED AGAIN' : 'QUEUED', title: j.title, repo: j.repo, person: j.person,
+        id: j.id, page: jobPage(j.id), ask: false, tag: j.resumed ? 'QUEUED AGAIN' : 'QUEUED', title: j.title, repo: j.repo, person: j.person,
         note: `${why}Position ${line.indexOf(j) + 1} in the queue, waiting ${waited < 60_000 ? 'less than a minute' : span(waited)}.`,
       };
     }),

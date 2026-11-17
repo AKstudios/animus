@@ -5,13 +5,15 @@
 // only by whoever added it (projects.ts).
 // Joining (invite, join) carries a one-time code instead, and leave the
 // person's own token (join.ts).
-// It also serves the display: its page at /, and what it shows at /display.
+// It also serves the display: its pages at / and /jobs/<id> (ui.ts), what the
+// overview shows at /display, and a job page's data and screenshots, with a
+// token, at /jobs/<id>/page-data and /jobs/<id>/shots/<name>.
 import { createServer, type IncomingMessage, type Server } from 'node:http';
 import { VERSION_HEADER } from '../../plugin/src/remote.ts';
 import { animusVersion, compatible } from '../../plugin/src/version.ts';
 import { parseSkills, type PersonalSkill } from '../../plugin/src/personal.ts';
 import { hashToken, helixHome, type Config } from './config.ts';
-import { display } from './display.ts';
+import { display, jobPage, jobShot } from './display.ts';
 import { inviteDetails, joinHelix, takeOff, verifyInChild, type Verify } from './join.ts';
 import { addProject, checkInChild, projectView, removeProject, type StartCheck } from './projects.ts';
 import type { Store } from './store.ts';
@@ -19,8 +21,8 @@ import { Refused, type Submission, type Supervisor } from './supervisor.ts';
 import { asset } from './ui.ts';
 
 const MAX_BODY = 1024 * 1024;
-/** The display loads only what Helix serves and talks only to Helix. */
-const CSP = "default-src 'none'; script-src 'self'; style-src 'self'; font-src 'self'; img-src 'self' data:; connect-src 'self'; base-uri 'none'; form-action 'none'";
+/** The display loads only what Helix serves and talks only to Helix. A job's screenshots need a token, so the page fetches them and shows them as blobs. */
+const CSP = "default-src 'none'; script-src 'self'; style-src 'self'; font-src 'self'; img-src 'self' data: blob:; connect-src 'self'; base-uri 'none'; form-action 'none'";
 
 /** Who holds the request's token. Only its hash is looked up: a token is long and random, so the lookup's timing gives nothing away. */
 function whoIs(store: Store, req: IncomingMessage): string | undefined {
@@ -65,9 +67,10 @@ export function serve(opts: {
     void (async () => {
       const url = new URL(req.url ?? '/', 'http://helix');
       // The display's page, scripts and fonts need no token.
-      const file = req.method === 'GET' ? asset(url.pathname) : undefined;
+      const file = req.method === 'GET' ? asset(url.pathname, req.headers.accept) : undefined;
       if (file) {
-        res.writeHead(200, { 'content-type': file.type, 'cache-control': file.cache, 'content-security-policy': CSP, 'x-content-type-options': 'nosniff' });
+        // vary: a job's path is its page to a browser and JSON to animus, so neither answer stands in for the other.
+        res.writeHead(200, { 'content-type': file.type, 'cache-control': file.cache, 'content-security-policy': CSP, 'x-content-type-options': 'nosniff', vary: 'accept' });
         return res.end(file.body);
       }
       // What the display shows needs no token either: Helix listens on a private network only, and this only reads.
@@ -86,6 +89,22 @@ export function serve(opts: {
       }
       const person = whoIs(store, req);
       if (!person) return send(401, { error: 'a valid token is needed: Authorization: Bearer <token>' });
+      // A job page's data, for any person on this Helix. The display is served by this Helix, so it sends no client version.
+      const pageData = req.method === 'GET' ? /^\/jobs\/(\d+)\/page-data$/.exec(url.pathname)?.[1] : undefined;
+      if (pageData) {
+        const page = jobPage(opts, Number(pageData));
+        return page ? send(200, page) : send(404, { error: `no job ${pageData}` });
+      }
+      // One of a job's screenshots, for its page: the name is as its shots folder lists it, and only such a name is served.
+      const shot = req.method === 'GET' ? /^\/jobs\/(\d+)\/shots\/(.+)$/.exec(url.pathname) : undefined;
+      if (shot) {
+        let name: string | undefined;
+        try { name = decodeURIComponent(shot[2]!); } catch { /* does not decode: no such screenshot */ }
+        const image = name === undefined ? undefined : jobShot(opts, Number(shot[1]), name);
+        if (!image) return send(404, { error: `no such screenshot of job ${shot[1]}` });
+        res.writeHead(200, { 'content-type': image.type, 'cache-control': 'private, no-cache', 'x-content-type-options': 'nosniff', 'helix-version': version });
+        return res.end(image.body);
+      }
       if (!current) return outdated();
       if (req.method === 'POST' && url.pathname === '/leave') {
         const { cancelled, kept } = takeOff(person, store, opts.reap);
