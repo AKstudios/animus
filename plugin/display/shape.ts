@@ -56,6 +56,8 @@ export type JobPage = {
   reviews?: Pick<Review, 'summary' | 'findings'>[];
   /** Every question the job asked, with the answer it was given; the one it waits on has none. */
   questions?: { question: string; answer?: string }[];
+  /** Its latest screenshots, as named in its shots folder (`build/…`), each served with a token at /jobs/<id>/shots/<name>; `at` is when they were taken. */
+  shots?: { at: string; files: string[] };
   /** What the job's run has printed, all of it. */
   log: string;
 };

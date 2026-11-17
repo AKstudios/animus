@@ -6,14 +6,14 @@
 // Joining (invite, join) carries a one-time code instead, and leave the
 // person's own token (join.ts).
 // It also serves the display: its pages at / and /jobs/<id> (ui.ts), what the
-// overview shows at /display, and a job page's data, with a token, at
-// /jobs/<id>/page-data.
+// overview shows at /display, and a job page's data and screenshots, with a
+// token, at /jobs/<id>/page-data and /jobs/<id>/shots/<name>.
 import { createServer, type IncomingMessage, type Server } from 'node:http';
 import { VERSION_HEADER } from '../../plugin/src/remote.ts';
 import { animusVersion, compatible } from '../../plugin/src/version.ts';
 import { parseSkills, type PersonalSkill } from '../../plugin/src/personal.ts';
 import { hashToken, helixHome, type Config } from './config.ts';
-import { display, jobPage } from './display.ts';
+import { display, jobPage, jobShot } from './display.ts';
 import { inviteDetails, joinHelix, takeOff, verifyInChild, type Verify } from './join.ts';
 import { addProject, checkInChild, projectView, removeProject, type StartCheck } from './projects.ts';
 import type { Store } from './store.ts';
@@ -94,6 +94,16 @@ export function serve(opts: {
       if (pageData) {
         const page = jobPage(opts, Number(pageData));
         return page ? send(200, page) : send(404, { error: `no job ${pageData}` });
+      }
+      // One of a job's screenshots, for its page: the name is as its shots folder lists it, and only such a name is served.
+      const shot = req.method === 'GET' ? /^\/jobs\/(\d+)\/shots\/(.+)$/.exec(url.pathname) : undefined;
+      if (shot) {
+        let name: string | undefined;
+        try { name = decodeURIComponent(shot[2]!); } catch { /* does not decode: no such screenshot */ }
+        const image = name === undefined ? undefined : jobShot(opts, Number(shot[1]), name);
+        if (!image) return send(404, { error: `no such screenshot of job ${shot[1]}` });
+        res.writeHead(200, { 'content-type': image.type, 'cache-control': 'private, no-cache', 'x-content-type-options': 'nosniff', 'helix-version': version });
+        return res.end(image.body);
       }
       if (!current) return outdated();
       if (req.method === 'POST' && url.pathname === '/leave') {

@@ -19,6 +19,8 @@ export type JobPageView = {
   checks: { name: string; command: string; tag: string; tone: Tone; detail: string; output?: string }[];
   reviews: { title: string; summary: string; findings: { tag: string; tone: Tone; where: string; problem: string; fix: string }[] }[];
   questions: { question: string; answer: string; answered: boolean }[];
+  /** Each screenshot, named by its file, and where Helix serves it to a token. */
+  shots: { name: string; src: string }[];
   log: string;
   /** While the job may still write to it, the page reads its log again every two seconds and keeps to its end. */
   follow: boolean;
@@ -64,6 +66,10 @@ export function jobView(p: JobPage, now: number): JobPageView {
       })),
     })),
     questions: (p.questions ?? []).map((q) => ({ question: q.question, answer: q.answer ?? 'Not answered yet.', answered: q.answer !== undefined })),
+    shots: (p.shots?.files ?? []).map((f) => ({
+      name: (f.split('/').at(-1) ?? f).replace(/\.[^.]+$/, ''),
+      src: `/jobs/${j.id}/shots/${f.split('/').map(encodeURIComponent).join('/')}`,
+    })),
     log: p.log,
     follow: j.state === 'running' || j.state === 'queued',
   };

@@ -2,13 +2,14 @@
 // the slots, and each repository's base branch and gates. Read fresh on every
 // request from the table, Animus's job files and each clone's profile, so
 // Helix keeps nothing for it.
-import { readdirSync, readFileSync, statSync } from 'node:fs';
+import { readdirSync, readFileSync, realpathSync, statSync } from 'node:fs';
 import { hostname } from 'node:os';
-import { join } from 'node:path';
+import { extname, join, sep } from 'node:path';
 import type { Display, DisplayJob, DisplayRepo, JobCheck, JobPage } from '../../plugin/display/shape.ts';
 import { readRuns, STAGES, type JobState } from '../../plugin/src/log.ts';
 import type { Review } from '../../plugin/src/review.ts';
 import { loadProfile, PROFILE_PATH } from '../../plugin/src/profile.ts';
+import { readShots } from '../../plugin/src/ui.ts';
 import { readyRepos, type Config } from './config.ts';
 import type { HelixJob, Store } from './store.ts';
 import type { Supervisor } from './supervisor.ts';
@@ -92,10 +93,9 @@ export function jobPage(opts: { store: Store; supervisor: Supervisor }, id: numb
   if (!job) return undefined;
   const spec = read(job.spec);
   const page: JobPage = { at: new Date().toISOString(), stages: STAGES, job: jobOf(job, opts.supervisor), ...(spec !== undefined ? { spec } : {}), log: opts.supervisor.log(id, Infinity) };
-  // Its Animus id comes from what the job printed: only a plain name is taken as a folder.
-  if (!job.animus_job || !/^[A-Za-z0-9][\w.-]*$/.test(job.animus_job)) return page;
   const home = opts.supervisor.animusHome(job.person);
-  const dir = join(home, 'jobs', job.animus_job);
+  const dir = folderOf(opts.supervisor, job);
+  if (!job.animus_job || !dir) return page;
   const runs = readRuns(join(home, 'runs.jsonl')).filter((r) => r.job === job.animus_job);
   if (runs.length) page.ms = Object.fromEntries(STAGES.map((s) => [s, runs.reduce((sum, r) => sum + (r.ms?.[s] ?? 0), 0)]));
   const state = readJson<JobState>(join(dir, 'state.json'));
@@ -110,7 +110,43 @@ export function jobPage(opts: { store: Store; supervisor: Supervisor }, id: numb
   const open = state?.outcome === 'needs-input' && state.question ? [{ question: state.question, ...(job.answer ? { answer: job.answer } : {}) }] : [];
   const questions = [...(state?.answers ?? []), ...open];
   if (questions.length) page.questions = questions;
+  const shots = shotsOf(dir);
+  if (shots.files.length) page.shots = shots;
   return page;
+}
+
+/** The screenshots a job's shots folder lists, as its manifest names them under that folder, and when they were taken. */
+function shotsOf(dir: string): { at: string; files: string[] } {
+  const s = readShots(join(dir, 'shots'));
+  const build: unknown = s?.build;
+  return { at: String(s?.at ?? ''), files: Array.isArray(build) ? build.filter((f): f is string => typeof f === 'string') : [] };
+}
+
+/** The job's Animus folder. Its Animus id comes from what the job printed: only a plain name is taken as a folder. */
+function folderOf(supervisor: Supervisor, job: HelixJob): string | undefined {
+  if (!job.animus_job || !/^[A-Za-z0-9][\w.-]*$/.test(job.animus_job)) return undefined;
+  return join(supervisor.animusHome(job.person), 'jobs', job.animus_job);
+}
+
+const IMAGE: Record<string, string> = { '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.webp': 'image/webp', '.gif': 'image/gif' };
+
+/**
+ * One of a job's screenshots, or nothing: only a name its shots folder's
+ * manifest lists, and only a file that is truly inside that folder, so no
+ * name or link a job left there leads anywhere else. It needs a token: the
+ * server sees to that.
+ */
+export function jobShot(opts: { store: Store; supervisor: Supervisor }, id: number, name: string): { type: string; body: Buffer } | undefined {
+  const job = opts.store.get(id);
+  const dir = job && folderOf(opts.supervisor, job);
+  const type = IMAGE[extname(name).toLowerCase()];
+  if (!dir || !type || !shotsOf(dir).files.includes(name)) return undefined;
+  try {
+    const root = realpathSync(join(dir, 'shots'));
+    const file = realpathSync(join(root, name));
+    if (!file.startsWith(root + sep)) return undefined;
+    return { type, body: readFileSync(file) };
+  } catch { return undefined; }
 }
 
 export function display(opts: { config: Config; store: Store; supervisor: Supervisor }): Display {

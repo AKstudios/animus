@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { mkdirSync, mkdtempSync, utimesSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, symlinkSync, utimesSync, writeFileSync } from 'node:fs';
 import type { AddressInfo } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -44,7 +44,7 @@ async function helix() {
     assert.equal(res.status, 200);
     return (await res.json()) as JobPage;
   };
-  return { animus, add, page, stop: () => { supervisor.stop(); server.close(); store.close(); } };
+  return { animus, url, add, page, stop: () => { supervisor.stop(); server.close(); store.close(); } };
 }
 
 /** Gives a file the nth minute after the job started as when it was written. */
@@ -197,4 +197,73 @@ test('the log follows its end only while it is scrolled to the end', () => {
   assert.equal(atEnd({ scrollTop: 600, scrollHeight: 1000, clientHeight: 400 }), true);
   assert.equal(atEnd({ scrollTop: 598, scrollHeight: 1000, clientHeight: 400 }), true);
   assert.equal(atEnd({ scrollTop: 300, scrollHeight: 1000, clientHeight: 400 }), false);
+});
+
+const PNG = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 1, 2, 3]);
+
+/** A UI job's shots folder as `animus shots` leaves it: the images under build/, and the manifest that lists them. */
+function shotsFolder(animus: string, job: string, build: string[]): string {
+  const dir = join(animus, 'jobs', job, 'shots');
+  mkdirSync(join(dir, 'build'), { recursive: true });
+  writeFileSync(join(animus, 'jobs', job, 'state.json'), JSON.stringify({ job }));
+  for (const f of build) writeFileSync(join(dir, f), PNG);
+  writeFileSync(join(dir, 'manifest.json'), JSON.stringify({ job, target: 'app', tree: 't', at: '2026-11-17T10:30:00Z', build, reference: [], design: 'missing' }));
+  return dir;
+}
+
+const ui = { state: 'ended', person: 'ana', repo: 'app', title: 'Settings page', draft: false, submitted: '2026-11-17T10:00:00Z' } as const;
+
+// Protects: criterion 5, a job's screenshots on its page, for a valid token only. Fails when: the page leaves them off, or Helix serves them without a token.
+test('a job page lists its screenshots, and Helix serves each one to a valid token only', async () => {
+  const h = await helix();
+  shotsFolder(h.animus, 'app-8', ['build/settings@390x844.png', 'build/settings@1280x800.png']);
+  const job = h.add({ ...ui, animus_job: 'app-8' }, '# Settings\n', '');
+
+  const v = jobView(await h.page(job.id), NOW);
+  const src = `/jobs/${job.id}/shots/build/settings%40390x844.png`;
+  const get = (token?: string) => fetch(new URL(src, h.url), token ? { headers: { authorization: `Bearer ${token}` } } : {});
+  const [shown, none, wrong] = await Promise.all([get('ben-token'), get(), get('not-a-token')]);
+  const body = Buffer.from(await shown.arrayBuffer());
+  h.stop();
+
+  assert.deepEqual(v.shots, [
+    { name: 'settings@390x844', src },
+    { name: 'settings@1280x800', src: `/jobs/${job.id}/shots/build/settings%401280x800.png` },
+  ]);
+  assert.deepEqual([shown.status, shown.headers.get('content-type'), body], [200, 'image/png', PNG]);
+  assert.deepEqual([none.status, wrong.status], [401, 401]);
+});
+
+// Protects: criterion 5, no path reaches outside a job's screenshots. Fails when: a name that climbs out, or a file of the folder that is not a screenshot, is served.
+test('Helix serves only the screenshots a job\'s shots folder lists, and nothing a name climbs out to', async () => {
+  const h = await helix();
+  shotsFolder(h.animus, 'app-8', ['build/settings@390x844.png']);
+  writeFileSync(join(h.animus, 'secret.png'), PNG);
+  const job = h.add({ ...ui, animus_job: 'app-8' }, '# Settings\n', '');
+  const other = h.add({ ...ui }, '# No folder\n', '');
+  const names = [
+    `${job.id}/shots/manifest.json`,
+    `${job.id}/shots/build%2Fother.png`,
+    `${job.id}/shots/build%2F..%2Fmanifest.json`,
+    `${job.id}/shots/..%2Fstate.json`,
+    `${job.id}/shots/build%2F..%2F..%2F..%2F..%2Fsecret.png`,
+    `${job.id}/shots/%2Fetc%2Fpasswd`,
+    `${other.id}/shots/build%2Fsettings%40390x844.png`,
+  ];
+  const statuses = await Promise.all(names.map(async (n) => (await fetch(new URL(`/jobs/${n}`, h.url), { headers: { authorization: 'Bearer ben-token' } })).status));
+  h.stop();
+  assert.deepEqual(statuses, names.map(() => 404));
+});
+
+// Protects: a screenshot the manifest lists cannot lead outside the folder. Fails when: a link a capture command left in build/ is followed.
+test('a listed screenshot that links outside the job\'s folder is not served', { skip: process.platform === 'win32' && 'links need privileges on Windows' }, async () => {
+  const h = await helix();
+  const dir = shotsFolder(h.animus, 'app-8', []);
+  writeFileSync(join(h.animus, 'secret.png'), PNG);
+  symlinkSync(join(h.animus, 'secret.png'), join(dir, 'build', 'home.png'));
+  writeFileSync(join(dir, 'manifest.json'), JSON.stringify({ build: ['build/home.png'], reference: [] }));
+  const job = h.add({ ...ui, animus_job: 'app-8' }, '# Settings\n', '');
+  const res = await fetch(new URL(`/jobs/${job.id}/shots/build/home.png`, h.url), { headers: { authorization: 'Bearer ben-token' } });
+  h.stop();
+  assert.equal(res.status, 404);
 });
