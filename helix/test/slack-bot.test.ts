@@ -21,8 +21,9 @@ for (const [event, reply] of [
   [{ kind: 'command', user: 'U0EVE', channel: 'C0TEAM', text: 'link <@U0EVE|eve> ana', responseUrl: URL }, { method: 'respond', url: URL, text: NOT_ON }],
   [{ kind: 'command', user: 'U0EVE', channel: 'C0TEAM', text: 'notify off', responseUrl: URL }, { method: 'respond', url: URL, text: NOT_ON }],
   [{ kind: 'command', user: 'U0EVE', channel: 'C0TEAM', text: '', responseUrl: URL }, { method: 'respond', url: URL, text: NOT_ON }],
+  [{ kind: 'action', user: 'U0EVE', channel: 'D0ANA', action: 'cancel_job', value: '1', responseUrl: URL }, { method: 'respond', url: URL, text: NOT_ON }],
 ] as [SlackEvent, Sent][]) {
-  test(`an unlinked Slack user's ${event.kind} "${event.text}" gets the private not-on-this-Helix reply and nothing is stored`, async () => {
+  test(`an unlinked Slack user's ${event.kind} "${"text" in event ? event.text : event.value}" gets the private not-on-this-Helix reply and nothing is stored`, async () => {
     const db = join(mkdtempSync(join(tmpdir(), 'helix-bot-')), 'helix.db');
     const store = openStore(db);
     store.putPerson('ana', { token_sha256: hashToken('ana-token') });

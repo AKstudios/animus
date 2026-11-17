@@ -103,7 +103,7 @@ export async function fakeSlack(tokens = { app: 'xapp-good' }): Promise<FakeSlac
 
 /** What the bot's core sent through the fake transport. */
 export type Sent =
-  | { method: 'post'; channel: string; text: string; thread?: string }
+  | { method: 'post'; channel: string; text: string; thread?: string; blocks?: unknown[] }
   | { method: 'dm'; user: string }
   | { method: 'ephemeral'; channel: string; user: string; text: string }
   | { method: 'respond'; url: string; text: string };
@@ -114,7 +114,7 @@ export function fakeTransport() {
   const sent: Sent[] = [];
   const transport: Transport = {
     onEvent: (h) => { handle = h; },
-    post: async (channel, text, thread) => { sent.push({ method: 'post', channel, text, ...(thread ? { thread } : {}) }); return `ts-${sent.length}`; },
+    post: async (channel, text, thread, blocks) => { sent.push({ method: 'post', channel, text, ...(thread ? { thread } : {}), ...(blocks ? { blocks } : {}) }); return `ts-${sent.length}`; },
     dm: async (user) => { sent.push({ method: 'dm', user }); return `D-${user}`; },
     ephemeral: async (channel, user, text) => { sent.push({ method: 'ephemeral', channel, user, text }); },
     respond: async (url, text) => { sent.push({ method: 'respond', url, text }); },

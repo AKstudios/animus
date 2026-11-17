@@ -18,7 +18,8 @@ type Envelope = {
   envelope_id?: string; type?: string;
   payload?: {
     user_id?: string; channel_id?: string; text?: string; response_url?: string;
-    event?: { type?: string; subtype?: string; bot_id?: string; channel_type?: string; user?: string; channel?: string; text?: string };
+    event?: { type?: string; subtype?: string; bot_id?: string; channel_type?: string; user?: string; channel?: string; text?: string; thread_ts?: string };
+    user?: { id?: string }; channel?: { id?: string }; actions?: { action_id?: string; value?: string }[];
   };
 };
 
@@ -26,9 +27,14 @@ type Envelope = {
 function eventOf(e: Envelope): SlackEvent | undefined {
   const p = e.payload;
   if (e.type === 'slash_commands' && p?.user_id && p.channel_id && p.response_url) return { kind: 'command', user: p.user_id, channel: p.channel_id, text: p.text ?? '', responseUrl: p.response_url };
+  const a = p?.actions?.[0];
+  if (e.type === 'interactive' && a?.action_id && a.value && p?.user?.id && p.channel?.id && p.response_url) return { kind: 'action', user: p.user.id, channel: p.channel.id, action: a.action_id, value: a.value, responseUrl: p.response_url };
   const m = p?.event;
+  const thread = m?.thread_ts ? { thread: m.thread_ts } : {};
   // Only what a person writes in the bot's DM: never the bot's own posts, which would be answered forever, nor edits and joins.
-  if (e.type === 'events_api' && m?.type === 'message' && m.channel_type === 'im' && !m.subtype && !m.bot_id && m.user && m.channel) return { kind: 'message', user: m.user, channel: m.channel, text: m.text ?? '' };
+  if (e.type === 'events_api' && m?.type === 'message' && m.channel_type === 'im' && !m.subtype && !m.bot_id && m.user && m.channel) return { kind: 'message', user: m.user, channel: m.channel, text: m.text ?? '', ...thread };
+  // In a channel the bot only hears the messages that name it.
+  if (e.type === 'events_api' && m?.type === 'app_mention' && !m.bot_id && m.user && m.channel) return { kind: 'message', user: m.user, channel: m.channel, text: m.text ?? '', mentioned: true, ...thread };
   return undefined;
 }
 

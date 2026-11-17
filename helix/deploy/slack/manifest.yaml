@@ -11,8 +11,8 @@ features:
     always_online: true
   slash_commands:
     - command: /helix
-      description: Invite someone, link a Slack user, or turn job notifications off and on
-      usage_hint: invite @user <github-login> | link @user <person> | notify off|on
+      description: See your jobs and Helix's load, invite someone, link a Slack user, or turn job notifications off and on
+      usage_hint: jobs | status | invite @user <github-login> | link @user <person> | notify off|on
       should_escape: true
 oauth_config:
   scopes:
@@ -21,10 +21,14 @@ oauth_config:
       - chat:write
       - im:write
       - im:history
+      - app_mentions:read
 settings:
+  interactivity:
+    is_enabled: true
   event_subscriptions:
     bot_events:
       - message.im
+      - app_mention
   org_deploy_enabled: false
   socket_mode_enabled: true
   token_rotation_enabled: false

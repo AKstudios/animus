@@ -62,7 +62,13 @@ test('a linked person\'s job from animus submit posts started, then its pull req
   h.stop();
   assert.deepEqual(h.slack.sent, [
     { method: 'dm', user: 'U0ANA' },
-    { method: 'post', channel: 'D-U0ANA', text: `Job ${job.id} started: add login (app)` },
+    {
+      method: 'post', channel: 'D-U0ANA', text: `Job ${job.id} started: add login (app)`,
+      blocks: [
+        { type: 'section', text: { type: 'mrkdwn', text: `Job ${job.id} started: add login (app)` } },
+        { type: 'actions', elements: [{ type: 'button', action_id: 'cancel_job', value: String(job.id), text: { type: 'plain_text', text: 'Cancel job' } }] },
+      ],
+    },
     { method: 'post', channel: 'D-U0ANA', thread: 'ts-2', text: `Job ${job.id} opened a pull request: https://example.test/pr/add-login` },
   ]);
 });
@@ -81,7 +87,7 @@ test('a job that asks posts its question and, once answered, carries on in its t
   h.stop();
   assert.deepEqual(h.posts().map(({ thread, text }) => [thread, text]), [
     [undefined, `Job ${asked.id} started: ask me (app)`],
-    ['ts-2', `Job ${asked.id} needs input: which one?\nAnswer it with animus answer ${asked.id} "<your answer>"`],
+    ['ts-2', `Job ${asked.id} needs input: which one?\nReply in this thread to answer it, or run animus answer ${asked.id} "<your answer>"`],
     ['ts-2', `Job ${asked.id} resumed`],
     ['ts-2', `Job ${asked.id} opened a pull request: https://example.test/pr/ask-me`],
     [undefined, `Job ${failed.id} started: fail hard (app)`],
