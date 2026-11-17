@@ -3,6 +3,7 @@ import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
+import { loadState } from '../src/log.ts';
 import { runJob } from '../src/pipeline.ts';
 import { git } from '../src/proc.ts';
 import { clean, deps, done, fakeAgent, makeRepo, write, writeSpec, type Step } from './helpers.ts';
@@ -102,4 +103,76 @@ test('a job that failed opens its draft PR after the same catch-up', async () =>
   const moved = git(origin, ['rev-parse', 'main']);
   assert.equal(git(repo, ['rev-parse', `animus/${run.job}^2`]), moved);
   assert.match(d.published[0]!.body, new RegExp(`Caught up with main at ${moved}`));
+});
+
+// The job writes src/feature.txt, and the base adds its own while the job runs: the merge conflicts there.
+const conflicting = (origin: string, extra: Record<string, string> = {}) => baseMoves(origin, { 'src/feature.txt': 'base\n', ...extra }, say('done'));
+const branchMerges = (repo: string, run: { base: string; job: string }) => git(repo, ['rev-list', '--count', '--merges', `${run.base}..animus/${run.job}`]);
+
+test('a conflict goes to a fresh session with the files, the spec and the base\'s commits, and the PR lists what it resolved', async () => {
+  const { origin, repo } = cloned();
+  const { agent, calls } = fakeAgent([conflicting(origin), () => clean(), say('done')]);
+  const d = deps(agent);
+  const run = await runJob({ repo, specFile: writeSpec(SMALL) }, d);
+
+  assert.equal(run.outcome, 'pr');
+  assert.deepEqual(calls.map((c) => [c.role, c.resume]), [['implementer', undefined], ['reviewer', undefined], ['implementer', undefined]]);
+  assert.match(calls[2]!.prompt, /src\/feature\.txt/);
+  assert.match(calls[2]!.prompt, /[0-9a-f]{7,} the base moves/);
+  assert.match(calls[2]!.prompt, /The feature file should say done\./);
+  const moved = git(origin, ['rev-parse', 'main']);
+  assert.equal(git(repo, ['rev-parse', `animus/${run.job}^2`]), moved);
+  assert.equal(run.gates.at(-1)!.ok, true);
+  assert.match(d.published[0]!.body, /Conflicts with main that the implementer resolved: `src\/feature\.txt`/);
+});
+
+test('a resolution that leaves conflict markers does not hold, whatever the gates say', async () => {
+  const { origin, repo } = cloned();
+  // The markers keep "done" in the file, so the gates alone would pass it.
+  const { agent } = fakeAgent([conflicting(origin), () => clean(), () => done()]);
+  const run = await runJob({ repo, specFile: writeSpec(SMALL) }, deps(agent));
+
+  assert.equal(run.outcome, 'needs-input');
+  assert.match(run.question!, /conflict markers are left in src\/feature\.txt/);
+  assert.equal(branchMerges(repo, run), '0');
+});
+
+test('gates that still fail after a resolution\'s fix rounds end the job as needs input with the conflicting files', async () => {
+  const { origin, repo } = cloned();
+  const { agent } = fakeAgent([conflicting(origin), () => clean(), say('base'), say('base still'), say('base again')]);
+  const run = await runJob({ repo, specFile: writeSpec(SMALL) }, deps(agent));
+
+  assert.equal(run.outcome, 'needs-input');
+  assert.match(run.question!, /conflicts in src\/feature\.txt/);
+  assert.match(run.question!, /the gates still fail after 2 fix round\(s\)/);
+});
+
+test('a session that cannot resolve a conflict asks, and the answer picks the job up at the catch-up', async () => {
+  const { origin, repo } = cloned();
+  const first = fakeAgent([conflicting(origin), () => clean(), () => ({ output: { status: 'needs-input', summary: '', question: 'Should it say done or base?' } })]);
+  const run = await runJob({ repo, specFile: writeSpec(SMALL) }, deps(first.agent));
+  assert.equal(run.outcome, 'needs-input');
+  assert.match(run.question!, /conflicts in src\/feature\.txt[\s\S]*Should it say done or base\?/);
+  assert.equal(branchMerges(repo, run), '0');
+
+  const second = fakeAgent([say('done')]);
+  const d = deps(second.agent);
+  const again = await runJob({ repo, resume: { state: loadState(run.job)!, answer: 'Done.' } }, d);
+  assert.equal(again.outcome, 'pr');
+  assert.deepEqual(second.calls.map((c) => [c.role, c.resume]), [['implementer', undefined]]);
+  assert.match(second.calls[0]!.prompt, /Should it say done or base\?[\s\S]*Done\./);
+  assert.equal(git(repo, ['rev-parse', `animus/${run.job}^2`]), git(origin, ['rev-parse', 'main']));
+  assert.match(d.published[0]!.body, /`src\/feature\.txt`/);
+});
+
+test('a conflict in a protected path ends the job as needs input with that path, before any session is asked', async () => {
+  const { origin, repo } = cloned();
+  // A resolving session would be a third call, which the fake agent refuses.
+  const { agent } = fakeAgent([baseMoves(origin, { '.github/ci.yml': 'base\n' }, say('done', { '.github/ci.yml': 'job\n' })), () => clean()]);
+  const run = await runJob({ repo, specFile: writeSpec(SMALL) }, deps(agent));
+
+  assert.equal(run.outcome, 'needs-input');
+  assert.match(run.question!, /protected/);
+  assert.match(run.question!, /\.github\/ci\.yml/);
+  assert.equal(branchMerges(repo, run), '0');
 });

@@ -7,7 +7,7 @@ import { homedir } from 'node:os';
 import { join } from 'node:path';
 import type { Tokens } from './agent.ts';
 import type { Plan } from './profiles.ts';
-import type { Finding } from './review.ts';
+import type { Finding, Review } from './review.ts';
 import type { Slicing } from './slices.ts';
 import type { Workspace } from './workspace.ts';
 
@@ -97,6 +97,8 @@ export type JobState = {
   /** The questions this job stopped to ask, each with the person's answer: the reviewer reads them beside the spec. */
   answers?: { question: string; answer: string }[];
   findings?: Finding[];
+  /** Set when the catch-up stopped to ask: the reviewed work is done, so a resumed job starts at the catch-up with what the PR needs from before it. */
+  catch_up?: { summary: string; notes?: string; review?: Review; review_rounds: number };
 };
 
 export const STAGES = ['setup', 'plan', 'implement', 'gates', 'review', 'evidence', 'pr'] as const;
