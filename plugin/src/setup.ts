@@ -17,8 +17,6 @@ import { atLeast, MIN_CLAUDE } from './semver.ts';
 export const MARKETPLACE = 'akstudios';
 export const PLUGIN = `animus@${MARKETPLACE}`;
 export const SOURCE = { source: 'github', repo: 'AKstudios/animus', ref: 'stable' } as const;
-/** What the marketplace was called up to 0.3.5; its plugin had the same skills. */
-export const OLD_MARKETPLACE = 'animus';
 /** Where Claude Code keeps a plugin turned on for one person in one checkout. */
 const LOCAL_SETTINGS = '.claude/settings.local.json';
 /** The first line of the `animus` command setup writes, so it knows its own. */
@@ -147,24 +145,38 @@ export function installedPlugins(claudeDir: string): Installed {
   } catch { return {}; }
 }
 
-/** Takes away the marketplace Animus had before it was called akstudios, and the plugin installed from it, wherever it is on. */
-async function oldName(io: Io, m: Machine): Promise<void> {
-  const old = marketplaces(io.run).find((k) => k.name === OLD_MARKETPLACE && /^akstudios\/animus$/i.test(k.repo ?? ''));
-  if (!old) return;
-  if (!yes(await io.ask(`Animus's marketplace used to be called ${OLD_MARKETPLACE}, and you still have it, which would load Animus twice. Remove the old one? [Y/n] `))) return;
-  for (const where of installedPlugins(m.claudeDir)[`animus@${OLD_MARKETPLACE}`] ?? []) {
-    io.run('claude', ['plugin', 'uninstall', `animus@${OLD_MARKETPLACE}`, '--scope', where.scope], where.projectPath ? { cwd: where.projectPath } : {});
+/**
+ * Takes away Animus's marketplace under any name but akstudios (it was
+ * called animus up to 0.3.5), and the plugin installed from it, wherever it is
+ * on. Claude Code knows a marketplace by its source, so akstudios cannot be
+ * added beside it: false when the person keeps it.
+ */
+async function oldName(io: Io, m: Machine): Promise<boolean> {
+  const old = marketplaces(io.run).find((k) => k.name !== MARKETPLACE && k.repo?.toLowerCase() === SOURCE.repo.toLowerCase());
+  if (!old) return true;
+  if (!yes(await io.ask(`You have Animus's marketplace under its old name, ${old.name}. It is called ${MARKETPLACE} now, and Claude Code cannot have both. Move it? (Animus is installed again from ${MARKETPLACE} below.) [Y/n] `))) {
+    io.say(`Keeping ${old.name}, so setup stops here. Run it again to move it.`);
+    return false;
   }
-  const r = io.run('claude', ['plugin', 'marketplace', 'remove', OLD_MARKETPLACE]);
-  io.say(r.ok ? `✓ removed the old ${OLD_MARKETPLACE} marketplace` : `Could not remove the old marketplace: ${r.out}. Remove it in Claude Code: /plugin, Marketplaces.`);
+  for (const where of installedPlugins(m.claudeDir)[`animus@${old.name}`] ?? []) {
+    io.run('claude', ['plugin', 'uninstall', `animus@${old.name}`, '--scope', where.scope], where.projectPath ? { cwd: where.projectPath } : {});
+  }
+  const r = io.run('claude', ['plugin', 'marketplace', 'remove', old.name]);
+  if (!r.ok) {
+    io.say(`Could not remove the ${old.name} marketplace: ${r.out}. Remove it in Claude Code (/plugin, Marketplaces), then run this again.`);
+    return false;
+  }
+  io.say(`✓ removed the ${old.name} marketplace`);
+  return true;
 }
 
 /** Adds the akstudios marketplace when it is not there yet. */
 function marketplace(io: Io): boolean {
   if (marketplaces(io.run).some((k) => k.name === MARKETPLACE)) return true;
   const r = io.run('claude', ['plugin', 'marketplace', 'add', `${SOURCE.repo}#${SOURCE.ref}`]);
-  if (!r.ok) io.say(`Could not add the ${MARKETPLACE} marketplace: ${r.out}`);
-  return r.ok;
+  if (r.ok && marketplaces(io.run).some((k) => k.name === MARKETPLACE)) return true;
+  io.say(`Could not add the ${MARKETPLACE} marketplace${r.out ? `: ${r.out}` : ''}`);
+  return false;
 }
 
 /**
@@ -385,7 +397,7 @@ async function command(io: Io, m: Machine): Promise<void> {
 export async function setup(io: Io, m: Machine, cwd: string): Promise<boolean> {
   io.say('Animus setup\n');
   if (!await tools(io, m)) return false;
-  await oldName(io, m);
+  if (!await oldName(io, m)) return false;
   if (!marketplace(io)) return false;
   io.say('');
   await updates(io, m);

@@ -8,6 +8,12 @@ clients with how to update.
 
 ## Unreleased
 
+- The installers and `animus setup` find Animus's marketplace by its GitHub
+  repository, whatever it is called. Claude Code knows a marketplace by its
+  source, so on a machine that had it as `animus`, adding `akstudios` added
+  nothing and the install stopped ("no plugin/src/setup.ts at an unknown
+  place"). Setup now moves it, and stops if the person keeps the old name.
+
 ## 0.3.7 (2026-11-17)
 
 - `install.sh` no longer hides from setup that `~/.local/bin` is missing from

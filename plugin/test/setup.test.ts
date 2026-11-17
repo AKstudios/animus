@@ -69,14 +69,18 @@ function fakeMachine(answers: string[], opts: { old?: boolean; path?: string } =
   for (const r of repos) { mkdirSync(r, { recursive: true }); spawnSync('git', ['init', '-q'], { cwd: r }); }
   if (opts.old) write(claudeDir, 'plugins/installed_plugins.json', JSON.stringify({ plugins: { 'animus@animus': [{ scope: 'user', installPath: '/x', version: '0.3.5' }] } }));
   const calls: string[] = [];
+  const known = new Map<string, string>([[opts.old ? 'animus' : 'akstudios', 'AKstudios/animus']]);
   const run: Run = (command, args, o = {}) => {
     const line = `${command} ${args.join(' ')}`;
     if (command === 'claude' || line === 'gh auth setup-git') calls.push(o.cwd ? `${line} (in ${o.cwd.slice(home.length + 1)})` : line);
     if (line === 'claude --version') return { ok: true, out: '2.1.326 (Claude Code)' };
     if (line === 'claude auth status --json') return { ok: true, out: '{"loggedIn":true}' };
-    if (line === 'claude plugin marketplace list --json') {
-      const known = [{ name: 'akstudios', repo: 'AKstudios/animus' }, ...(opts.old ? [{ name: 'animus', repo: 'AKstudios/animus' }] : [])];
-      return { ok: true, out: JSON.stringify(known) };
+    // Claude Code knows a marketplace by its source: adding one it has under another name adds nothing.
+    if (line === 'claude plugin marketplace list --json') return { ok: true, out: JSON.stringify([...known].map(([name, repo]) => ({ name, repo }))) };
+    if (line.startsWith('claude plugin marketplace remove ')) { known.delete(args[3]!); return { ok: true, out: '' }; }
+    if (line === 'claude plugin marketplace add AKstudios/animus#stable') {
+      if (![...known.values()].includes('AKstudios/animus')) known.set('akstudios', 'AKstudios/animus');
+      return { ok: true, out: '' };
     }
     if (line === 'git rev-parse --show-toplevel') return o.cwd && existsSync(join(o.cwd, '.git')) ? { ok: true, out: o.cwd } : { ok: false, out: 'not a git repository' };
     if (command === 'git') return realGit(args, o.cwd!);
@@ -97,6 +101,7 @@ test('setup removes the old marketplace, turns on updates, turns Animus on in th
     'gh auth setup-git',
     'claude plugin uninstall animus@animus --scope user',
     'claude plugin marketplace remove animus',
+    'claude plugin marketplace add AKstudios/animus#stable',
     `claude plugin install ${PLUGIN} --scope local (in Dev/shop)`,
     `claude plugin install ${PLUGIN} --scope local (in code/api)`,
   ]);
@@ -144,4 +149,12 @@ test('the animus command runs the newest installed copy of the plugin', () => {
     assert.deepEqual(out.args, ['doctor', '--json']);
     assert.match(out.bin, /0\.4\.0[/\\]bin[/\\]animus$/);
   });
+});
+
+test('setup stops, changing nothing, when the person keeps the marketplace under its old name', async () => {
+  const f = fakeMachine(['n'], { old: true });
+  assert.equal(await setup(f.io, f.machine, f.home), false);
+  assert.ok(!f.calls.some((c) => /uninstall|remove|add|install/.test(c)));
+  assert.ok(f.said.some((l) => l.includes('setup stops here')));
+  assert.equal(autoUpdating(f.claudeDir), false);
 });

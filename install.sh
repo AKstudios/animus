@@ -98,19 +98,24 @@ else
 fi
 
 # The marketplace. https, so a machine with no GitHub ssh key can clone it.
+# Claude Code knows a marketplace by its source: one added before it was
+# called akstudios keeps its old name, and setup moves it.
 export CLAUDE_CODE_PLUGIN_PREFER_HTTPS=1
-if claude plugin marketplace list --json 2>/dev/null | grep -q "\"name\": *\"$MARKET\""; then
-  claude plugin marketplace update "$MARKET" >/dev/null 2>&1 || true
+ours() {
+  claude plugin marketplace list --json | node -e '
+    let s = ""; process.stdin.on("data", (d) => (s += d)).on("end", () => {
+      const m = JSON.parse(s).find((k) => (k.repo || "").toLowerCase() === process.argv[1].toLowerCase());
+      if (m) console.log(m[process.argv[2]]);
+    });' "$REPO" "$1"
+}
+name="$(ours name)"
+if [[ -n $name ]]; then
+  claude plugin marketplace update "$name" >/dev/null 2>&1 || die "could not update the $name marketplace"
 else
   claude plugin marketplace add "$REPO#$REF" || die "could not add the $MARKET marketplace"
 fi
-ok "the $MARKET marketplace is in Claude Code"
+where="$(ours installLocation)"
+[[ -n $where && -f $where/plugin/src/setup.ts ]] || die "Animus's marketplace has no plugin/src/setup.ts at ${where:-an unknown place}"
+ok "Animus's marketplace is in Claude Code"
 say ""
-
-where="$(claude plugin marketplace list --json | node -e '
-  let s = ""; process.stdin.on("data", (d) => (s += d)).on("end", () => {
-    const m = JSON.parse(s).find((k) => k.name === process.argv[1]);
-    if (m) console.log(m.installLocation);
-  });' "$MARKET")"
-[[ -n $where && -f $where/plugin/src/setup.ts ]] || die "the $MARKET marketplace has no plugin/src/setup.ts at ${where:-an unknown place}"
 exec node --disable-warning=ExperimentalWarning "$where/plugin/src/setup.ts" </dev/tty

@@ -63,17 +63,21 @@ if (Have 'claude') { Ok "claude $(claude --version)" } else {
 
 # The marketplace. https, so a machine with no GitHub ssh key can clone it.
 $env:CLAUDE_CODE_PLUGIN_PREFER_HTTPS = '1'
-$known = claude plugin marketplace list --json | ConvertFrom-Json
-if ($known | Where-Object { $_.name -eq $Market }) {
-  claude plugin marketplace update $Market *> $null
+# Claude Code knows a marketplace by its source: one added before it was
+# called akstudios keeps its old name, and setup moves it.
+function Ours { claude plugin marketplace list --json | ConvertFrom-Json | Where-Object { $_.repo -eq $Repo } | Select-Object -First 1 }
+$ours = Ours
+if ($ours) {
+  claude plugin marketplace update $ours.name *> $null
+  if ($LASTEXITCODE -ne 0) { Stop-Install "Could not update the $($ours.name) marketplace." }
 } else {
   claude plugin marketplace add "$Repo#$Ref"
   if ($LASTEXITCODE -ne 0) { Stop-Install "Could not add the $Market marketplace." }
-  $known = claude plugin marketplace list --json | ConvertFrom-Json
+  $ours = Ours
 }
-Ok "the $Market marketplace is in Claude Code`n"
+Ok "Animus's marketplace is in Claude Code`n"
 
-$where = ($known | Where-Object { $_.name -eq $Market }).installLocation
+$where = $ours.installLocation
 $setup = Join-Path $where 'plugin\src\setup.ts'
-if (-not (Test-Path $setup)) { Stop-Install "The $Market marketplace has no plugin\src\setup.ts at $where." }
+if (-not (Test-Path $setup)) { Stop-Install "Animus's marketplace has no plugin\src\setup.ts at $where." }
 node --disable-warning=ExperimentalWarning $setup
