@@ -15,10 +15,12 @@ import { supervise, type Launch } from '../src/supervisor.ts';
 
 const SPEC = (title: string) => `---\nsize: small\n---\n# ${title}\n\n## Acceptance criteria\n\n1. It works.\n`;
 
-// "ask" asks until it is given an answer; "hold" never ends.
+// "ask" asks until it is given an answer; "hold" never ends; "late" never ends and names its Animus job only after 400 ms.
 const FAKE = `
 const [title, answer] = process.argv.slice(1);
-console.error('job fake-' + title + ': ' + title);
+const says = () => console.error('job fake-' + title + ': ' + title);
+// Like animus winding down on SIGTERM: what it had to say still comes out before it exits.
+if (title.startsWith('late')) { setTimeout(says, 400); process.on('SIGTERM', () => { setTimeout(() => process.exit(0), 600); }); } else says();
 if (title.startsWith('ask') && !answer) console.log(JSON.stringify({ outcome: 'needs-input', question: 'which?' }));
 else if (title.startsWith('ask')) console.log(JSON.stringify({ outcome: 'needs-input', question: 'again?' }));
 else setInterval(() => {}, 1000);
@@ -96,6 +98,20 @@ test('an answer or cancel that is refused leaves no activity', async (t) => {
   await assert.rejects(client.cancel(String(held.id)), /already/);
 
   assert.deepEqual(h.log().map(([, kind]) => kind), ['submitted', 'cancelled']);
+});
+
+test('a job cancelled before it named its Animus job stays cancelled', async (t) => {
+  const h = await helix();
+  t.after(h.stop);
+  const late = await client.submit({ repo: 'app', spec: SPEC('late'), name: 'spec.md' });
+  await until(() => h.store.get(late.id)?.state, (s) => s === 'running');
+  // Long enough for its process to be up, short of the 400 ms before it names its Animus job.
+  await new Promise((r) => { setTimeout(r, 200); });
+  await client.cancel(String(late.id));
+  await new Promise((r) => { setTimeout(r, 800); });
+
+  assert.equal(h.store.get(late.id)?.state, 'cancelled');
+  await assert.rejects(client.cancel(String(late.id)), /already been cancelled/);
 });
 
 test('joining keeps the day they joined and an activity; leaving keeps both activities and the jobs', async (t) => {

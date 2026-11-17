@@ -164,7 +164,12 @@ export function supervise(opts: {
       const text = chunk.toString();
       appendFileSync(logFile(job.id), text);
       const id = /^job (\S+): /m.exec(text)?.[1];
-      if (id && !running.animus_job && !stopped) { running = { ...running, animus_job: id }; store.save(running); }
+      if (id && !running.animus_job && !stopped) {
+        running = { ...running, animus_job: id };
+        // Saved onto what the table says now: a job cancelled before this line came stays cancelled.
+        const current = store.get(job.id);
+        if (current?.state === 'running') store.save({ ...current, animus_job: id });
+      }
     });
     const end = (fallback: string) => {
       if (!children.delete(job.id) || stopped) return;

@@ -12,6 +12,9 @@ clients with how to update.
   saying `gh` is not installed whenever it could not be run; "not installed"
   is kept for when it is not found. The test of opening a pull request no
   longer fails on a busy machine (it stopped 0.4.0 deploying to Helix).
+- A Helix job cancelled in its first moments stays cancelled. Before, the job
+  naming its Animus job just after the cancel put it back as running, so it
+  could be cancelled again and then ended as failed.
 
 ## 0.4.0 (2026-11-17)
 
