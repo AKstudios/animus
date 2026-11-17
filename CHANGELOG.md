@@ -8,6 +8,8 @@ clients with how to update.
 
 ## Unreleased
 
+## 0.4.1 (2026-11-17)
+
 - A pull request that `gh` fails to open or update says why, instead of
   saying `gh` is not installed whenever it could not be run; "not installed"
   is kept for when it is not found. The test of opening a pull request no
