@@ -11,7 +11,7 @@ import { fileURLToPath } from 'node:url';
 import { AnimusError } from '../../plugin/src/proc.ts';
 import { loadProgress, type Progress } from '../../plugin/src/log.ts';
 import { parseSpec } from '../../plugin/src/spec.ts';
-import { credentialEnv, personEnv, type Config } from './config.ts';
+import { credentialEnv, personEnv, readyRepos, type Config } from './config.ts';
 import type { HelixJob, Store } from './store.ts';
 
 const PLUGIN = join(dirname(fileURLToPath(import.meta.url)), '..', '..', 'plugin');
@@ -38,7 +38,7 @@ const animus: Launch = (job, repoDir) => ({
 export const MAX_INTERRUPTIONS = 3;
 
 /** Looks at a person's credentials before their job starts: why the job cannot run, or variables to add to it (the person's git identity). */
-export type Preflight = (person: string, env: Record<string, string>, repoDir: string) => { why?: string; env?: Record<string, string> };
+export type Preflight = (person: string, env: Record<string, string>, repoDir: string, repo: string) => { why?: string; env?: Record<string, string> };
 
 export type Submission = { repo: string; spec: string; name?: string; draft?: boolean };
 
@@ -116,16 +116,18 @@ export function supervise(opts: {
   };
 
   function start(job: HelixJob): void {
-    const repoDir = config.repos[job.repo] ?? '';
+    const project = store.project(job.repo);
+    const repoDir = project?.state === 'ready' ? project.dir : '';
+    const person = store.person(job.person);
     mkdirSync(dirname(logFile(job.id)), { recursive: true });
     let env: NodeJS.ProcessEnv;
     let launched: ReturnType<Launch>;
     try {
       // Taken off since the job was queued: it never runs, and never with the machine's own logins in place of theirs.
-      if (!config.people[job.person]) throw new AnimusError(`${job.person} is no longer on Helix`);
-      if (!repoDir) throw new AnimusError(`Helix no longer has the repository ${job.repo}`);
-      const theirs = personEnv(config.people[job.person]);
-      const looked = opts.preflight?.(job.person, theirs, repoDir) ?? {};
+      if (!person) throw new AnimusError(`${job.person} is no longer on Helix`);
+      if (!repoDir) throw new AnimusError(`Helix no longer has the project ${job.repo}`);
+      const theirs = personEnv(person);
+      const looked = opts.preflight?.(job.person, theirs, repoDir, job.repo) ?? {};
       if (looked.why) throw new AnimusError(looked.why);
       // What the person set themselves wins over what was looked up.
       const jobEnv = { ...looked.env, ...theirs, ...credentialEnv(theirs), ANIMUS_USER: job.person, ANIMUS_TRIGGER: 'helix', ANIMUS_BIN: join(PLUGIN, 'bin', 'animus') };
@@ -202,8 +204,9 @@ export function supervise(opts: {
 
   return {
     submit(person, s) {
-      const repoDir = config.repos[s.repo];
-      if (!repoDir) throw new Refused(400, `Helix has no repository named ${s.repo}; it has ${Object.keys(config.repos).join(', ') || 'none'}`);
+      const project = store.project(s.repo);
+      if (project?.state === 'checking') throw new Refused(409, `Helix is still checking the project ${s.repo}: animus project list says when it is ready`);
+      if (project?.state !== 'ready') throw new Refused(400, `Helix has no project named ${s.repo}; it has ${Object.keys(readyRepos(store)).join(', ') || 'none'}. Add it from a checkout of it: animus project add`);
       let title: string;
       try { title = parseSpec(s.spec, s.name ?? 'spec.md').title; } catch (err) { throw new Refused(400, (err as Error).message); }
       const job = store.add({ state: 'queued', person, repo: s.repo, spec: '', title, draft: Boolean(s.draft), submitted: now() });

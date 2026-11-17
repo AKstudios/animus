@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
 import type { Agent, AgentRequest } from '../../plugin/src/agent.ts';
-import { checkPerson, claudeToken, githubPush, githubToken, type Runner } from '../src/check.ts';
+import { checkPerson, claudeToken, describeFindings, failing, githubPush, githubToken, type Runner } from '../src/check.ts';
 import { credentialEnv, hashToken, type Config } from '../src/config.ts';
 import { openStore } from '../src/store.ts';
 import { MAX_INTERRUPTIONS, supervise, type Launch } from '../src/supervisor.ts';
@@ -59,20 +59,30 @@ test('the Claude token check runs one small session with the person\'s variables
 test('a person with no env file fails the check, and the repositories are tried only with a token GitHub accepts', () => {
   const home = mkdtempSync(join(tmpdir(), 'helix-check-'));
   writeFileSync(join(home, 'ana.env'), 'GH_TOKEN=t\n');
-  const config: Config = { host: '127.0.0.1', port: 0, slots: 1, repos: { app: '/r' }, people: { ana: { token_sha256: 'x', env_file: join(home, 'ana.env') }, ben: { token_sha256: 'y' } } };
-  assert.match(checkPerson(config, 'ben')[0]!.detail, /none was given/);
-  const good = checkPerson(config, 'ana', { runner: answers({ 'gh api': { stdout: USER() }, 'git remote': { stdout: 'https://github.com/o/app.git' } }) });
+  const store = openStore(join(home, 'helix.db'));
+  store.putProject({ name: 'app', url: '', dir: '/r', state: 'ready', added: '' });
+  store.putPerson('ana', { token_sha256: 'x', env_file: join(home, 'ana.env') });
+  store.putPerson('ben', { token_sha256: 'y' });
+  assert.match(checkPerson(store, 'ben')[0]!.detail, /none was given/);
+  const good = checkPerson(store, 'ana', { runner: answers({ 'gh api': { stdout: USER() }, 'git remote': { stdout: 'https://github.com/o/app.git' } }) });
   assert.deepEqual(good.map((f) => [f.what, f.ok]), [['GitHub token', true], ['push to app', true]]);
-  const bad = checkPerson(config, 'ana', { runner: answers({ 'gh api': { code: 1, stderr: 'HTTP 401' } }) });
+  const bad = checkPerson(store, 'ana', { runner: answers({ 'gh api': { code: 1, stderr: 'HTTP 401' } }) });
   assert.deepEqual(bad.map((f) => [f.what, f.ok]), [['GitHub token', false]]);
+  // A project the token may not push to is told, and is not held against the person: GitHub decides who submits for what.
+  const elsewhere = checkPerson(store, 'ana', { runner: answers({ 'gh api': { stdout: USER() }, 'git remote': { stdout: 'https://github.com/o/app.git' }, 'git push': { code: 128, stderr: 'remote: Permission denied' } }) });
+  assert.deepEqual([elsewhere[1]!.ok, elsewhere[1]!.optional, failing(elsewhere).length], [false, true, 0]);
+  assert.match(describeFindings('ana', elsewhere), /  no   push to app: .*Permission denied/);
+  store.close();
 });
 
 /** A Helix home with one job the table calls running, as a crash leaves it. */
 function crashed(job: { pid?: number; started?: string; interrupted?: number }) {
   const home = mkdtempSync(join(tmpdir(), 'helix-'));
   mkdirSync(join(home, 'repo'));
-  const config: Config = { host: '127.0.0.1', port: 0, slots: 1, repos: { app: join(home, 'repo') }, people: { ana: { token_sha256: hashToken('t') } } };
+  const config: Config = { host: '127.0.0.1', port: 0, slots: 1 };
   const store = openStore(join(home, 'helix.db'));
+  store.putProject({ name: 'app', url: '', dir: join(home, 'repo'), state: 'ready', added: '' });
+  store.putPerson('ana', { token_sha256: hashToken('t') });
   const added = store.add({ state: 'running', person: 'ana', repo: 'app', spec: join(home, 'spec.md'), title: 'x', draft: false, submitted: new Date().toISOString(), ...job });
   const launch: Launch = () => ({ command: process.execPath, args: ['-e', 'setInterval(() => {}, 1000)'] });
   return { home, config, store, id: added.id, launch };
@@ -113,7 +123,7 @@ test('a job whose credentials fail the look before it starts ends at once with t
 test('a job runs with the git identity the look before it found, unless the person\'s env file sets its own', async () => {
   const c = crashed({});
   writeFileSync(join(c.home, 'ana.env'), 'GIT_AUTHOR_EMAIL=own@example.test\n');
-  c.config.people.ana!.env_file = join(c.home, 'ana.env');
+  c.store.putPerson('ana', { token_sha256: hashToken('t'), env_file: join(c.home, 'ana.env') });
   c.store.save({ ...c.store.get(c.id)!, state: 'queued' });
   const launch: Launch = () => ({ command: process.execPath, args: ['-e', 'console.log(JSON.stringify({ outcome: "pr", reason: process.env.GIT_AUTHOR_NAME + " " + process.env.GIT_AUTHOR_EMAIL + " " + process.env.GIT_COMMITTER_EMAIL }))'] });
   const s = supervise({ store: c.store, config: c.config, home: c.home, launch, preflight: () => ({ env: { GIT_AUTHOR_NAME: 'ana', GIT_AUTHOR_EMAIL: '1+ana@users.noreply.github.com', GIT_COMMITTER_EMAIL: '1+ana@users.noreply.github.com' } }) });

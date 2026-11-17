@@ -7,7 +7,7 @@ import { hostname } from 'node:os';
 import { join } from 'node:path';
 import { STAGES, type Progress } from '../../plugin/src/log.ts';
 import { loadProfile, PROFILE_PATH } from '../../plugin/src/profile.ts';
-import type { Config } from './config.ts';
+import { readyRepos, type Config } from './config.ts';
 import type { HelixJob, Store } from './store.ts';
 import type { Supervisor } from './supervisor.ts';
 
@@ -74,7 +74,7 @@ export function display(opts: { config: Config; store: Store; supervisor: Superv
     at: new Date().toISOString(),
     slots: config.slots,
     stages: STAGES,
-    repos: Object.entries(config.repos).map(([name, dir]) => repoOf(name, dir)),
+    repos: Object.entries(readyRepos(store)).map(([name, dir]) => repoOf(name, dir)),
     jobs: store.list(SHOWN).map((j) => jobOf(j, supervisor)),
   };
 }

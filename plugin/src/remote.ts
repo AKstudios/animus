@@ -1,6 +1,7 @@
 // The client side of Helix (docs/factory.md, "The office machine"): submit a
-// spec to the machine that runs jobs, and ask about it. Five thin HTTP calls;
-// the result never depends on them, since it lands as a pull request.
+// spec to the machine that runs jobs, ask about it, and add the projects
+// jobs run for. Thin HTTP calls; a job's result never depends on them, since
+// it lands as a pull request.
 import { chmodSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, join as joinPath } from 'node:path';
 import { animusHome } from './log.ts';
@@ -72,13 +73,28 @@ export const jobs = () => call<{ slots: number; jobs: RemoteJob[] }>('GET', '/jo
 export const job = (id: string) => call<RemoteJob>('GET', `/jobs/${encodeURIComponent(id)}`);
 export const cancel = (id: string) => call<RemoteJob>('POST', `/jobs/${encodeURIComponent(id)}/cancel`);
 export const answer = (id: string, text: string) => call<RemoteJob>('POST', `/jobs/${encodeURIComponent(id)}/answer`, { answer: text });
+/** A project as Helix reports it: checking until Helix has tried it, then ready or failed. */
+export type RemoteProject = { name: string; url: string; state: 'checking' | 'ready' | 'failed'; added: string; added_by?: string; reason?: string; log?: string };
+export const projects = () => call<{ projects: RemoteProject[] }>('GET', '/projects');
+export const project = (name: string) => call<RemoteProject>('GET', `/projects/${encodeURIComponent(name)}`);
+export const addProject = (p: { name: string; url: string }) => call<RemoteProject>('POST', '/projects', p);
+export const removeProject = (name: string) => call<RemoteProject>('DELETE', `/projects/${encodeURIComponent(name)}`);
+
+/** `animus project list`: one line per project. */
+export function describeProjects(list: readonly RemoteProject[]): string {
+  if (!list.length) return 'no projects yet: animus project add, from a checkout of one';
+  const rows = list.map((p) => [p.name, p.state, p.url, p.added_by ? `added by ${p.added_by}` : 'added on the machine', p.state === 'failed' ? (p.reason ?? '').split('\n')[0]!.slice(0, 80) : '']);
+  const widths = rows[0]!.map((_, i) => Math.max(...rows.map((row) => row[i]!.length)));
+  return rows.map((row) => row.map((cell, i) => cell.padEnd(widths[i]!)).join('  ').trimEnd()).join('\n');
+}
+
 export const leave = () => call<{ name: string; cancelled: number[]; kept?: string }>('POST', '/leave');
 
 /** What an invite is for: asked with its code, before any token exists. */
 export type InviteDetails = { name: string; github?: string; expires: string; repos: { name: string; url: string }[] };
 export const inviteDetails = (url: string, code: string) => request<InviteDetails>('POST', url, '/invite', undefined, { code });
 export const join = (url: string, code: string, tokens: { claude_token: string; github_token: string }) =>
-  request<{ name: string; token: string; github?: string }>('POST', url, '/join', undefined, { code, ...tokens });
+  request<{ name: string; token: string; github?: string; cannot_push?: string[] }>('POST', url, '/join', undefined, { code, ...tokens });
 
 const how = (j: RemoteJob) => (j.state === 'ended' ? j.outcome ?? 'ended' : j.state);
 

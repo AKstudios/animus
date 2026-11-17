@@ -8,6 +8,7 @@
 import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { parse } from 'yaml';
+import { skillsForRole, type PersonalSkill } from './personal.ts';
 import { isRecord } from './profile.ts';
 import { PLUGIN_ROOT, type Factory } from './profiles.ts';
 import { AnimusError } from './proc.ts';
@@ -59,7 +60,7 @@ export type RoleSkills = {
 };
 
 /** Everything a role is given about skills for one job. */
-export function roleSkills(factory: Pick<Factory, 'skills'>, role: string, type: string, worktree?: string, vendor = VENDOR): RoleSkills {
+export function roleSkills(factory: Pick<Factory, 'skills'>, role: string, type: string, worktree?: string, personal: readonly PersonalSkill[] = [], vendor = VENDOR): RoleSkills {
   const parts: string[] = [];
   const names: string[] = [];
   const dirs: string[] = [];
@@ -81,6 +82,14 @@ export function roleSkills(factory: Pick<Factory, 'skills'>, role: string, type:
   if (own.length) {
     parts.push(`# This repository's skills\n\nThe project keeps its own guidance in these files. Read one before work it covers:\n\n${own.map((s) => `- ${s.file}: ${s.description || s.name}`).join('\n')}`);
     names.push(...own.map((s) => `repo:${s.name}`));
+  }
+  for (const p of skillsForRole(personal, role, type)) {
+    parts.push([
+      `# The submitter's skill: ${p.name}`,
+      'The person who submitted this job asked for this skill on their jobs. Follow it where it applies; the spec, the project\'s rules and the gates still decide what the work must do. Only its own text came with it: files it refers to are not here.',
+      body(p.text),
+    ].join('\n\n'));
+    names.push(`personal:${p.name}@${p.sha.slice(0, 8)}`);
   }
   return { names, system: parts.join('\n\n'), dirs };
 }

@@ -1,24 +1,20 @@
 // Helix's home and its one config file: where it listens, how many jobs run
-// at once, the repositories it has clones of, and the people who may submit.
-// A person is known by the hash of a token; the token itself is shown once,
-// when they are added, and never kept.
+// at once, and whether jobs run in containers. The people who may submit and
+// the projects they submit for are in helix.db (store.ts); a config.yaml from
+// before that has them moved there the first time Helix opens it.
 import { createHash, randomBytes } from 'node:crypto';
 import { chmodSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { isAbsolute, join, relative, resolve } from 'node:path';
 import { parse, stringify } from 'yaml';
 import { isRecord } from '../../plugin/src/profile.ts';
-import { AnimusError } from '../../plugin/src/proc.ts';
+import { AnimusError, tryGit } from '../../plugin/src/proc.ts';
+import type { Person, Store } from './store.ts';
+
+export type { Person } from './store.ts';
 
 export const helixHome = () => process.env.HELIX_HOME ?? join(homedir(), '.helix');
 export const configFile = () => join(helixHome(), 'config.yaml');
-
-/**
- * env_file: KEY=VALUE lines set for that person's jobs only: their Claude
- * token and GitHub credential. github: the login their GitHub token signed in
- * as when they joined.
- */
-export type Person = { token_sha256: string; env_file?: string; github?: string };
 
 export type Config = {
   /** What the display calls this machine; its hostname when unset. */
@@ -30,9 +26,6 @@ export type Config = {
   port: number;
   /** Jobs that run at once; set by the machine's memory. */
   slots: number;
-  /** Repositories by name, each a clone on this machine with a .animus/animus.yaml. */
-  repos: Record<string, string>;
-  people: Record<string, Person>;
   /**
    * Run each job in a container of its own (container.ts), with these limits.
    * Left out, jobs run on the machine as Helix's account, sharing it.
@@ -40,84 +33,118 @@ export type Config = {
   container?: { memory?: string; cpus?: number };
 };
 
-const DEFAULTS: Config = { host: '127.0.0.1', port: 7420, slots: 2, repos: {}, people: {} };
+const DEFAULTS: Config = { host: '127.0.0.1', port: 7420, slots: 2 };
+
+/** What config.yaml held before people and projects moved to helix.db. */
+type Old = { repos?: Record<string, string>; people?: Record<string, Person> };
 
 export const hashToken = (token: string) => createHash('sha256').update(token).digest('hex');
 
-export function loadConfig(file = configFile()): Config {
-  if (!existsSync(file)) return structuredClone(DEFAULTS);
+function readRaw(file: string): Record<string, unknown> {
+  if (!existsSync(file)) return {};
   let raw: unknown;
   try { raw = parse(readFileSync(file, 'utf8')); } catch (err) { throw new AnimusError(`${file}: ${(err as Error).message}`); }
+  if (raw === null || raw === undefined) return {};
   if (!isRecord(raw)) throw new AnimusError(`${file}: expected a mapping at the top`);
+  return raw;
+}
+
+export function loadConfig(file = configFile()): Config {
+  const { repos: _r, people: _p, ...raw } = readRaw(file) as Record<string, unknown> & Old;
   const config = { ...structuredClone(DEFAULTS), ...raw } as Config;
   if (!Number.isInteger(config.slots) || config.slots < 1) throw new AnimusError(`${file}: slots must be a whole number, 1 or more`);
-  if (!isRecord(config.repos) || !isRecord(config.people)) throw new AnimusError(`${file}: repos and people must be mappings`);
   return config;
 }
 
 export function saveConfig(config: Config, file = configFile()): void {
   mkdirSync(helixHome(), { recursive: true });
   writeFileSync(file, stringify(config));
-  // The file names where credentials are kept: the owner's eyes only, where the system has such a thing.
   chmodSync(file, 0o600);
 }
 
+/**
+ * Moves the people and repositories a config.yaml from before 0.4 names into
+ * helix.db, then takes them out of the file. One already in the table is
+ * left as the table has it. Returns what moved.
+ */
+export function importRegistry(store: Store, file = configFile()): { people: string[]; repos: string[] } {
+  const raw = readRaw(file) as Record<string, unknown> & Old;
+  if (raw.people === undefined && raw.repos === undefined) return { people: [], repos: [] };
+  if ((raw.people !== undefined && !isRecord(raw.people)) || (raw.repos !== undefined && !isRecord(raw.repos))) throw new AnimusError(`${file}: repos and people must be mappings`);
+  const moved = { people: [] as string[], repos: [] as string[] };
+  for (const [name, person] of Object.entries(raw.people ?? {})) {
+    if (store.person(name) || !isRecord(person) || typeof person.token_sha256 !== 'string') continue;
+    store.putPerson(name, person);
+    moved.people.push(name);
+  }
+  for (const [name, dir] of Object.entries(raw.repos ?? {})) {
+    if (store.project(name) || typeof dir !== 'string') continue;
+    store.putProject({ name, url: originUrl(dir) ?? '', dir: resolve(dir), state: 'ready', added: new Date().toISOString() });
+    moved.repos.push(name);
+  }
+  const { people: _p, repos: _r, ...rest } = raw;
+  writeFileSync(file, stringify(rest));
+  chmodSync(file, 0o600);
+  return moved;
+}
+
+/** A clone's origin, if it has one. */
+export const originUrl = (dir: string) => tryGit(dir, ['remote', 'get-url', 'origin']) || undefined;
+
 /** A person's name names their folder and credentials file, so it is kept to safe characters. */
-export function checkName(name: string): void {
-  if (!/^[A-Za-z0-9._-]+$/.test(name) || /^\.+$/.test(name)) throw new AnimusError('a person\'s name may hold letters, digits, dot, dash and underscore');
+export function checkName(name: string, what = 'a person\'s name'): void {
+  if (!/^[A-Za-z0-9._-]+$/.test(name) || /^\.+$/.test(name)) throw new AnimusError(`${what} may hold letters, digits, dot, dash and underscore`);
 }
 
 /** Adds a person, or gives one a new token. Returns the token: the only time it exists in the clear. */
-export function addPerson(name: string, envFile?: string, github?: string): string {
+export function addPerson(store: Store, name: string, envFile?: string, github?: string): string {
   checkName(name);
   if (envFile && !existsSync(envFile)) throw new AnimusError(`no file at ${envFile}`);
-  const config = loadConfig();
+  const known = store.person(name);
   const token = randomBytes(24).toString('base64url');
-  const env = envFile ? resolve(envFile) : config.people[name]?.env_file;
-  const login = github ?? config.people[name]?.github;
-  config.people[name] = { token_sha256: hashToken(token), ...(env ? { env_file: env } : {}), ...(login ? { github: login } : {}) };
-  saveConfig(config);
+  const env = envFile ? resolve(envFile) : known?.env_file;
+  const login = github ?? known?.github;
+  store.putPerson(name, { token_sha256: hashToken(token), ...(env ? { env_file: env } : {}), ...(login ? { github: login } : {}) });
   return token;
 }
 
 /**
- * Takes a person off Helix: their token stops working as soon as `helix serve`
- * reads the file again, and the credentials file is deleted when it is under
- * Helix's home. Returns a credentials file kept elsewhere, for whoever removes
- * them to delete by hand.
+ * Takes a person off Helix: their token stops working at once, and the
+ * credentials file is deleted when it is under Helix's home. Returns a
+ * credentials file kept elsewhere, for whoever removes them to delete by hand.
  */
-export function removePerson(name: string): { kept?: string } {
-  const config = loadConfig();
-  const person = config.people[name];
-  if (!person) throw new AnimusError(`${configFile()} has no person named ${name}`);
-  delete config.people[name];
-  saveConfig(config);
+export function removePerson(store: Store, name: string): { kept?: string } {
+  const person = store.person(name);
+  if (!person) throw new AnimusError(`Helix has no person named ${name}`);
+  store.dropPerson(name);
   const file = person.env_file;
   if (!file || !existsSync(file)) return {};
   const inside = relative(helixHome(), resolve(file));
   // A file someone else also points to is not this person's alone.
-  const shared = Object.values(config.people).some((p) => p.env_file && resolve(p.env_file) === resolve(file));
+  const shared = Object.values(store.people()).some((p) => p.env_file && resolve(p.env_file) === resolve(file));
   if (!inside.startsWith('..') && !isAbsolute(inside) && !shared) { rmSync(file); return {}; }
   return { kept: file };
 }
 
-/** Stops Helix taking jobs for a repository. Its clone stays; returns where it is. */
-export function removeRepo(name: string): string {
-  const config = loadConfig();
-  const dir = config.repos[name];
-  if (!dir) throw new AnimusError(`${configFile()} has no repository named ${name}`);
-  delete config.repos[name];
-  saveConfig(config);
-  return dir;
-}
-
-export function addRepo(name: string, dir: string): void {
+/** A clone already on this machine that jobs may be submitted for, ready at once: the machine's own way to add one. */
+export function addRepo(store: Store, name: string, dir: string): void {
+  checkName(name, 'a project\'s name');
   const path = resolve(dir);
   if (!existsSync(join(path, '.git'))) throw new AnimusError(`${path} is not a git checkout`);
-  const config = loadConfig();
-  config.repos[name] = path;
-  saveConfig(config);
+  store.putProject({ name, url: originUrl(path) ?? '', dir: path, state: 'ready', added: new Date().toISOString() });
 }
+
+/** Stops Helix taking jobs for a repository. Its clone stays; returns where it is. */
+export function removeRepo(store: Store, name: string): string {
+  const project = store.project(name);
+  if (!project) throw new AnimusError(`Helix has no project named ${name}`);
+  store.dropProject(name);
+  return project.dir;
+}
+
+/** The projects jobs may be submitted for now, by name: their clones. */
+export const readyRepos = (store: Store): Record<string, string> =>
+  Object.fromEntries(store.projects().filter((p) => p.state === 'ready').map((p) => [p.name, p.dir]));
 
 /**
  * Makes git use the person's GitHub token for https remotes, for this process

@@ -93,7 +93,8 @@ export async function joinHelix(url: string, code: string, cwd: string): Promise
   const login = { url: base, token: joined.token, name: joined.name };
   helix.saveHelixLogin(login);
   say(`\nYou are on Helix as ${joined.name}${joined.github ? ` (GitHub: ${joined.github})` : ''}. Your Helix token is kept in ${helix.helixFile()}.`);
-  say('From a repository Helix has: animus submit <spec.md>, then animus status.');
+  if (joined.cannot_push?.length) say(`Your GitHub token may not push to ${joined.cannot_push.join(', ')}, so Helix refuses your jobs there until it may: add them to the token's repositories on GitHub.`);
+  say('From a repository Helix has: animus submit <spec.md>, then animus status. For one it has not: animus project add.');
   return login;
 }
 

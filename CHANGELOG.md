@@ -8,6 +8,29 @@ clients with how to update.
 
 ## Unreleased
 
+- Projects people add themselves: `animus project add [<name>]` from a
+  checkout puts its repository on Helix (`POST /projects`). Helix clones it
+  with that person's GitHub token, checks the token may push, reads its
+  profile and runs its installs and setup once, in the job image when jobs
+  run in containers, before it takes it; the command waits and prints the
+  check (`GET /projects/<name>`). `animus project list` (`GET /projects`) and
+  `animus project remove <name>` (`DELETE /projects/<name>`, only whoever
+  added it). GitHub is the member list: anyone whose token may push to a
+  project may submit for it, and a job from someone whose token may not fails
+  before it starts. A join no longer fails on a project the token may not
+  push to; the person is told which. `animus submit` finds the project by the
+  checkout's GitHub address. `helix remove-repo` deletes the clones people's
+  jobs made of the project.
+- A `helix` skill: asked in a Claude Code session to add, list or remove a
+  project, or to submit, follow, answer or cancel a job on Helix, Claude runs
+  the command and passes on what Helix said, including a refused remove.
+- The README is shorter and says what is built; running the Helix machine is
+  now in `helix/README.md`.
+- People and projects are kept in `helix.db`, not `config.yaml`. The `people`
+  and `repos` of an existing `config.yaml` are moved there, and out of the
+  file, the first time a `helix` command runs. `helix serve` starts with no
+  projects.
+
 ## 0.3.2 (2026-11-16)
 
 - Inviting and joining: `helix invite <name> [--github <login>]` prints a

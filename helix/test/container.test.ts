@@ -65,7 +65,7 @@ test('cancelling a person\'s jobs ends their containers, and a contained job\'s 
   saveProgress('app-1', 'gates', 'implementer');
   if (before === undefined) delete process.env.ANIMUS_HOME; else process.env.ANIMUS_HOME = before;
   writeFileSync(join(home, 'paused'), '');
-  const supervisor = supervise({ store, config: { host: '', port: 0, slots: 1, repos: {}, people: {} }, home, animusHomeOf: (p) => personDirs(home, p).animus });
+  const supervisor = supervise({ store, config: { host: '', port: 0, slots: 1 }, home, animusHomeOf: (p) => personDirs(home, p).animus });
   assert.equal(supervisor.progress(job({ animus_job: 'app-1' }))?.stage, 'gates');
   assert.equal(supervisor.progress(job({ animus_job: 'app-1', person: 'ben' })), undefined);
   supervisor.stop();

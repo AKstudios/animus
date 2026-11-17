@@ -3,15 +3,23 @@
 // sends nothing says whether it may write to each repository, and one small
 // Claude session says whether the Claude token answers. `helix check` runs
 // all of it; the supervisor runs the GitHub part before each job, so a token
-// that ended fails the job at once and says why.
+// that ended fails the job at once and says why, and a push for the job's
+// project, since GitHub decides who may submit for what. A push refused
+// elsewhere is reported, not counted against the person: nobody has to reach
+// every project.
 import { spawnSync } from 'node:child_process';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { Agent } from '../../plugin/src/agent.ts';
-import { credentialEnv, personEnv, type Config } from './config.ts';
+import { credentialEnv, personEnv, readyRepos } from './config.ts';
+import type { Store } from './store.ts';
 
-export type Finding = { what: string; ok: boolean; detail: string };
+/** optional: a finding that is reported but does not count against the person (a push to one project). */
+export type Finding = { what: string; ok: boolean; detail: string; optional?: boolean };
+
+/** Whether a set of findings holds one that counts. */
+export const failing = (findings: readonly Finding[]) => findings.filter((f) => !f.ok && !f.optional);
 
 /** The name and address GitHub credits a person's commits to. */
 export type Identity = { name: string; email: string };
@@ -78,21 +86,25 @@ export function claudeToken(env: Record<string, string>, agent: Agent): Finding 
 }
 
 /** Everything for one person. Without an agent the Claude token is not tried. */
-export function checkPerson(config: Config, name: string, deps: { agent?: Agent; runner?: Runner } = {}): Finding[] {
+export function checkPerson(store: Store, name: string, deps: { agent?: Agent; runner?: Runner } = {}): Finding[] {
+  const person = store.person(name);
   let env: Record<string, string>;
-  try { env = personEnv(config.people[name]); } catch (err) { return [{ what: 'env file', ok: false, detail: (err as Error).message }]; }
-  if (!config.people[name]?.env_file) return [{ what: 'env file', ok: false, detail: 'none was given (helix add-person <name> --env-file <file>), so their jobs would run with the machine\'s own sign-ins' }];
-  return checkEnv(config, env, deps).findings;
+  try { env = personEnv(person); } catch (err) { return [{ what: 'env file', ok: false, detail: (err as Error).message }]; }
+  if (!person?.env_file) return [{ what: 'env file', ok: false, detail: 'none was given (helix add-person <name> --env-file <file>), so their jobs would run with the machine\'s own sign-ins' }];
+  return checkEnv(readyRepos(store), env, deps).findings;
 }
 
-/** Tries a set of credentials against every repository: what `helix check` and joining both ask. login: who the GitHub token is. */
-export function checkEnv(config: Config, env: Record<string, string>, deps: { agent?: Agent; runner?: Runner } = {}): { findings: Finding[]; login?: string } {
+/**
+ * Tries a set of credentials, and whether they may push to each project:
+ * what `helix check` and joining both ask. login: who the GitHub token is.
+ */
+export function checkEnv(repos: Record<string, string>, env: Record<string, string>, deps: { agent?: Agent; runner?: Runner } = {}): { findings: Finding[]; login?: string } {
   const token = githubToken(env, deps.runner);
   const findings: Finding[] = [token];
-  if (token.ok) for (const [repo, dir] of Object.entries(config.repos)) findings.push(githubPush(repo, dir, env, deps.runner));
+  if (token.ok) for (const [repo, dir] of Object.entries(repos)) findings.push({ ...githubPush(repo, dir, env, deps.runner), optional: true });
   if (deps.agent) findings.push(claudeToken(env, deps.agent));
   return { findings, ...(token.identity ? { login: token.identity.name } : {}) };
 }
 
 export const describeFindings = (person: string, findings: readonly Finding[]) =>
-  [`${person}`, ...findings.map((f) => `  ${f.ok ? 'ok  ' : 'FAIL'} ${f.what}: ${f.detail}`)].join('\n');
+  [`${person}`, ...findings.map((f) => `  ${f.ok ? 'ok  ' : f.optional ? 'no  ' : 'FAIL'} ${f.what}: ${f.detail}`)].join('\n');

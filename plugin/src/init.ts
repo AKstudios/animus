@@ -70,7 +70,7 @@ const ECOSYSTEMS: [name: string, detect: (repo: string) => Found | undefined][] 
 /** The profile's text for this repository, and what could not be worked out. */
 export function draftProfile(repo: string): { text: string; said: string[] } {
   const found = ECOSYSTEMS.flatMap(([name, detect]) => { const f = detect(repo); return f ? [{ name, ...f }] : []; });
-  if (!found.length) throw new AnimusError(`nothing at the root of ${repo} says how it is built (no package.json, pyproject.toml, go.mod or Cargo.toml). Write ${PROFILE_PATH} by hand: the README's "The project's profile" lists its keys`);
+  if (!found.length) throw new AnimusError(`nothing at the root of ${repo} says how it is built (no package.json, pyproject.toml, go.mod or Cargo.toml). Write ${PROFILE_PATH} by hand: the README's "Configuration" shows its keys`);
   const commands: Record<string, string> = {};
   // Two ecosystems at one root both have a test command: the second is named for its ecosystem.
   for (const f of found) for (const [gate, run] of f.commands) commands[gate in commands ? `${f.name}-${gate}` : gate] = run;

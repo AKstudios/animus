@@ -63,3 +63,12 @@ export function commitAll(cwd: string, message: string): boolean {
   git(cwd, ['commit', '--quiet', '--no-verify', '-m', message]);
   return true;
 }
+
+/**
+ * The https address of a GitHub repository, from any of the forms a clone's
+ * origin takes. Helix clones with its people's tokens, which needs https.
+ */
+export function githubUrl(url: string): string | undefined {
+  const m = /^(?:https:\/\/github\.com\/|git@github\.com:|ssh:\/\/git@github\.com\/)([A-Za-z0-9-]+)\/([A-Za-z0-9._-]+?)(?:\.git)?\/?$/.exec(url.trim());
+  return m ? `https://github.com/${m[1]}/${m[2]}.git` : undefined;
+}

@@ -25,30 +25,44 @@ export function personDirs(home: string, person: string) {
 export const containerName = (id: number) => `helix-job-${id}`;
 export const imageName = (version: string) => `animus-job:${version}`;
 
+export type Mount = { path: string; readOnly?: boolean };
+
 /**
- * The `docker run` for one job. Credentials are passed by name only (`-e
- * NAME`): Docker reads their values from its own environment, so they never
- * appear in a process list.
+ * A `docker run` of the job image under Helix's limits: the account's uid, no
+ * capabilities, no new privileges, folders mounted at the same paths they
+ * have on the machine, and nothing else of the machine's. Credentials are
+ * passed by name only (`-e NAME`): Docker reads their values from its own
+ * environment, so they never appear in a process list.
  */
+export function runArgs(opts: {
+  name: string; image: string; limits: ContainerConfig; uid: number; gid: number;
+  mounts: Mount[]; envNames: string[]; workdir: string; command: string[];
+}): string[] {
+  const { limits } = opts;
+  return [
+    'run', '--rm', '--name', opts.name, '--init',
+    '--user', `${opts.uid}:${opts.gid}`,
+    '--memory', limits.memory ?? '6g', '--cpus', String(limits.cpus ?? 2), '--pids-limit', '4096',
+    '--security-opt', 'no-new-privileges', '--cap-drop', 'ALL',
+    ...opts.mounts.flatMap((m) => ['-v', `${m.path}:${m.path}${m.readOnly ? ':ro' : ''}`]),
+    // Package downloads are checked against the lockfile's hashes, so one cache serves everyone.
+    '-v', 'helix-npm-cache:/home/animus/.npm',
+    ...opts.envNames.flatMap((n) => ['-e', n]),
+    '-w', opts.workdir,
+    opts.image, ...opts.command,
+  ];
+}
+
+/** The `docker run` for one job: Animus read-only, the person's folder, and the job's spec read-only. */
 export function dockerArgs(opts: {
   job: Pick<HelixJob, 'id'>; image: string; limits: ContainerConfig; uid: number; gid: number;
   animusRoot: string; person: ReturnType<typeof personDirs>; specDir: string; envNames: string[]; command: string[];
 }): string[] {
-  const { limits, person } = opts;
-  return [
-    'run', '--rm', '--name', containerName(opts.job.id), '--init',
-    '--user', `${opts.uid}:${opts.gid}`,
-    '--memory', limits.memory ?? '6g', '--cpus', String(limits.cpus ?? 2), '--pids-limit', '4096',
-    '--security-opt', 'no-new-privileges', '--cap-drop', 'ALL',
-    '-v', `${opts.animusRoot}:${opts.animusRoot}:ro`,
-    '-v', `${person.root}:${person.root}`,
-    '-v', `${opts.specDir}:${opts.specDir}:ro`,
-    // Package downloads are checked against the lockfile's hashes, so one cache serves everyone.
-    '-v', 'helix-npm-cache:/home/animus/.npm',
-    ...opts.envNames.flatMap((n) => ['-e', n]),
-    '-w', person.root,
-    opts.image, ...opts.command,
-  ];
+  return runArgs({
+    name: containerName(opts.job.id), image: opts.image, limits: opts.limits, uid: opts.uid, gid: opts.gid,
+    mounts: [{ path: opts.animusRoot, readOnly: true }, { path: opts.person.root }, { path: opts.specDir, readOnly: true }],
+    envNames: opts.envNames, workdir: opts.person.root, command: opts.command,
+  });
 }
 
 /**

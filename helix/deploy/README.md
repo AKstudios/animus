@@ -6,15 +6,15 @@ running it holds:
 | What | Where (the account `desmond` on abstergo) | Can be made again? |
 | --- | --- | --- |
 | This repository, at a release tag | `~/animus` | yes: clone it |
-| Helix's config, people's token hashes and credentials files, the queue, each job's spec and log | `~/.helix` | no: copy it |
+| Helix's config; `helix.db` with people's token hashes, the projects and the queue; credentials files; each job's spec and log; the clones Helix made of projects people added (`repos/`) | `~/.helix` | no: copy it |
 | Each job's state, gate output, review and transcripts; the run log | `~/.animus` | no: copy it to keep history and resume jobs |
-| The repositories jobs run in, and their worktrees | `~/repos`, `~/repos/.worktrees` | yes: clone over https |
+| Clones added by hand with `helix add-repo`, and their worktrees | `~/repos`, `~/repos/.worktrees` | yes: clone over https |
 | Claude Code, gh, Node 24, agent-browser's Chrome | `~/.local/bin`, `/usr/local/bin`, `~/.agent-browser` | yes |
 | The service, Tailscale Serve, no sleep, the browser sandbox | set up by `ubuntu/setup.sh` | yes |
 
-`config.yaml` names the repositories and credentials files by absolute path.
-Keep the same account name and the same folders, and a copy of `~/.helix`
-works as it is. Otherwise edit those paths in `config.yaml`.
+`helix.db` names the projects' clones and the credentials files by absolute
+path. Keep the same account name and the same folders, and a copy of
+`~/.helix` works as it is.
 
 ## A new machine (Ubuntu), about half an hour
 
@@ -25,8 +25,10 @@ works as it is. Otherwise edit those paths in `config.yaml`.
 3. As that account: install Claude Code and `gh`. Clone this repository into
    `~/animus` (a read-only deploy key) and check out the release the team
    runs: `git checkout v<version> && npm ci`.
-4. Clone each repository over https into `~/repos/<name>`, then run
-   `helix/bin/helix add-repo <name> ~/repos/<name>` for each one.
+4. Nothing to clone: once people have joined (step 8), each runs `animus
+   project add` from a checkout of a project, and Helix clones it with their
+   token. To add one by hand instead, clone it over https into
+   `~/repos/<name>` and run `helix/bin/helix add-repo <name> ~/repos/<name>`.
 5. Set `url` in `config.yaml` to the address people will reach Helix at
    (`https://helix.<tailnet>.ts.net`, step 7). For each person run `helix invite
    <name>` and send them the command it prints; they run it on their laptop
@@ -42,7 +44,8 @@ works as it is. Otherwise edit those paths in `config.yaml`.
    its own name on the tailnet, `https://helix.<tailnet>.ts.net`, apart from
    the machine's. The machine needs a tag, and the service needs approving
    once in Tailscale's admin console (Services).
-8. From a laptop, `animus join <url> <code>`, then `animus doctor`.
+8. From a laptop, `animus join <url> <code>`, then `animus doctor`, then
+   `animus project add` from a checkout of each project.
 
 ## Moving abstergo to new hardware, keeping everything
 

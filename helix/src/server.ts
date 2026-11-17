@@ -1,16 +1,18 @@
-// Helix's HTTP API: five actions (submit, status, result, cancel, answer)
-// over JSON, for the private network only. Each of those carries a person's
-// token; a job can be cancelled or answered only by whoever submitted it.
+// Helix's HTTP API: five actions on jobs (submit, status, result, cancel,
+// answer) and three on projects (add, list, remove), over JSON, for the
+// private network only. Each of those carries a person's token; a job can be
+// cancelled or answered only by whoever submitted it, and a project removed
+// only by whoever added it (projects.ts).
 // Joining (invite, join) carries a one-time code instead, and leave the
 // person's own token (join.ts).
 // It also serves the display: its page at /, and what it shows at /display.
-import { timingSafeEqual } from 'node:crypto';
 import { createServer, type IncomingMessage, type Server } from 'node:http';
 import { VERSION_HEADER } from '../../plugin/src/remote.ts';
 import { animusVersion, compatible } from '../../plugin/src/version.ts';
-import { hashToken, type Config } from './config.ts';
+import { hashToken, helixHome, type Config } from './config.ts';
 import { display } from './display.ts';
 import { inviteDetails, joinHelix, takeOff, verifyInChild, type Verify } from './join.ts';
+import { addProject, checkInChild, projectView, removeProject, type StartCheck } from './projects.ts';
 import type { Store } from './store.ts';
 import { Refused, type Submission, type Supervisor } from './supervisor.ts';
 import { asset } from './ui.ts';
@@ -19,14 +21,10 @@ const MAX_BODY = 1024 * 1024;
 /** The display loads only what Helix serves and talks only to Helix. */
 const CSP = "default-src 'none'; script-src 'self'; style-src 'self'; font-src 'self'; img-src 'self' data:; connect-src 'self'; base-uri 'none'; form-action 'none'";
 
-function whoIs(config: Config, req: IncomingMessage): string | undefined {
+/** Who holds the request's token. Only its hash is looked up: a token is long and random, so the lookup's timing gives nothing away. */
+function whoIs(store: Store, req: IncomingMessage): string | undefined {
   const token = /^Bearer (.+)$/.exec(req.headers.authorization ?? '')?.[1];
-  if (!token) return undefined;
-  const given = Buffer.from(hashToken(token));
-  return Object.entries(config.people).find(([, p]) => {
-    const known = Buffer.from(String(p.token_sha256));
-    return known.length === given.length && timingSafeEqual(known, given);
-  })?.[0];
+  return token ? store.personByToken(hashToken(token)) : undefined;
 }
 
 async function body(req: IncomingMessage): Promise<Record<string, unknown>> {
@@ -48,9 +46,15 @@ export function serve(opts: {
   verify?: Verify;
   /** Ends what a job leaves outside its process tree (its container), for a person who leaves. */
   reap?: (id: number) => void;
+  /** How a project someone adds is checked; by default in a `helix check-project` process. */
+  startCheck?: StartCheck;
+  /** Helix's home: where projects' clones and checks go. */
+  home?: string;
 }): Server {
   const { config, store, supervisor } = opts;
   const verify = opts.verify ?? verifyInChild;
+  const home = opts.home ?? helixHome();
+  const startCheck = opts.startCheck ?? checkInChild(store, home);
   const version = animusVersion();
   return createServer((req, res) => {
     const send = (status: number, value: unknown) => {
@@ -77,18 +81,24 @@ export function serve(opts: {
       if (req.method === 'POST' && (url.pathname === '/invite' || url.pathname === '/join')) {
         if (!current) return outdated();
         const b = await body(req);
-        return url.pathname === '/invite' ? send(200, inviteDetails(config, store, b.code)) : send(201, await joinHelix({ config, store, verify }, b));
+        return url.pathname === '/invite' ? send(200, inviteDetails(store, b.code)) : send(201, await joinHelix({ store, verify }, b));
       }
-      const person = whoIs(config, req);
+      const person = whoIs(store, req);
       if (!person) return send(401, { error: 'a valid token is needed: Authorization: Bearer <token>' });
       if (!current) return outdated();
       if (req.method === 'POST' && url.pathname === '/leave') {
-        // Off at once in this process; config.yaml says the same for the next start.
-        delete config.people[person];
         const { cancelled, kept } = takeOff(person, store, opts.reap);
         return send(200, { name: person, cancelled: cancelled.map((j) => j.id), ...(kept ? { kept } : {}) });
       }
       const [, root, id, action] = url.pathname.split('/');
+      if (root === 'projects') {
+        const name = id ? decodeURIComponent(id) : undefined;
+        if (!name && req.method === 'GET') return send(200, { projects: store.projects().map(({ dir: _dir, ...p }) => p) });
+        if (!name && req.method === 'POST') { const { dir: _dir, ...p } = addProject({ store, home, startCheck }, person, await body(req)); return send(202, p); }
+        if (name && !action && req.method === 'GET') { const { dir: _dir, ...p } = projectView(store, home, name); return send(200, p); }
+        if (name && !action && req.method === 'DELETE') { const { dir: _dir, ...p } = removeProject({ store, home }, person, name); return send(200, p); }
+        return send(404, { error: `nothing at ${req.method} ${url.pathname}` });
+      }
       if (root !== 'jobs') return send(404, { error: `nothing at ${url.pathname}` });
       if (!id) {
         if (req.method === 'GET') return send(200, { slots: config.slots, jobs: store.list() });

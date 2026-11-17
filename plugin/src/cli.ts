@@ -7,15 +7,16 @@ import { cleanup, describeCleanup, KEEP_DAYS } from './cleanup.ts';
 import { describeFindings, doctor } from './doctor.ts';
 import { initProfile } from './init.ts';
 import { joinHelix, leaveHelix } from './join.ts';
+import { addProject } from './project.ts';
 import { describe, failsOnBase, jobChecks, runChecks } from './gates.ts';
-import { mainCheckout, touchedFiles } from './git.ts';
+import { githubUrl, mainCheckout, touchedFiles } from './git.ts';
 import { describeRuns, jobDir, loadState, readRuns, type Run } from './log.ts';
 import { factoryVersion, jobOf, onPath, runJob, uiJobOf } from './pipeline.ts';
 import { describeNumbers, numbers, refreshOutcomes } from './outcomes.ts';
 import { prFacts, prState, publish, pushEvidence } from './pr.ts';
 import { loadProfile } from './profile.ts';
 import { describePlan, loadFactory, resolvePlan } from './profiles.ts';
-import { git, AnimusError, GitError } from './proc.ts';
+import { git, tryGit, AnimusError, GitError } from './proc.ts';
 import * as helix from './remote.ts';
 import { describeSkills, grantsFor } from './skills.ts';
 import { criteriaSoFar, describeSlicing, planSlices } from './slices.ts';
@@ -70,8 +71,18 @@ With Helix, the machine that runs jobs for everyone:
   animus leave [--yes]
         Take yourself off it: your jobs there are cancelled, and it deletes
         your tokens.
+  animus project add [<name>]
+        Put this checkout's repository on Helix, named after its folder unless
+        given a name. Helix clones it with your GitHub token, and runs its
+        profile's setup once, before it takes it; this waits and shows how it
+        goes. Anyone on Helix whose GitHub token may push to it may then submit
+        for it.
+  animus project list
+  animus project remove <name>
+        Only whoever added it; its people's clones on Helix are deleted.
   animus submit <spec.md> [--repo <dir>] [--draft]
-        Queue the spec there, for the repository of this name.
+        Queue the spec there, for the project with this checkout's GitHub
+        address (or, failing that, named after its folder).
   animus status [<id>]      Its queue, or one job with the end of its log.
   animus result <id>        One job as JSON; exits 0 once it ended in a pull request.
   animus answer <id> <text> Answer a job's question; it is queued again.
@@ -139,7 +150,12 @@ async function main(argv: string[]): Promise<number> {
       const file = resolve(positionals[0]);
       // Refused here, before it is sent, when its labels would not run.
       resolvePlan(loadFactory(), loadSpec(file));
-      const repo = basename(mainCheckout(resolve(values.repo ?? cwd)));
+      const checkout = mainCheckout(resolve(values.repo ?? cwd));
+      // The project with this checkout's GitHub address, whatever it was named when added; else one named after the folder.
+      const url = githubUrl(tryGit(checkout, ['remote', 'get-url', 'origin']) ?? '');
+      // A Helix from before projects has no list to ask.
+      const known = url ? await helix.projects().then((r) => r.projects, () => []) : [];
+      const repo = known.find((p) => p.url === url)?.name ?? basename(checkout);
       const j = await helix.submit({ repo, spec: readFileSync(file, 'utf8'), name: basename(file), ...(values.draft ? { draft: true } : {}) });
       console.log(`job ${j.id} is ${j.state} on Helix: ${j.title}\nfollow it with: animus status ${j.id}`);
       return 0;
@@ -151,6 +167,23 @@ async function main(argv: string[]): Promise<number> {
     case 'leave':
       console.log(await leaveHelix(Boolean(values.yes)));
       return 0;
+    case 'project': {
+      const [sub, name] = positionals;
+      if (sub === 'list') { console.log(helix.describeProjects((await helix.projects()).projects)); return 0; }
+      if (sub === 'remove') {
+        if (!name) throw new AnimusError('usage: animus project remove <name>');
+        await helix.removeProject(name);
+        console.log(`${name} is off Helix`);
+        return 0;
+      }
+      if (sub === 'add') {
+        const p = await addProject(resolve(values.repo ?? cwd), { ...(name ? { name } : {}), say });
+        if (p.state === 'ready') { console.log(`${p.name} is on Helix: animus submit <spec.md> from a checkout of it`); return 0; }
+        console.log(`${p.name} was not taken: ${p.reason ?? 'its check failed'}`);
+        return 1;
+      }
+      throw new AnimusError('usage: animus project add [<name>] | list | remove <name>');
+    }
     case 'status':
       console.log(positionals[0] ? helix.describeJob(await helix.job(positionals[0])) : helix.describeJobs((await helix.jobs()).jobs));
       return 0;

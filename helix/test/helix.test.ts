@@ -8,7 +8,7 @@ import { saveProgress } from '../../plugin/src/log.ts';
 import * as client from '../../plugin/src/remote.ts';
 import { write } from '../../plugin/test/helpers.ts';
 import { animusVersion } from '../../plugin/src/version.ts';
-import { addPerson, hashToken, loadConfig, removePerson, type Config } from '../src/config.ts';
+import { addPerson, hashToken, removePerson, type Config } from '../src/config.ts';
 import type { Display } from '../src/display.ts';
 import { serve } from '../src/server.ts';
 import { openStore } from '../src/store.ts';
@@ -43,10 +43,13 @@ async function helix(home = mkdtempSync(join(tmpdir(), 'helix-'))) {
   mkdirSync(repo, { recursive: true });
   const secrets = join(home, 'ana.env');
   writeFileSync(secrets, 'SECRET=anas\n');
-  const config: Config = { host: '127.0.0.1', port: 0, slots: 1, repos: { app: repo }, people: { ana: { token_sha256: hashToken('ana-token'), env_file: secrets }, ben: { token_sha256: hashToken('ben-token') } } };
+  const config: Config = { host: '127.0.0.1', port: 0, slots: 1 };
   const release = join(home, 'release');
   const launch: Launch = (job) => ({ command: process.execPath, args: ['-e', FAKE, job.title, job.answer ?? '', release] });
   const store = openStore(join(home, 'helix.db'));
+  store.putPerson('ana', { token_sha256: hashToken('ana-token'), env_file: secrets });
+  store.putPerson('ben', { token_sha256: hashToken('ben-token') });
+  store.putProject({ name: 'app', url: 'https://github.com/o/app.git', dir: repo, state: 'ready', added: '' });
   const supervisor = supervise({ store, config, home, launch });
   const server = serve({ config, store, supervisor });
   await new Promise<void>((r) => { server.listen(0, '127.0.0.1', r); });
@@ -81,7 +84,7 @@ test('a request with no valid token, an unknown repository, or a spec that does 
   h.as('nobody');
   await assert.rejects(h.submit('x'), /a valid token is needed/);
   h.as('ana');
-  await assert.rejects(client.submit({ repo: 'other', spec: SPEC('x'), name: 'spec.md' }), /no repository named other; it has app/);
+  await assert.rejects(client.submit({ repo: 'other', spec: SPEC('x'), name: 'spec.md' }), /no project named other; it has app\. Add it/);
   await assert.rejects(client.submit({ repo: 'app', spec: '# No criteria\n', name: 'spec.md' }), /Acceptance criteria/);
   h.stop();
 });
@@ -225,7 +228,7 @@ test('a person taken off Helix: their token stops working, their jobs are cancel
   const bens = await h.submit('hold for ben');
 
   const cancelled = cancelJobsOf(h.store, 'ana');
-  delete h.config.people.ana;
+  h.store.dropPerson('ana');
   assert.deepEqual(cancelled.map((j) => j.id), [running.id]);
   const after = await until(() => client.job(String(running.id)), (j) => j.state === 'cancelled');
   assert.match(after.reason!, /ana was removed from Helix/);
@@ -264,14 +267,16 @@ test('remove-person deletes the credentials file Helix keeps for them, and leave
   try {
     writeFileSync(join(home, 'cleo.env'), 'GH_TOKEN=x\n');
     writeFileSync(join(elsewhere, 'dan.env'), 'GH_TOKEN=y\n');
-    addPerson('cleo', join(home, 'cleo.env'));
-    addPerson('dan', join(elsewhere, 'dan.env'));
-    assert.deepEqual(removePerson('cleo'), {});
+    const store = openStore(join(home, 'helix.db'));
+    addPerson(store, 'cleo', join(home, 'cleo.env'));
+    addPerson(store, 'dan', join(elsewhere, 'dan.env'));
+    assert.deepEqual(removePerson(store, 'cleo'), {});
     assert.equal(existsSync(join(home, 'cleo.env')), false);
-    assert.deepEqual(removePerson('dan'), { kept: join(elsewhere, 'dan.env') });
+    assert.deepEqual(removePerson(store, 'dan'), { kept: join(elsewhere, 'dan.env') });
     assert.equal(readFileSync(join(elsewhere, 'dan.env'), 'utf8'), 'GH_TOKEN=y\n');
-    assert.deepEqual(loadConfig().people, {});
-    assert.throws(() => removePerson('dan'), /no person named dan/);
+    assert.deepEqual(store.people(), {});
+    assert.throws(() => removePerson(store, 'dan'), /no person named dan/);
+    store.close();
   } finally {
     if (before === undefined) delete process.env.HELIX_HOME; else process.env.HELIX_HOME = before;
   }
