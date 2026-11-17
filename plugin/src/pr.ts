@@ -119,9 +119,12 @@ export const publish: Publish = ({ cwd, branch, baseBranch, title, body, draft }
   } catch (err) {
     throw new AnimusError(`could not push ${branch}: ${(err as Error).message}`);
   }
-  const existing = gh(cwd, ['pr', 'view', branch, '--json', 'url', '--jq', '.url'], undefined, true);
-  if (existing) {
+  const found = gh(cwd, ['pr', 'view', branch, '--json', 'url,isDraft', '--jq', '"\\(.url) \\(.isDraft)"'], undefined, true);
+  if (found) {
+    const [existing, isDraft] = found.split(' ') as [string, string];
     gh(cwd, ['pr', 'edit', branch, '--body-file', '-'], body);
+    // The pull request ends as a draft only when the job failed, whatever an earlier attempt left.
+    if (draft !== (isDraft === 'true')) gh(cwd, ['pr', 'ready', branch, ...(draft ? ['--undo'] : [])]);
     return existing;
   }
   return gh(cwd, ['pr', 'create', '--base', baseBranch, '--head', branch, '--title', title, '--body-file', '-', ...(draft ? ['--draft'] : [])], body)!;
