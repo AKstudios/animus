@@ -4,14 +4,15 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
 import { claudeProjectDirs } from '../src/agent.ts';
-import { cleanup, KEEP_DAYS } from '../src/cleanup.ts';
+import { cleanup, KEEP_DAYS, type PrEnd } from '../src/cleanup.ts';
 import { jobDir, loadState } from '../src/log.ts';
 import { runJob } from '../src/pipeline.ts';
 import type { PrState } from '../src/pr.ts';
 import { git, tryGit, AnimusError } from '../src/proc.ts';
 import { clean, deps, done, fakeAgent, makeRepo, write, writeSpec } from './helpers.ts';
 
-const LATER = Date.now() + (KEEP_DAYS + 1) * 24 * 60 * 60 * 1000;
+const DAY = 24 * 60 * 60 * 1000;
+const LATER = Date.now() + (KEEP_DAYS + 1) * DAY;
 
 /** A project with an origin, and one finished job on it whose branches are pushed as a real job's are. */
 async function finishedJob(opts: { dryRun?: boolean; keep?: boolean } = {}) {
@@ -33,25 +34,30 @@ async function finishedJob(opts: { dryRun?: boolean; keep?: boolean } = {}) {
   return { job: run.job, left };
 }
 
-const only = (job: string, state: PrState | undefined, over: { days?: number; dryRun?: boolean; now?: number; named?: boolean } = {}) => {
-  const { named, ...opts } = over;
+const only = (job: string, state: PrState | undefined, over: { days?: number; dryRun?: boolean; now?: number; named?: boolean; ended?: string } = {}) => {
+  const { named, ended, ...opts } = over;
   // Other tests' jobs share the home: every job but this one has an open pull request, or none.
-  const results = cleanup({ ...opts, ...(named ? { jobs: [job] } : {}) }, (url) => (url.endsWith('/pr/1') ? state : 'OPEN'));
+  const lookup: PrEnd = (url) => (url.endsWith('/pr/1') ? (state ? { state, ...(ended ? { ended } : {}) } : undefined) : { state: 'OPEN' });
+  const results = cleanup({ ...opts, ...(named ? { jobs: [job] } : {}) }, lookup);
   return results.find((r) => r.job === job)!;
 };
 
-test('a job whose pull request merged or closed loses its branches here and on origin and its worktree; its folder goes once it is old', async () => {
+test('a job whose pull request merged or closed loses its worktree at once and its branches once the pull request ended long enough ago; its folder stays', async () => {
   for (const state of ['MERGED', 'CLOSED'] as const) {
     const { job, left } = await finishedJob({ keep: true });
     assert.deepEqual(left(), { local: [`animus/${job}`], remote: [`animus/${job}`, `animus-evidence/${job}`], worktree: true, folder: true });
 
-    const first = only(job, state);
-    assert.deepEqual(left(), { local: [], remote: [], worktree: false, folder: true });
-    assert.equal(first.removed.length, 4);
-    assert.match(first.kept!, /its folder stays until 14 day/);
+    const first = only(job, state, { ended: new Date().toISOString() });
+    assert.deepEqual(left(), { local: [`animus/${job}`], remote: [`animus/${job}`, `animus-evidence/${job}`], worktree: false, folder: true });
+    assert.equal(first.removed.length, 1);
+    assert.match(first.kept!, new RegExp(`branches stay until ${KEEP_DAYS} day`));
 
-    assert.deepEqual(only(job, state, { now: LATER }).removed, [`folder ${jobDir(job)}`]);
-    assert.equal(left().folder, false);
+    // Long after the job last ran, a pull request that ended lately still keeps them.
+    assert.deepEqual(only(job, state, { now: LATER, ended: new Date(LATER - DAY).toISOString() }).removed, []);
+    const later = only(job, state, { now: LATER, ended: new Date().toISOString() });
+    assert.deepEqual(later.removed, [`origin/animus/${job}`, `origin/animus-evidence/${job}`, `branch animus/${job}`]);
+    assert.equal(later.kept, undefined);
+    assert.deepEqual(left(), { local: [], remote: [], worktree: false, folder: true });
   }
 });
 
@@ -66,15 +72,16 @@ test('a job with an open pull request, or one whose state cannot be read, is lef
   }
 });
 
-test('a job that never had a pull request is kept while it is recent, and goes whole once it is old or named', async () => {
-  for (const how of [{ now: LATER }, { named: true }]) {
-    const { job, left } = await finishedJob({ dryRun: true });
-    assert.match(only(job, undefined).kept!, /no pull request/);
-    assert.deepEqual([left().local.length, left().folder], [1, true]);
+test('a job that never had a pull request keeps everything while it is recent; once old its branches go and its folder stays, and named it goes whole', async () => {
+  const { job, left } = await finishedJob({ dryRun: true });
+  assert.match(only(job, undefined).kept!, /no pull request/);
+  assert.deepEqual([left().local.length, left().folder], [1, true]);
 
-    only(job, undefined, how);
-    assert.deepEqual(left(), { local: [], remote: [], worktree: false, folder: false });
-  }
+  only(job, undefined, { now: LATER });
+  assert.deepEqual(left(), { local: [], remote: [], worktree: false, folder: true });
+
+  only(job, undefined, { named: true });
+  assert.equal(left().folder, false);
 });
 
 test('--dry-run says what would go and removes nothing; an unknown job is an error', async () => {
@@ -83,21 +90,17 @@ test('--dry-run says what would go and removes nothing; an unknown job is an err
   const result = only(job, 'MERGED', { dryRun: true, named: true });
   assert.deepEqual(result.removed, [`origin/animus/${job}`, `origin/animus-evidence/${job}`, `branch animus/${job}`, `folder ${jobDir(job)}`]);
   assert.deepEqual(left(), before);
-  assert.throws(() => cleanup({ jobs: ['no-such-job'] }, () => 'MERGED'), AnimusError);
+  assert.throws(() => cleanup({ jobs: ['no-such-job'] }, () => ({ state: 'MERGED' })), AnimusError);
 });
 
-test('the transcripts Claude Code kept of a job\'s sessions go with its folder, and not before', async () => {
-  const { job, left } = await finishedJob({ keep: true });
+test('the transcripts Claude Code kept of a job\'s sessions are never removed: they are part of its record', async () => {
+  const { job } = await finishedJob({ keep: true });
   const [transcripts] = claudeProjectDirs(loadState(job)!.workspace.worktree);
   mkdirSync(transcripts!, { recursive: true });
   writeFileSync(join(transcripts!, 'session-1.jsonl'), '{}\n');
-
-  only(job, 'MERGED');
-  assert.equal(left().folder, true);
+  only(job, 'MERGED', { now: LATER });
+  only(job, 'MERGED', { named: true });
   assert.equal(existsSync(transcripts!), true);
-
-  assert.ok(only(job, 'MERGED', { now: LATER }).removed.includes(`Claude Code transcripts ${transcripts}`));
-  assert.equal(existsSync(transcripts!), false);
 });
 
 test('a job waiting for an answer is kept however old, until it is named', async () => {

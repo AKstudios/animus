@@ -79,13 +79,18 @@ five numbers split by task class. Without `gh`, it shows what it last read.
 
 #### `animus cleanup [<job>...] [--days <n>] [--dry-run]`
 
-Removes what finished jobs left behind: the branches (local and on origin)
-and worktree of a job whose PR is merged or closed, and the folder of a job
-that last ran more than `--days` ago (default 14), with the transcripts
-Claude Code kept of its sessions (`~/.claude/projects/<worktree>`, or under
-`CLAUDE_CONFIG_DIR`). A job with an open PR, or one waiting for an answer,
-is kept. Named jobs are removed without waiting for `--days`. `--dry-run`
-lists what would be removed. Nothing runs it on a laptop by itself; on
+Removes what finished jobs left behind. A job whose PR is merged or closed
+loses its worktree at once, and its branches (`animus/<job>` and
+`animus-evidence/<job>`, local and on origin) once the PR ended more than
+`--days` ago (default 30). A job with no PR loses both once it last ran
+that long ago. A job with an open PR, or one waiting for an answer, is
+kept. What a job records stays for analysis: its folder (spec, gate output,
+reviews, screenshots, transcripts), Claude Code's own transcripts and the
+run log. A named job goes whole and at once, folder included. `--dry-run`
+lists what would be removed.
+
+Deleting an evidence branch leaves its PR's screenshots unreachable once
+GitHub collects the commit; the job's folder keeps them. Nothing runs it on a laptop by itself; on
 Helix, `helix cleanup` runs it once a day ([helix.md](helix.md#cleanup)).
 
 Removing a worktree also drops install-cache saves (`.git/animus/installs`)

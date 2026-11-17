@@ -1,9 +1,9 @@
 import assert from 'node:assert/strict';
-import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
-import { animusCleanups, helixCleanup, oldJobFolders, staleImages } from '../src/cleanup.ts';
+import { animusCleanups, helixCleanup, staleImages } from '../src/cleanup.ts';
 import { personDirs } from '../src/container.ts';
 import { openStore, type HelixJob } from '../src/store.ts';
 
@@ -22,29 +22,18 @@ function helix() {
   return { home, store, add };
 }
 
-test('Helix\'s folder of a job goes once it ended long enough ago, unless it waits for an answer or has not ended', () => {
+test('Helix keeps every job\'s folder and removes only the job images of other releases', () => {
   const { home, store, add } = helix();
-  const ids = {
-    old: add({ outcome: 'pr', ended: ago(20) }),
-    cancelled: add({ state: 'cancelled', ended: ago(20) }),
-    recent: add({ outcome: 'failed', ended: ago(2) }),
-    asking: add({ outcome: 'needs-input', ended: ago(40) }),
-    running: add({ state: 'running', started: ago(20) }),
-    queued: add({ state: 'queued' }),
-  };
-  const dirs = oldJobFolders(store, { home, days: 14, now: NOW });
-  assert.deepEqual(dirs, [join(home, 'jobs', String(ids.old)), join(home, 'jobs', String(ids.cancelled))]);
-
+  const ids = [add({ outcome: 'pr', ended: ago(200) }), add({ state: 'cancelled', ended: ago(200) })];
   const lines: string[] = [];
   const docker: string[][] = [];
   helixCleanup(store, {
-    home, contained: true, days: 14, dryRun: false, now: NOW, version: '0.3.4',
+    home, contained: true, days: 30, dryRun: false, version: '0.3.4',
     docker: (args) => { docker.push(args); return { status: 0, stdout: args[1] === 'ls' ? '0.3.3\n0.3.4\n' : '' }; },
   }, (l) => lines.push(l));
   assert.deepEqual(docker.slice(1), [['image', 'rm', 'animus-job:0.3.3']]);
-  assert.ok(lines.includes('removed animus-job:0.3.3'));
-  assert.deepEqual(oldJobFolders(store, { home, days: 0, now: NOW }).map((d) => d.split('/').pop()), [String(ids.recent)]);
-  assert.ok(lines.includes(`removed ${dirs[0]}`));
+  assert.deepEqual(lines, ['removed animus-job:0.3.3']);
+  for (const id of ids) assert.equal(existsSync(join(home, 'jobs', String(id))), true);
 });
 
 test('animus cleanup runs in each person\'s Animus home with their credentials, or once as the machine without containers', () => {

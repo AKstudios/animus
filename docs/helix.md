@@ -103,16 +103,16 @@ once a day, in a process of its own; `helix cleanup [--days <n>]
 [--dry-run]` runs it by hand. It:
 
 - runs `animus cleanup` in each person's Animus home
-  (`~/.helix/people/<person>/animus`) with their credentials, so their
-  merged or closed PRs lose their branches and worktrees, and old job
-  folders go with their Claude transcripts. Without containers it runs
-  once, as the machine's account.
-- removes Helix's own folder of each job (`~/.helix/jobs/<id>/`: the spec
-  and `log.txt`) that ended or was cancelled more than `--days` ago
-  (default 14). A job waiting for an answer is kept. Its row in `helix.db`
-  stays.
+  (`~/.helix/people/<person>/animus`) with their credentials: a merged or
+  closed PR's worktree goes at once and its branches `--days` after it
+  ended (default 30). Without containers it runs once, as the machine's
+  account.
 - removes `animus-job` images of other releases. Docker refuses one a
   container still uses, and the next run tries again.
+
+Every job's record stays for analysis: Helix's own folder of it
+(`~/.helix/jobs/<id>/`: the spec and `log.txt`), its row in `helix.db`,
+and the person's job folders and Claude transcripts.
 
 A job's UI server (`animus ui up`, `animus shots`) is stopped when the job's
 process ends, however it ends, so a cancelled job leaves nothing serving.

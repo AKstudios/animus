@@ -95,11 +95,10 @@ const USAGE = `helix: runs Animus jobs for several people on one machine
         containers when config.yaml has a container: entry.
   helix cleanup [--days <n>] [--dry-run]
         Remove what finished jobs leave on this machine: animus cleanup in
-        each person's Animus home, with their credentials (merged or closed
-        pull requests lose their branches, worktrees and, after --days
-        (default ${KEEP_DAYS}), their folders); Helix's own folder of each job
-        that ended over --days ago and waits for no answer; and the job
-        images of other releases. helix serve runs it once a day.
+        each person's Animus home, with their credentials (a merged or
+        closed pull request's worktree at once, its branches --days after,
+        default ${KEEP_DAYS}), and the job images of other releases. Job folders,
+        logs and transcripts are kept. helix serve runs it once a day.
   helix check [<name>]
         Try each person's credentials against GitHub and Claude: who the
         GitHub token is, when it ends, whether it may push to each repository,

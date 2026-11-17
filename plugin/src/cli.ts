@@ -3,7 +3,7 @@ import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { parseArgs } from 'node:util';
 import { claudeAgent } from './agent.ts';
-import { cleanup, describeCleanup, KEEP_DAYS } from './cleanup.ts';
+import { cleanup, describeCleanup, KEEP_DAYS, type PrEnd } from './cleanup.ts';
 import { describeFindings, doctor } from './doctor.ts';
 import { enable, realRun, setup, terminalIo, thisMachine } from './setup.ts';
 import { initProfile } from './init.ts';
@@ -14,7 +14,7 @@ import { githubUrl, mainCheckout, touchedFiles } from './git.ts';
 import { describeRuns, jobDir, loadState, readRuns, type Run } from './log.ts';
 import { factoryVersion, jobOf, onPath, runJob, uiJobOf } from './pipeline.ts';
 import { describeNumbers, numbers, refreshOutcomes } from './outcomes.ts';
-import { prFacts, prState, publish, pushEvidence } from './pr.ts';
+import { prFacts, publish, pushEvidence } from './pr.ts';
 import { personalFor, readSkillsFile, skillsForRole, snapshotSkills, whereToRun, type PersonalSkill, type Where } from './personal.ts';
 import { loadProfile } from './profile.ts';
 import { describePlan, loadFactory, resolvePlan } from './profiles.ts';
@@ -59,11 +59,13 @@ const USAGE = `animus: a spec goes in, a pull request with proof comes out
         time to merge, human commits, reverted or reworked within 30 days),
         and the five numbers split by task class.
   animus cleanup [<job>...] [--days <n>] [--dry-run]
-        Remove what finished jobs left: the branches (here and on origin) and
-        worktree of a job whose pull request merged or closed, and the folder
-        of a job that last ran over --days ago (default ${KEEP_DAYS}). A job with an
-        open pull request is kept. A named job does not wait for --days.
-        --dry-run only says what would go.
+        Remove what finished jobs left: the worktree of a job whose pull
+        request merged or closed, and its branches (here and on origin) once
+        that was over --days ago (default ${KEEP_DAYS}); a job with no pull request
+        loses both once it last ran that long ago. A job with an open pull
+        request, or waiting for an answer, is kept. Job folders, transcripts
+        and the run log are kept for analysis; a named job goes whole, folder
+        too, at once. --dry-run only says what would go.
   animus skills
         The vendored skills, where each came from, and which role gets it.
   animus setup
@@ -291,7 +293,12 @@ async function main(argv: string[]): Promise<number> {
       if (!Number.isFinite(days) || days < 0) throw new AnimusError(`--days takes a number of days, not ${values.days}`);
       if (!onPath('gh')) throw new AnimusError('gh is not installed, so cleanup cannot tell which pull requests are finished');
       const dryRun = Boolean(values['dry-run']);
-      console.log(describeCleanup(cleanup({ jobs: positionals, days, dryRun }, prState), dryRun));
+      const prEnd: PrEnd = (url, cwd) => {
+        const f = prFacts(url, cwd);
+        const ended = f?.mergedAt ?? f?.closedAt;
+        return f ? { state: f.state, ...(ended ? { ended } : {}) } : undefined;
+      };
+      console.log(describeCleanup(cleanup({ jobs: positionals, days, dryRun }, prEnd), dryRun));
       return 0;
     }
     case 'check': case 'shots': case 'ui': {

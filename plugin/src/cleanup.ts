@@ -1,25 +1,29 @@
-// Cleanup: what a job leaves behind goes once nobody needs it. A job whose
-// pull request merged or closed loses its branch, its evidence branch (here
-// and on origin) and any worktree still standing. Its folder under Animus's
-// home goes once it is old, with the transcripts Claude Code kept of its
-// sessions, and so does everything of a job that never had a pull request. A
-// job with an open pull request, or one waiting for an answer, is never
-// touched unless named. The run log keeps every job's line.
+// Cleanup: what a job leaves behind goes once nobody needs it, and its
+// record never does. A job whose pull request merged or closed loses any
+// worktree still standing at once, and its branch and evidence branch (here
+// and on origin) once the pull request has been finished for --days; a job
+// that never had a pull request loses them once it last ran that long ago.
+// A job with an open pull request, or one waiting for an answer, is never
+// touched. The job's folder (spec, gate output, reviews, screenshots,
+// transcripts), Claude Code's own transcripts and the run log are kept for
+// analysis: only a job named on the command line goes whole, and at once.
 import { existsSync, readdirSync, rmSync, statSync } from 'node:fs';
 import { join } from 'node:path';
-import { claudeProjectDirs } from './agent.ts';
 import { revParse } from './git.ts';
 import { animusHome, jobDir, loadState, readRuns } from './log.ts';
-import { evidenceBranch, type PrLookup } from './pr.ts';
+import { evidenceBranch, type PrState } from './pr.ts';
 import { AnimusError, tryGit } from './proc.ts';
 import { removeWorkspace } from './workspace.ts';
 
-/** How long a job's folder outlives its last run, in days. */
-export const KEEP_DAYS = 14;
+/** How long a finished job's branches outlive its pull request, or its last run when it had none, in days. */
+export const KEEP_DAYS = 30;
 const DAY_MS = 24 * 60 * 60 * 1000;
 
+/** A pull request's state, and when it merged or closed if it did; undefined when GitHub cannot say. */
+export type PrEnd = (url: string, cwd: string) => { state: PrState; ended?: string } | undefined;
+
 export type CleanupOptions = {
-  /** Only these jobs, and at once: a named job does not wait until it is old. */
+  /** Only these jobs, whole and at once: their folders go too. */
   jobs?: readonly string[];
   days?: number;
   /** Report what would go; remove nothing. */
@@ -30,7 +34,7 @@ export type CleanupOptions = {
 /** What happened to one job: what was removed, and why anything of it stays. */
 export type Cleaned = { job: string; removed: string[]; kept?: string };
 
-export function cleanup(opts: CleanupOptions, lookup: PrLookup): Cleaned[] {
+export function cleanup(opts: CleanupOptions, lookup: PrEnd): Cleaned[] {
   const root = jobDir('');
   const all = existsSync(root) ? readdirSync(root).filter((job) => loadState(job)) : [];
   const unknown = opts.jobs?.find((job) => !all.includes(job));
@@ -41,24 +45,27 @@ export function cleanup(opts: CleanupOptions, lookup: PrLookup): Cleaned[] {
   return (named ? opts.jobs! : all).map((job) => cleanJob(job, prs.get(job), named, opts, lookup));
 }
 
-function cleanJob(job: string, pr: string | undefined, named: boolean, opts: CleanupOptions, lookup: PrLookup): Cleaned {
+function cleanJob(job: string, pr: string | undefined, named: boolean, opts: CleanupOptions, lookup: PrEnd): Cleaned {
   const state = loadState(job)!;
   const dir = jobDir(job);
   const { repo } = state;
   const hasRepo = existsSync(join(repo, '.git'));
   const days = opts.days ?? KEEP_DAYS;
-  const old = named || (opts.now ?? Date.now()) - statSync(join(dir, 'state.json')).mtimeMs >= days * DAY_MS;
-  // Read before the worktree goes: its path with links resolved names one of them.
-  const transcripts = claudeProjectDirs(state.workspace.worktree);
+  const now = opts.now ?? Date.now();
+  const lastRun = statSync(join(dir, 'state.json')).mtimeMs;
 
   if (state.outcome === 'needs-input' && !named) return { job, removed: [], kept: 'it is waiting for an answer; name it to remove it now' };
+  // Since when nobody needs its branches: its pull request ended, or, with none, it last ran.
+  let since = lastRun;
   if (pr) {
-    const prState = lookup(pr, hasRepo ? repo : animusHome());
-    if (!prState) return { job, removed: [], kept: `the state of ${pr} could not be read` };
-    if (prState === 'OPEN') return { job, removed: [], kept: `${pr} is open` };
-  } else if (!old) {
-    return { job, removed: [], kept: `it has no pull request and last ran less than ${days} day(s) ago; name it to remove it now` };
+    const end = lookup(pr, hasRepo ? repo : animusHome());
+    if (!end) return { job, removed: [], kept: `the state of ${pr} could not be read` };
+    if (end.state === 'OPEN') return { job, removed: [], kept: `${pr} is open` };
+    if (end.ended) since = Date.parse(end.ended);
   }
+  const old = named || now - since >= days * DAY_MS;
+  // A job with a finished pull request needs no worktree; one without keeps it as long as its branch.
+  if (!pr && !old) return { job, removed: [], kept: `it has no pull request and last ran less than ${days} day(s) ago; name it to remove it now` };
 
   const act = !opts.dryRun;
   const removed: string[] = [];
@@ -70,7 +77,7 @@ function cleanJob(job: string, pr: string | undefined, named: boolean, opts: Cle
       removed.push(`worktree ${worktree}`);
     }
     const names = [branch, evidenceBranch(job)];
-    if (tryGit(repo, ['remote', 'get-url', 'origin'])) {
+    if (old && tryGit(repo, ['remote', 'get-url', 'origin'])) {
       const heads = tryGit(repo, ['ls-remote', '--heads', 'origin', ...names]);
       if (heads === undefined) problems.push('origin could not be reached');
       else {
@@ -81,20 +88,17 @@ function cleanJob(job: string, pr: string | undefined, named: boolean, opts: Cle
         if (act) for (const n of names) tryGit(repo, ['branch', '-dr', `origin/${n}`]);
       }
     }
-    for (const n of names) {
+    for (const n of old ? names : []) {
       if (!revParse(repo, `refs/heads/${n}`)) continue;
       if (act && tryGit(repo, ['branch', '-D', n]) === undefined) problems.push(`the branch ${n} could not be deleted`);
       else removed.push(`branch ${n}`);
     }
   }
-  if (problems.length) return { job, removed, kept: `${problems.join('; ')}; its folder stays so cleanup can try again` };
-  if (!old) return { job, removed, kept: `its folder stays until ${days} day(s) after its last run` };
+  if (problems.length) return { job, removed, kept: `${problems.join('; ')}; cleanup tries again next time` };
+  if (!old) return { job, removed, kept: `its branches stay until ${days} day(s) after ${pr} ended` };
+  if (!named) return { job, removed };
   if (act) rmSync(dir, { recursive: true, force: true });
   removed.push(`folder ${dir}`);
-  for (const t of transcripts.filter((d) => existsSync(d))) {
-    if (act) rmSync(t, { recursive: true, force: true });
-    removed.push(`Claude Code transcripts ${t}`);
-  }
   return { job, removed };
 }
 

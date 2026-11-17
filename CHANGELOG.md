@@ -8,6 +8,18 @@ clients with how to update.
 
 ## Unreleased
 
+- `install.sh` no longer hides from setup that `~/.local/bin` is missing from
+  the person's PATH, so setup offers to add it. `install.ps1` stops with an
+  error instead of `exit`, which closed the PowerShell window it ran in.
+
+- Cleanup keeps every job's record for analysis: `animus cleanup` no
+  longer removes job folders after 14 days, or Claude Code's transcripts,
+  and `helix cleanup` no longer removes Helix's job folders (`log.txt`).
+  Only a job named to `animus cleanup` goes whole.
+- A finished job's branches, `animus/<job>` and `animus-evidence/<job>`,
+  stay 30 days after its pull request merged or closed (`--days`), instead
+  of going at once; its worktree still goes at once.
+
 ## 0.3.6 (2026-11-17)
 
 - The marketplace is now called `akstudios`, so the plugin is

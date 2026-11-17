@@ -81,7 +81,7 @@ A job leaves nothing in the target repository but its branch.
 | `~/.animus/jobs/<job>/` | Its state, spec, gate output, reviews, PR body, screenshots, transcripts, `progress.json` |
 | `../.worktrees/<repo>/` | The job's worktree, removed when the job ends unless `--keep` |
 | `<repo>/.git/animus/installs/` | The install cache: the two saves used last per install path, and any used in the last hour |
-| `~/.claude/projects/<worktree>/` | Claude Code's transcripts of the job's sessions, removed with the job's folder |
+| `~/.claude/projects/<worktree>/` | Claude Code's transcripts of the job's sessions, kept |
 | `~/.helix/` (Helix only) | `config.yaml`, `helix.db`, credentials, each person's folder under `people/` |
 
 ## Source map

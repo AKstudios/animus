@@ -2,10 +2,11 @@
 // needs it, the way `animus cleanup` does it on a laptop. `helix serve` runs
 // it once a day. Each person's Animus home gets `animus cleanup`, run as an
 // animus process with that person's credentials (their pull requests and
-// branches are theirs); Helix's own folder of each job that ended goes once
-// it is old and waits for no answer; and the job images of other releases go.
+// branches are theirs), and the job images of other releases go. Every
+// job's record stays for analysis: Helix's own folder of it (its spec and
+// log.txt), and the person's job folders and transcripts.
 import { spawnSync } from 'node:child_process';
-import { existsSync, rmSync } from 'node:fs';
+import { existsSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { credentialEnv, personEnv } from './config.ts';
@@ -13,10 +14,9 @@ import { imageName, personDirs } from './container.ts';
 import type { Store } from './store.ts';
 
 const CLI = join(dirname(fileURLToPath(import.meta.url)), '..', '..', 'plugin', 'src', 'cli.ts');
-const DAY_MS = 24 * 60 * 60 * 1000;
 
 /** How often `helix serve` cleans up, and how long after it starts it first does. */
-export const CLEANUP_EVERY_MS = DAY_MS;
+export const CLEANUP_EVERY_MS = 24 * 60 * 60 * 1000;
 export const CLEANUP_FIRST_MS = 10 * 60 * 1000;
 
 /** Runs docker; undefined when it is not there. Replaced in tests. */
@@ -27,7 +27,7 @@ const docker: Docker = (args) => {
   return r.error ? undefined : { status: r.status, stdout: r.stdout ?? '' };
 };
 
-export type CleanupOptions = { home: string; contained: boolean; days: number; dryRun: boolean; now?: number; docker?: Docker };
+export type CleanupOptions = { home: string; contained: boolean; days: number; dryRun: boolean; docker?: Docker };
 
 /** Each `animus cleanup` to run: one per person's Animus home with containers, else the machine's own once. */
 export type AnimusCleanup = { who: string; env?: Record<string, string>; why?: string };
@@ -44,15 +44,6 @@ export function animusCleanups(store: Store, opts: Pick<CleanupOptions, 'home' |
       return [{ who: name, why: (err as Error).message }];
     }
   });
-}
-
-/** Helix's folders of jobs that ended at least days ago and are not waiting for an answer. */
-export function oldJobFolders(store: Store, opts: Pick<CleanupOptions, 'home' | 'days' | 'now'>): string[] {
-  const now = opts.now ?? Date.now();
-  return [...store.inState('ended'), ...store.inState('cancelled')]
-    .filter((j) => j.outcome !== 'needs-input' && j.ended && now - Date.parse(j.ended) >= opts.days * DAY_MS)
-    .map((j) => join(opts.home, 'jobs', String(j.id)))
-    .filter((dir) => existsSync(dir));
 }
 
 /** The job images of other releases, from the tags `docker image ls` gives. */
@@ -73,10 +64,6 @@ export function helixCleanup(store: Store, opts: CleanupOptions & { version: str
     if (r.status !== 0) ok = false;
     say(`${run.who}: animus cleanup${r.status === 0 ? '' : ` failed (${r.error?.message ?? `exit ${r.status}`})`}`);
     for (const line of out.split('\n').filter(Boolean)) say(`  ${line}`);
-  }
-  for (const dir of oldJobFolders(store, opts)) {
-    if (!opts.dryRun) rmSync(dir, { recursive: true, force: true });
-    say(`${would} ${dir}`);
   }
   const run = opts.docker ?? docker;
   const ls = run(['image', 'ls', imageName('').replace(/:$/, ''), '--format', '{{.Tag}}']);
