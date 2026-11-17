@@ -20,15 +20,15 @@ console.error('job fake-x: ' + title);
 console.log(JSON.stringify(answer ? { outcome: 'pr', pr: 'https://example.test/pr/' + answer } : { outcome: 'needs-input', question: 'which one?' }));
 `;
 
-/** A Helix with ana (U0ANA) and ben (U0BEN) linked, U0OWNER the owner, and a real supervisor behind the bot. */
+/** A Helix with ana (U0ANA), ben (U0BEN) and ajmal (U0OWNER), the owner, linked, and a real supervisor behind the bot. */
 function helix(opts: { slots?: number; paused?: boolean } = {}) {
   const home = mkdtempSync(join(tmpdir(), 'helix-slack-control-'));
   process.env.HELIX_HOME = home;
   mkdirSync(join(home, 'repo'));
   if (opts.paused) writeFileSync(pauseFile(home), '');
-  const config: Config = { host: '127.0.0.1', port: 0, slots: opts.slots ?? 2, slack: { enabled: true, owner: 'U0OWNER' } };
+  const config: Config = { host: '127.0.0.1', port: 0, slots: opts.slots ?? 2, owner: 'ajmal', slack: { enabled: true } };
   const store = openStore(join(home, 'helix.db'));
-  for (const [name, user] of [['ana', 'U0ANA'], ['ben', 'U0BEN']] as const) {
+  for (const [name, user] of [['ana', 'U0ANA'], ['ben', 'U0BEN'], ['ajmal', 'U0OWNER']] as const) {
     store.putPerson(name, { token_sha256: hashToken(`${name}-token`) });
     store.linkSlack(name, user);
   }

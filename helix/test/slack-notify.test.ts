@@ -29,7 +29,7 @@ async function helix() {
   const home = mkdtempSync(join(tmpdir(), 'helix-slack-notify-'));
   process.env.HELIX_HOME = home;
   mkdirSync(join(home, 'repo'));
-  const config: Config = { host: '127.0.0.1', port: 0, slots: 1, slack: { enabled: true, owner: 'U0OWNER' } };
+  const config: Config = { host: '127.0.0.1', port: 0, slots: 1, slack: { enabled: true } };
   const store = openStore(join(home, 'helix.db'));
   store.putPerson('ana', { token_sha256: hashToken('ana-token') });
   store.putPerson('ben', { token_sha256: hashToken('ben-token') });

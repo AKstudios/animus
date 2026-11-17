@@ -55,7 +55,8 @@ function readFrames(socket: Socket, onText: (text: string) => void): void {
   });
 }
 
-export async function fakeSlack(tokens = { app: 'xapp-good' }): Promise<FakeSlack> {
+/** A bot token in tokens makes auth.test work with it, for helix slack setup. */
+export async function fakeSlack(tokens: { app: string; bot?: string } = { app: 'xapp-good' }): Promise<FakeSlack> {
   const calls: string[] = [];
   const received: Record<string, unknown>[] = [];
   const responses: Record<string, unknown>[] = [];
@@ -74,6 +75,7 @@ export async function fakeSlack(tokens = { app: 'xapp-good' }): Promise<FakeSlac
     const port = (server.address() as AddressInfo).port;
     res.end(JSON.stringify(method === 'apps.connections.open' && token === tokens.app
       ? { ok: true, url: `ws://127.0.0.1:${port}/link/${sockets.length + 1}` }
+      : method === 'auth.test' && tokens.bot && token === tokens.bot ? { ok: true, team: 'Acme' }
       : { ok: false, error: 'invalid_auth' }));
   });
   server.on('upgrade', (req, socket: Socket) => {

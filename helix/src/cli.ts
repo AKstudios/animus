@@ -19,8 +19,8 @@ import { checkInChild, checkProject, failInterruptedChecks, forgetProject, setup
 import { INVITE_HOURS, invite, takeOff } from './join.ts';
 import { ask } from '../../plugin/src/join.ts';
 import { describeInvite, describeRemoval } from '../../plugin/src/remote.ts';
-import { setOwner } from './owner.ts';
-import { slackEnvFile, slackSetup, slackWeb } from './slack-api.ts';
+import { moveSlackOwner, setOwner } from './owner.ts';
+import { slackEnvFile, slackOwner, slackSetup, slackWeb } from './slack-api.ts';
 import { startSlack } from './slack-socket.ts';
 import { slackBot, slackInvite, slackNotifier } from './slack.ts';
 import { serve } from './server.ts';
@@ -118,9 +118,10 @@ const USAGE = `helix: runs Animus jobs for several people on one machine
         logs and transcripts are kept. helix serve runs it once a day.
   helix slack setup
         Turn on the Slack bot: asks for the Slack app's bot token (xoxb-),
-        its app token (xapp-) and your own Slack member ID (U…), the bot's
-        owner. Both tokens are tried against Slack, then kept in
-        ${helixHome()}/credentials/slack.env; config.yaml gets slack: {enabled, owner}.
+        its app token (xapp-) and the owner's Slack member ID (U…), which
+        it links to the owner (helix owner first). Both tokens are tried
+        against Slack, then kept in ${helixHome()}/credentials/slack.env;
+        config.yaml gets slack: {enabled: true}.
   helix check [<name>]
         Try each person's credentials against GitHub and Claude: who the
         GitHub token is, when it ends, whether it may push to each repository,
@@ -136,6 +137,8 @@ function main(argv: string[]): number | undefined | Promise<number> {
   switch (command) {
     case 'serve': {
       const store = openHelix();
+      const movedSlack = moveSlackOwner(store);
+      if (movedSlack) console.error(`helix: ${movedSlack}`);
       const config = loadConfig();
       const home = helixHome();
       // A GitHub token that ended fails the job before it starts, with the reason.
@@ -321,12 +324,16 @@ function main(argv: string[]): number | undefined | Promise<number> {
 
 /** helix slack setup: the tokens are asked for, never taken on the command line. */
 async function setupSlack(): Promise<number> {
+  const owner = slackOwner();
   if (!process.stdin.isTTY) throw new AnimusError('helix slack setup asks for two tokens, so it runs in a terminal');
   const bot = await ask('Bot User OAuth Token (xoxb-..., under OAuth & Permissions): ', true);
   const app = await ask('App-Level Token (xapp-..., under Basic Information, with connections:write): ', true);
-  const owner = await ask('Your Slack member ID (U..., in your profile under ⋮, Copy member ID): ');
-  const { team } = await slackSetup({ bot, app, owner });
-  console.log(`Slack works${team ? ` for ${team}` : ''}: the tokens are in ${slackEnvFile()}, and config.yaml has slack: {enabled: true, owner: ${owner.trim()}}. Restart helix serve to connect.`);
+  const user = await ask(`${owner}'s Slack member ID, as the owner (U..., in their profile under ⋮, Copy member ID): `);
+  const store = openHelix();
+  try {
+    const { team } = await slackSetup(store, { bot, app, user });
+    console.log(`Slack works${team ? ` for ${team}` : ''}: the tokens are in ${slackEnvFile()}, config.yaml has slack: {enabled: true}, and ${user.trim()} is linked to ${owner}, the owner. Restart helix serve to connect.`);
+  } finally { store.close(); }
   return 0;
 }
 

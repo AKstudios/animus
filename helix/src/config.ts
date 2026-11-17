@@ -33,8 +33,8 @@ export type Config = {
   container?: { memory?: string; cpus?: number };
   /** The person who may invite and remove people and act on any project or job; set by helix owner (owner.ts). */
   owner?: string;
-  /** The Slack bot, set by helix slack setup; its tokens are in credentials/slack.env. owner is a Slack user id (U…). */
-  slack?: { enabled: boolean; owner: string };
+  /** The Slack bot, set by helix slack setup; its tokens are in credentials/slack.env. Its owner is the Slack user linked to owner. */
+  slack?: { enabled: boolean };
 };
 
 const DEFAULTS: Config = { host: '127.0.0.1', port: 7420, slots: 2 };

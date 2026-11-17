@@ -10,7 +10,7 @@ import { slackBot } from '../src/slack.ts';
 import { openStore } from '../src/store.ts';
 import { fakeSlack, until } from './fake-slack.ts';
 
-const ON: Config = { host: '127.0.0.1', port: 0, slots: 1, slack: { enabled: true, owner: 'U0OWNER' } };
+const ON: Config = { host: '127.0.0.1', port: 0, slots: 1, slack: { enabled: true } };
 
 function home() {
   process.env.HELIX_HOME = mkdtempSync(join(tmpdir(), 'helix-socket-'));
@@ -23,7 +23,7 @@ const command = (id: string, text: string, url = URL) => ({ envelope_id: id, typ
 const acks = (slack: { received: Record<string, unknown>[] }) => slack.received.map((m) => m.envelope_id);
 
 // Protects: criterion 7, off means off. Fails when: serve opens a Slack connection the owner did not turn on.
-for (const [what, slack] of [['no slack key', undefined], ['slack.enabled false', { enabled: false, owner: 'U0OWNER' }]] as const) {
+for (const [what, slack] of [['no slack key', undefined], ['slack.enabled false', { enabled: false }]] as const) {
   test(`with ${what} in config.yaml, Helix opens no connection to Slack`, async () => {
     home();
     const fake = await fakeSlack();
@@ -125,6 +125,6 @@ test('a /helix command is answered privately at its response_url, not with chat.
   // A reply at the response_url, or a Web API call besides the connect.
   await until('a reply', () => fake.responses.length + fake.calls.length > 1);
 
-  assert.deepEqual(fake.responses, [{ response_type: 'ephemeral', text: 'You\'re not on this Helix. Ask <@U0OWNER> for an invite.' }]);
+  assert.deepEqual(fake.responses, [{ response_type: 'ephemeral', text: 'You\'re not on this Helix. Ask the owner for an invite.' }]);
   assert.deepEqual(fake.calls, ['apps.connections.open xapp-good']);
 });

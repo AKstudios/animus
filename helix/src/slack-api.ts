@@ -5,7 +5,8 @@
 import { chmodSync, mkdirSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { AnimusError } from '../../plugin/src/proc.ts';
-import { helixHome, updateConfig } from './config.ts';
+import { helixHome, loadConfig, updateConfig } from './config.ts';
+import type { Store } from './store.ts';
 
 export const SLACK_API = 'https://slack.com/api';
 
@@ -62,14 +63,22 @@ export const slackWeb = (bot: string, api = SLACK_API): Omit<Transport, 'onEvent
   },
 });
 
+/** The owner, whose Slack user setup links; refused before anything is asked when there is none. */
+export function slackOwner(): string {
+  const { owner } = loadConfig();
+  if (!owner) throw new AnimusError('helix slack setup links the owner\'s Slack user, and this Helix has no owner: helix owner <person> first');
+  return owner;
+}
+
 /**
- * Tries both tokens against Slack, then keeps them in slack.env and turns the
- * bot on in config.yaml for the owner. A token Slack refuses leaves nothing
- * written. Returns the workspace the bot token is for.
+ * Tries both tokens against Slack, then keeps them in slack.env, turns the bot
+ * on in config.yaml and links the Slack user given to the owner. A token Slack
+ * refuses leaves nothing written. Returns the workspace the bot token is for.
  */
-export async function slackSetup(answers: { bot: string; app: string; owner: string }, api = SLACK_API): Promise<{ team?: string }> {
-  const owner = answers.owner.trim();
-  if (!SLACK_USER.test(owner)) throw new AnimusError(`${owner} is not a Slack user id: one starts with U, as in U0123ABCD (in Slack, your profile, ⋮, Copy member ID)`);
+export async function slackSetup(store: Store, answers: { bot: string; app: string; user: string }, api = SLACK_API): Promise<{ team?: string }> {
+  const owner = slackOwner();
+  const user = answers.user.trim();
+  if (!SLACK_USER.test(user)) throw new AnimusError(`${user} is not a Slack user id: one starts with U, as in U0123ABCD (in Slack, your profile, ⋮, Copy member ID)`);
   const tokens = { bot: answers.bot.trim(), app: answers.app.trim() };
   const tried = async (what: keyof typeof tokens, method: string) => {
     // One line in slack.env each: anything but printable characters is no token.
@@ -83,6 +92,7 @@ export async function slackSetup(answers: { bot: string; app: string; owner: str
   mkdirSync(dirname(file), { recursive: true, mode: 0o700 });
   writeFileSync(file, `SLACK_BOT_TOKEN=${tokens.bot}\nSLACK_APP_TOKEN=${tokens.app}\n`, { mode: 0o600 });
   chmodSync(file, 0o600);
-  updateConfig({ slack: { enabled: true, owner } });
+  updateConfig({ slack: { enabled: true } });
+  store.linkSlack(owner, user);
   return typeof bot.team === 'string' ? { team: bot.team } : {};
 }

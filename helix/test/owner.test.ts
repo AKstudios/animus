@@ -1,17 +1,20 @@
 import assert from 'node:assert/strict';
 import { execFile } from 'node:child_process';
-import { mkdtempSync, readFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync } from 'node:fs';
 import type { AddressInfo } from 'node:net';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { test, type TestContext } from 'node:test';
 import { fileURLToPath } from 'node:url';
+import { parse } from 'yaml';
 import * as client from '../../plugin/src/remote.ts';
-import { configFile, hashToken, saveConfig, type Config } from '../src/config.ts';
+import { configFile, hashToken, saveConfig, updateConfig, type Config } from '../src/config.ts';
+import { moveSlackOwner } from '../src/owner.ts';
 import { serve } from '../src/server.ts';
+import { slackEnvFile, slackSetup } from '../src/slack-api.ts';
 import { openStore } from '../src/store.ts';
 import { supervise, type Launch } from '../src/supervisor.ts';
-import { fakeTransport } from './fake-slack.ts';
+import { fakeSlack, fakeTransport } from './fake-slack.ts';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..', '..');
 const HELIX = join(ROOT, 'helix', 'src', 'cli.ts');
@@ -233,4 +236,53 @@ test('animus status --all from someone but the owner is refused', async (t) => {
   assert.equal(r.code, 2);
   assert.match(r.err, /only the owner, ajmal, may see every job/);
   assert.doesNotMatch(r.out, /ajmal/);
+});
+
+// Protects: criterion 6, setup links the owner. Fails when: helix slack setup leaves the owner's Slack user unlinked, or still writes slack.owner.
+test('helix slack setup links the Slack user it is given to the owner, and config.yaml gets no slack.owner', async (t) => {
+  const h = await helix(t, { owner: 'ajmal' });
+  const api = await fakeSlack({ app: 'xapp-good', bot: 'xoxb-good' });
+  t.after(() => api.close());
+
+  await slackSetup(h.store, { bot: 'xoxb-good', app: 'xapp-good', user: 'U0AJMAL' }, api.api);
+
+  assert.equal(h.store.slackOf('ajmal'), 'U0AJMAL');
+  assert.deepEqual(parse(readFileSync(configFile(), 'utf8')).slack, { enabled: true });
+});
+
+// Protects: criterion 6, no owner, no setup. Fails when: helix slack setup asks for tokens or turns Slack on while nobody is the owner.
+test('helix slack setup is refused while there is no owner, and writes nothing', async (t) => {
+  await helix(t);
+  const before = readFileSync(configFile(), 'utf8');
+
+  const r = await cli(HELIX, ['slack', 'setup']);
+
+  assert.equal(r.code, 2);
+  assert.match(r.err, /this Helix has no owner: helix owner <person> first/);
+  assert.equal(readFileSync(configFile(), 'utf8'), before);
+  assert.ok(!existsSync(slackEnvFile()));
+});
+
+// Protects: criterion 6, the move at start. Fails when: a slack.owner left by an earlier setup is not linked to the owner, or stays in config.yaml.
+test('a slack.owner left in config.yaml is linked to the owner and taken out of config.yaml', async (t) => {
+  const h = await helix(t);
+  updateConfig({ owner: 'ajmal', slack: { enabled: true, owner: 'U0AJMAL' } as Config['slack'] });
+
+  const said = moveSlackOwner(h.store);
+
+  assert.equal(h.store.slackOf('ajmal'), 'U0AJMAL');
+  assert.deepEqual(parse(readFileSync(configFile(), 'utf8')).slack, { enabled: true });
+  assert.match(said ?? '', /U0AJMAL is now linked to ajmal/);
+});
+
+// Protects: criterion 6, nothing lost. Fails when: a slack.owner is dropped while there is no owner to link it to.
+test('a slack.owner left in config.yaml stays there while there is no owner', async (t) => {
+  const h = await helix(t);
+  updateConfig({ slack: { enabled: true, owner: 'U0AJMAL' } as Config['slack'] });
+
+  const said = moveSlackOwner(h.store);
+
+  assert.equal(h.store.personBySlack('U0AJMAL'), undefined);
+  assert.equal(parse(readFileSync(configFile(), 'utf8')).slack.owner, 'U0AJMAL');
+  assert.match(said ?? '', /no owner to link it to/);
 });
