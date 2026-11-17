@@ -8,6 +8,8 @@ clients with how to update.
 
 ## Unreleased
 
+## 0.4.2 (2026-11-17)
+
 - `lan_url` in Helix's `config.yaml`: the address on the office network.
   When it is set, `helix invite`, `animus invite` and the Slack bot's invite
   DM give a second join line with it, for joining with Tailscale off, beside
