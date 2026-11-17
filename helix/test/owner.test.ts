@@ -47,7 +47,7 @@ async function helix(t: TestContext, extra: Partial<Config> = {}) {
   config.url = url;
   saveConfig(config);
   const as = (person: string) => ({ HELIX_URL: url, HELIX_TOKEN: `${person}-token` });
-  return { url, slack, as };
+  return { url, slack, as, store };
 }
 
 /** An invite's printout with what differs from one invite to the next taken out. */
@@ -106,5 +106,50 @@ for (const [who, owner, said] of [
     assert.equal(r.code, 2);
     assert.match(r.err, said);
     assert.doesNotMatch(r.out, /animus join/);
+  });
+}
+
+// Protects: criterion 2, the owner removes a person from a laptop. Fails when: animus remove-person does not take the person off, or prints anything but helix remove-person's checklist.
+test('the owner\'s animus remove-person takes the person off and prints the checklist helix remove-person does', async (t) => {
+  const h = await helix(t, { owner: 'ajmal' });
+  h.store.putPerson('sam', { token_sha256: hashToken('sam-token') });
+  h.store.putPerson('cleo', { token_sha256: hashToken('cleo-token') });
+
+  const fromLaptop = await cli(ANIMUS, ['remove-person', 'sam'], h.as('ajmal'));
+  const onMachine = await cli(HELIX, ['remove-person', 'cleo']);
+
+  assert.equal(fromLaptop.code, 0, fromLaptop.err);
+  assert.equal(onMachine.code, 0, onMachine.err);
+  assert.equal(fromLaptop.out.replaceAll('sam', 'NAME'), onMachine.out.replaceAll('cleo', 'NAME'));
+  assert.match(fromLaptop.out, /Left to do elsewhere:/);
+  assert.equal(h.store.person('sam'), undefined);
+});
+
+// Protects: criterion 2, the refusal. Fails when: someone but the owner can remove a person.
+test('animus remove-person from someone but the owner is refused, and the person stays', async (t) => {
+  const h = await helix(t, { owner: 'ajmal' });
+  h.store.putPerson('sam', { token_sha256: hashToken('sam-token') });
+
+  const r = await cli(ANIMUS, ['remove-person', 'sam'], h.as('ana'));
+
+  assert.equal(r.code, 2);
+  assert.match(r.err, /only the owner, ajmal, may remove people/);
+  assert.ok(h.store.person('sam'));
+});
+
+// Protects: criterion 5, the owner stays. Fails when: any path takes the owner off Helix, leaving it with nobody who may invite.
+for (const [what, file, args, as] of [
+  ['animus leave from the owner', ANIMUS, ['leave', '--yes'], 'ajmal'],
+  ['animus remove-person of the owner', ANIMUS, ['remove-person', 'ajmal'], 'ajmal'],
+  ['helix remove-person of the owner', HELIX, ['remove-person', 'ajmal'], undefined],
+] as const) {
+  test(`${what} is refused until another owner is named`, async (t) => {
+    const h = await helix(t, { owner: 'ajmal' });
+
+    const r = await cli(file, [...args], as ? h.as(as) : {});
+
+    assert.equal(r.code, 2);
+    assert.match(r.err, /name another owner first: helix owner <person> on the machine/);
+    assert.ok(h.store.person('ajmal'));
   });
 }

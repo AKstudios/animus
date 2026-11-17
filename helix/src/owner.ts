@@ -13,7 +13,12 @@ export function setOwner(store: Store, name: string): void {
   updateConfig({ owner: name });
 }
 
-export const isOwner = (config: Config, person: string | undefined) => Boolean(config.owner) && person === config.owner;
+export const isOwner = (config: Pick<Config, 'owner'>, person: string | undefined) => Boolean(config.owner) && person === config.owner;
+
+/** Refuses taking the owner off Helix, by leave or remove-person: it would be left with nobody who may invite. */
+export function keepOwner(config: Pick<Config, 'owner'>, person: string): void {
+  if (isOwner(config, person)) throw new Refused(409, 'name another owner first: helix owner <person> on the machine');
+}
 
 /** Refuses a request that only the owner may make, saying who the owner is. */
 export function requireOwner(config: Config, person: string, what: string): void {

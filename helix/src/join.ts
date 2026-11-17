@@ -13,8 +13,9 @@ import { chmodSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { failing, type Finding } from './check.ts';
-import { addPerson, checkName, hashToken, helixHome, removePerson } from './config.ts';
+import { addPerson, checkName, hashToken, helixHome, removePerson, type Config } from './config.ts';
 import { personDirs } from './container.ts';
+import { keepOwner } from './owner.ts';
 import { SLACK_USER } from './slack-api.ts';
 import type { Invite, Store } from './store.ts';
 import { cancelJobsOf, Refused } from './supervisor.ts';
@@ -109,8 +110,10 @@ export async function joinHelix(opts: { store: Store; verify: Verify; at?: Date 
  * Takes a person off Helix: their token, their queued and running jobs, their
  * credentials file under Helix's home, and their folder. Returns a
  * credentials file kept elsewhere, for whoever removes them to delete.
+ * Every way off Helix comes here, so the owner is refused here.
  */
-export function takeOff(name: string, store: Store, reap?: (id: number) => void): { kept?: string; cancelled: HelixJob[]; folder: string } {
+export function takeOff(name: string, store: Store, config: Pick<Config, 'owner'>, reap?: (id: number) => void): { kept?: string; cancelled: HelixJob[]; folder: string } {
+  keepOwner(config, name);
   const { kept } = removePerson(store, name);
   const cancelled = cancelJobsOf(store, name, reap);
   const folder = personDirs(helixHome(), name).root;

@@ -92,6 +92,9 @@ With Helix, the machine that runs jobs for everyone:
         your tokens.
   animus invite <name> [--github <login>] [--slack <member-id>]
         The owner only: what helix invite does on the machine, from here.
+  animus remove-person <name>
+        The owner only: what helix remove-person does on the machine, from here.
+        The owner themselves cannot leave or be removed until another is named.
   animus project add [<name>]
         Put this checkout's repository on Helix, named after its folder unless
         given a name. Helix clones it with your GitHub token, and runs its
@@ -234,6 +237,10 @@ async function main(argv: string[]): Promise<number> {
       console.log(helix.describeInvite(made, made.url ?? helix.helixLogin()?.url));
       return 0;
     }
+    case 'remove-person':
+      if (!positionals[0]) throw new AnimusError('usage: animus remove-person <name>');
+      console.log(helix.describeRemoval(await helix.removePerson(positionals[0])));
+      return 0;
     case 'project': {
       const [sub, name] = positionals;
       if (sub === 'list') { console.log(helix.describeProjects((await helix.projects()).projects)); return 0; }

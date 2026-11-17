@@ -4,12 +4,12 @@
 // cancelled or answered only by whoever submitted it, and a project removed
 // only by whoever added it (projects.ts).
 // Joining (invite, join) carries a one-time code instead, and leave the
-// person's own token (join.ts). Inviting people (POST /people) is the
-// owner's alone (owner.ts).
+// person's own token (join.ts). Inviting and removing people (POST /people,
+// DELETE /people/<name>) is the owner's alone (owner.ts).
 // It also serves the display: its page at /, and what it shows at /display.
 import { createServer, type IncomingMessage, type Server } from 'node:http';
 import { AnimusError } from '../../plugin/src/proc.ts';
-import { VERSION_HEADER, type MadeInvite } from '../../plugin/src/remote.ts';
+import { VERSION_HEADER, type MadeInvite, type RemovedPerson } from '../../plugin/src/remote.ts';
 import { animusVersion, compatible } from '../../plugin/src/version.ts';
 import { parseSkills, type PersonalSkill } from '../../plugin/src/personal.ts';
 import { hashToken, helixHome, type Config } from './config.ts';
@@ -116,10 +116,17 @@ export function serve(opts: {
         return send(201, await invitePerson(await body(req)));
       }
       if (req.method === 'POST' && url.pathname === '/leave') {
-        const { cancelled, kept } = takeOff(person, store, opts.reap);
+        const { cancelled, kept } = takeOff(person, store, config, opts.reap);
         return send(200, { name: person, cancelled: cancelled.map((j) => j.id), ...(kept ? { kept } : {}) });
       }
       const [, root, id, action] = url.pathname.split('/');
+      if (root === 'people' && id && !action && req.method === 'DELETE') {
+        requireOwner(config, person, 'remove people');
+        const name = decodeURIComponent(id);
+        if (!store.person(name)) throw new Refused(404, `Helix has no person named ${name}`);
+        const { cancelled, ...gone } = takeOff(name, store, config, opts.reap);
+        return send(200, { name, cancelled: cancelled.map((j) => j.id), ...gone, home } satisfies RemovedPerson);
+      }
       if (root === 'projects') {
         const name = id ? decodeURIComponent(id) : undefined;
         if (!name && req.method === 'GET') return send(200, { projects: store.projects().map(({ dir: _dir, ...p }) => p) });

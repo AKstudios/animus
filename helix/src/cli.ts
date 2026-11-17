@@ -18,7 +18,7 @@ import { loadProfile } from '../../plugin/src/profile.ts';
 import { checkInChild, checkProject, failInterruptedChecks, forgetProject, setupHere, setupInContainer } from './projects.ts';
 import { INVITE_HOURS, invite, takeOff } from './join.ts';
 import { ask } from '../../plugin/src/join.ts';
-import { describeInvite } from '../../plugin/src/remote.ts';
+import { describeInvite, describeRemoval } from '../../plugin/src/remote.ts';
 import { setOwner } from './owner.ts';
 import { slackEnvFile, slackSetup, slackWeb } from './slack-api.ts';
 import { startSlack } from './slack-socket.ts';
@@ -82,7 +82,9 @@ const USAGE = `helix: runs Animus jobs for several people on one machine
         The owner runs the same from their laptop: animus invite.
   helix owner <person>
         Make someone who has joined the owner, in config.yaml: from their
-        own laptop they invite people (animus invite).
+        own laptop they invite and remove people (animus invite, animus
+        remove-person). The owner cannot leave or be removed until another
+        is named.
   helix add-person <name> [--env-file <file>]
         Let a person submit, and print their token once. The file holds
         KEY=VALUE lines set for their jobs only (CLAUDE_CODE_OAUTH_TOKEN, GH_TOKEN).
@@ -91,6 +93,7 @@ const USAGE = `helix: runs Animus jobs for several people on one machine
         Take a person off: their token stops working, their queued and
         running jobs are cancelled, and their credentials file under
         ${helixHome()} is deleted. Prints what is left to do elsewhere.
+        The owner runs the same from their laptop: animus remove-person.
   helix remove-repo <name>
         Stop taking jobs for a project, whoever added it. People's clones of
         it are deleted, and Helix's own when animus project add made it; one
@@ -235,20 +238,9 @@ function main(argv: string[]): number | undefined | Promise<number> {
     case 'remove-person': {
       const name = positionals[0];
       if (!name) throw new AnimusError('usage: helix remove-person <name>');
-      const contained = Boolean(loadConfig().container);
-      const gone = withStore((store) => takeOff(name, store, contained ? removeContainer : undefined));
-      const { kept, cancelled, folder } = gone;
-      console.log([
-        `${name} is off Helix: their token no longer works${cancelled.length ? `, and job(s) ${cancelled.map((j) => j.id).join(', ')} were cancelled` : ''}.`,
-        kept ? `Their credentials file is outside ${helixHome()}, so it was left: delete ${kept}` : 'Their credentials file is deleted.',
-        `Their folder ${folder} (clones, job state, Claude config) is deleted.`,
-        '',
-        'Left to do elsewhere:',
-        '  - GitHub: revoke the token they gave Helix (they can, or an org owner under the org\'s personal access tokens), and take them off the organisation or repositories.',
-        '  - Claude: take them off your Claude organisation, or have them revoke the token they gave Helix.',
-        '  - Tailscale: remove them from the tailnet, which takes their devices off it.',
-        '  - Their open animus/* pull requests: close or take over; animus cleanup removes the branches of closed ones.',
-      ].join('\n'));
+      const config = loadConfig();
+      const { cancelled, ...gone } = withStore((store) => takeOff(name, store, config, config.container ? removeContainer : undefined));
+      console.log(describeRemoval({ name, cancelled: cancelled.map((j) => j.id), ...gone, home: helixHome() }));
       return 0;
     }
     case 'invite': {

@@ -116,6 +116,26 @@ export function describeInvite(made: MadeInvite, url: string | undefined): strin
   ].join('\n');
 }
 
+/** A person Helix took off: their cancelled jobs, a credentials file it kept outside its home, their deleted folder. */
+export type RemovedPerson = { name: string; cancelled: number[]; kept?: string; folder: string; home: string };
+/** `animus remove-person`, from the owner's laptop: the same as helix remove-person on the machine. */
+export const removePerson = (name: string) => call<RemovedPerson>('DELETE', `/people/${encodeURIComponent(name)}`);
+
+/** What helix remove-person and animus remove-person print: what was done, and what is left to do elsewhere. */
+export function describeRemoval(gone: RemovedPerson): string {
+  return [
+    `${gone.name} is off Helix: their token no longer works${gone.cancelled.length ? `, and job(s) ${gone.cancelled.join(', ')} were cancelled` : ''}.`,
+    gone.kept ? `Their credentials file is outside ${gone.home}, so it was left: delete ${gone.kept}` : 'Their credentials file is deleted.',
+    `Their folder ${gone.folder} (clones, job state, Claude config) is deleted.`,
+    '',
+    'Left to do elsewhere:',
+    '  - GitHub: revoke the token they gave Helix (they can, or an org owner under the org\'s personal access tokens), and take them off the organisation or repositories.',
+    '  - Claude: take them off your Claude organisation, or have them revoke the token they gave Helix.',
+    '  - Tailscale: remove them from the tailnet, which takes their devices off it.',
+    '  - Their open animus/* pull requests: close or take over; animus cleanup removes the branches of closed ones.',
+  ].join('\n');
+}
+
 export const join = (url: string, code: string, tokens: { claude_token: string; github_token: string }) =>
   request<{ name: string; token: string; github?: string; cannot_push?: string[] }>('POST', url, '/join', undefined, { code, ...tokens });
 

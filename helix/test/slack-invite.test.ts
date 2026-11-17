@@ -114,7 +114,7 @@ test('a person taken off Helix loses their Slack link, and the bot then treats t
   const { store, slack } = helix();
   store.linkSlack('ana', 'U0ANA');
 
-  takeOff('ana', store);
+  takeOff('ana', store, {});
   await slack.deliver({ kind: 'message', user: 'U0ANA', channel: 'D0ANA', text: 'hello' });
 
   assert.equal(store.personBySlack('U0ANA'), undefined);
