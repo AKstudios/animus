@@ -19,7 +19,7 @@ export type Live = {
 export type Waiting = { id: number | string; page: string; ask: boolean; tag: string; title: string; repo: string; person: string; personPage?: string; note: string };
 
 /** meta: how long it took and what it cost; the project and person are drawn from repo and person. */
-export type Recent = { id: number | string; page: string; tag: string; tone: Tone; title: string; repo: string; person: string; personPage?: string; meta: string; reason?: string };
+export type Recent = { id: number | string; page: string; tag: string; /** Local display: the pull request the tag names, on GitHub. */ href?: string; tone: Tone; title: string; repo: string; person: string; personPage?: string; meta: string; reason?: string };
 
 /** An open pull request on the overview; it links to GitHub and to the job that opened it. */
 export type Pr = { id: number; page: string; href: string; tag: string; draft: boolean; title: string; repo: string; person: string; personPage: string };
@@ -38,6 +38,8 @@ export type View = {
   empty?: { title: string; text: string; free: string; command: string };
   /** The local display: it has no slots or queue to show, and lists every job by project instead of PRs and RECENT. */
   local: boolean;
+  /** Whether the header links to the people pages: Helix has them, the local display does not. */
+  people: boolean;
   /** Local display: every job of the shown projects, newest first, grouped by project in the order of their newest job. */
   byProject: { project: string; jobs: Recent[] }[];
   live: Live[]; noLive: string;
@@ -92,8 +94,10 @@ const people = (person: string, local: boolean) => (local ? {} : { personPage: p
 function recent(j: DisplayJob, local = false): Recent {
   const [tag, tone] = LISTED[j.state === 'ended' ? j.outcome ?? 'failed' : j.state] ?? ['ENDED', 'mute'];
   const took = j.started && j.ended ? span(Date.parse(j.ended) - Date.parse(j.started)) : '';
+  // Helix lists open PRs apart; only the local display tags a job with its pull request.
+  const number = local && j.pr ? /(\d+)\/?$/.exec(j.pr)?.[1] : undefined;
   return {
-    id: j.id, page: jobPage(j.id), tag, tone, title: j.title, repo: j.repo, person: j.person, ...people(j.person, local),
+    id: j.id, page: jobPage(j.id), tag: number ? `${tag} #${number}` : tag, ...(number && /^https?:\/\//.test(j.pr!) ? { href: j.pr } : {}), tone, title: j.title, repo: j.repo, person: j.person, ...people(j.person, local),
     meta: [took, j.cost_usd !== undefined ? usd(j.cost_usd) : ''].filter(Boolean).join(' · '),
     ...(j.resume ? { reason: `It stopped before it ended. To carry on: ${j.resume}` } : j.reason ? { reason: firstLine(j.reason) } : {}),
   };
@@ -171,6 +175,7 @@ export function view(d: Display, picked: string | null, now: number): View {
     prs,
     recent: ended.slice(0, RECENT).map((j) => recent(j, d.local === true)),
     local: d.local === true,
+    people: d.local !== true,
     byProject: d.local ? [...Map.groupBy(shown, (j) => j.repo)].map(([project, jobs]) => ({ project, jobs: jobs.map((j) => recent(j, d.local === true)) })) : [],
   };
 }

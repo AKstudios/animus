@@ -7,7 +7,8 @@ import { hostname, tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { setTimeout as sleep } from 'node:timers/promises';
 import { test } from 'node:test';
-import { jobNotice, route } from '../display/pages.ts';
+import { jobView } from '../display/job-view.ts';
+import { jobNotice, peopleNotice, personNotice, route } from '../display/pages.ts';
 import type { Display, DisplayJob, JobPage } from '../display/shape.ts';
 import { view } from '../display/view.ts';
 import { listenLocal, localJobs, localServer } from '../src/local-display.ts';
@@ -112,17 +113,36 @@ test('a local job page answers with no token, with its checks, spec and run; unk
   assert.deepEqual(statuses, [404, 404]);
 });
 
-// Protects: the page is served for a job's address and not for people pages. Fails when: /people answers, or a job's address does not give the page to a browser.
-test('the local display serves the page for a job and has no people pages', async () => {
+// Protects: the page is served for a job's address and for people addresses, so a browser never lands on raw JSON. Fails when: /people answers an error, or a job's address does not give the page to a browser.
+test('the local display serves the page for a job and for people addresses, with no people data', async () => {
   seed('some-job');
   const s = await served();
   const browser = { accept: 'text/html' };
-  const [job, people, script] = await Promise.all([s.get('/jobs/some-job', browser), s.get('/people', browser), s.get('/ui/app.ts')]);
+  const [job, people, person, data, script] = await Promise.all([s.get('/jobs/some-job', browser), s.get('/people', browser), s.get('/people/ana', browser), s.get('/people/page-data'), s.get('/ui/app.ts')]);
   s.stop();
   assert.equal(job.status, 200);
   assert.match(await job.text(), /<div id="helix"/);
-  assert.equal(people.status, 404);
+  assert.deepEqual([people.status, person.status, data.status], [200, 200, 404]);
+  assert.match(await people.text(), /<div id="helix"/);
   assert.match(script.headers.get('content-type') ?? '', /javascript/);
+});
+
+// Protects: what the local display says where it lacks something. Fails when: the header still links to people, a job's PR has no number or link, the people pages or the log do not say where the rest is.
+test('the local display names a job by its PR, links it, and says where people and the log are not', () => {
+  const d: Display = {
+    name: 'laptop', at: '2026-11-17T12:00:00Z', slots: 0, stages: ['setup'], local: true, repos: [{ name: 'shop' }],
+    jobs: [
+      { id: 'a-1', person: '', repo: 'shop', title: 'a', submitted: '2026-11-17T10:00:00Z', state: 'ended', outcome: 'draft-pr', pr: 'https://github.com/o/shop/pull/8' },
+      { id: 'a-2', person: '', repo: 'shop', title: 'b', submitted: '2026-11-17T09:00:00Z', state: 'ended', outcome: 'pr' },
+    ],
+  };
+  const v = view(d, null, Date.parse(d.at));
+  assert.deepEqual(v.byProject[0]!.jobs.map((j) => [j.tag, j.href]), [['DRAFT PR #8', 'https://github.com/o/shop/pull/8'], ['PR', undefined]]);
+  assert.equal(v.people, false);
+  assert.match(peopleNotice(false, undefined, true) ?? '', /no people pages/);
+  assert.match(personNotice('ana', false, undefined, true) ?? '', /no people pages/);
+  const page = jobView({ at: d.at, stages: d.stages, job: d.jobs[0]!, log: '' }, 0, true);
+  assert.match(page.noLog, /went to the terminal it ran in/);
 });
 
 // Protects: only loopback names are answered. Fails when: a page on another site, resolving its own name to 127.0.0.1, can read the jobs.

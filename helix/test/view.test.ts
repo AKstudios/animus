@@ -26,6 +26,15 @@ test('a running job shows its stage, who is working, the last line it said and h
   assert.deepEqual([v.running, v.slots, v.queued, v.asks], [2, 2, 0, 0]);
 });
 
+// Protects: a card draws no separator or empty `>` line for what the job lacks. Fails when: the view gives a person's page or a line to a job that has neither, or Helix loses its People link.
+test('a running job with no person or line yet has neither, and only Helix links to people', () => {
+  const j = job({ person: '', state: 'running', started: ago(1) });
+  const local = view({ ...shown([j]), local: true }, null, NOW);
+  const helix = view(shown([j]), null, NOW);
+  assert.deepEqual([local.live[0]!.person, local.live[0]!.personPage, local.live[0]!.now], ['', undefined, '']);
+  assert.deepEqual([local.people, helix.people], [false, true]);
+});
+
 test('waiting lists the jobs that ask first, then the queue in order with each job\'s place and why it is there again', () => {
   const v = view(shown([
     job({ id: 1, state: 'queued', submitted: ago(4) }),

@@ -98,8 +98,7 @@ export function localServer(): Server {
     if (!/^(127\.0\.0\.1|localhost)(:\d+)?$/.test(req.headers.host ?? '') || req.method !== 'GET') return send(403, { error: 'this display answers GET requests for 127.0.0.1 only' });
     const url = new URL(req.url ?? '/', 'http://localhost');
     const file = asset(url.pathname, req.headers.accept);
-    // /people/… is Helix's: the page is not served for it here.
-    if (file && !url.pathname.startsWith('/people')) {
+    if (file) {
       res.writeHead(200, { 'content-type': file.type, 'cache-control': file.cache, 'content-security-policy': CSP, 'x-content-type-options': 'nosniff', vary: 'accept' });
       return res.end(file.body);
     }
