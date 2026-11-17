@@ -8,6 +8,8 @@ clients with how to update.
 
 ## Unreleased
 
+## 0.3.8 (2026-11-17)
+
 - The installers and `animus setup` find Animus's marketplace by its GitHub
   repository, whatever it is called. Claude Code knows a marketplace by its
   source, so on a machine that had it as `animus`, adding `akstudios` added
