@@ -2,9 +2,9 @@
 
 A fine-grained token reaches one account's repositories, so a person working
 across organisations could not join with one. Helix now has a GitHub App,
-owned by the AKstudios organisation and installable by any account, and
-people join with its device flow: they type a short code at GitHub instead
-of making and pasting a token. Helix keeps their refresh token and gets an
+owned by an organisation the Helix owner runs and installable by any
+account, and people join with its device flow: they type a short code at
+GitHub instead of making and pasting a token. Helix keeps their refresh token and gets an
 eight-hour user access token before each job.
 
 User access tokens act as the person and reach only repositories where the

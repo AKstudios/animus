@@ -56,10 +56,10 @@ path. Keep the same account name and the same folders, and a copy of
 
 With the app, `animus join` shows a GitHub code to approve instead of asking
 for a fine-grained token, and Helix refreshes each person's short-lived token
-before every job. You need to be an owner of the AKstudios organisation (or
-one of its GitHub App managers).
+before every job. It lives under an organisation you own (or are a GitHub App manager of),
+written `<org>` below.
 
-1. Go to <https://github.com/organizations/AKstudios/settings/apps/new>
+1. Go to `https://github.com/organizations/<org>/settings/apps/new`
    (the organisation's **Settings**, **Developer settings**, **GitHub Apps**,
    **New GitHub App**) and fill it in from
    [helix/deploy/github/manifest.json](../helix/deploy/github/manifest.json):
@@ -72,10 +72,10 @@ one of its GitHub App managers).
    - **Repository permissions**: Contents read and write, Pull requests read
      and write; Metadata read-only comes with them. Nothing else.
    - **Where can this GitHub App be installed?**: **Any account**, so
-     projects outside AKstudios can install it too.
+     projects outside `<org>` can install it too.
 2. **Create GitHub App**. On its page, under **About**, copy the **Client
    ID** (`Iv23…`). Helix needs no client secret and no private key.
-3. **Install App**, and install it on AKstudios with the repositories Helix
+3. **Install App**, and install it on `<org>` with the repositories Helix
    takes jobs for (or all of them). The owner of any other project installs
    it on theirs from the app's public page,
    `https://github.com/apps/<app-name>/installations/new`; `animus join`
