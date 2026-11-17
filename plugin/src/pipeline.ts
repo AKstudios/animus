@@ -11,7 +11,7 @@ import { userInfo } from 'node:os';
 import { basename, join, resolve } from 'node:path';
 import { resolveAfter, waitForMerged } from './after.ts';
 import type { Agent, AgentResult } from './agent.ts';
-import { describe, failsOnBase, jobChecks, LATER_SLICE, runChecks, type CheckResult } from './gates.ts';
+import { describe, failsOnBase, gateReport, jobChecks, LATER_SLICE, runChecks, type CheckResult } from './gates.ts';
 import { commitAll, mainCheckout, matchesAny, touchedFiles } from './git.ts';
 import { appendRun, jobDir, saveProgress, saveState, writeJson, type JobState, type Outcome, type Run, type Stage } from './log.ts';
 import { evidenceBranch, prBody, prState, type Evidence, type PrLookup, type Publish } from './pr.ts';
@@ -289,7 +289,7 @@ export async function runJob(opts: RunOptions, deps: Deps): Promise<Run> {
       const ok = lastGates.every((r) => r.ok);
       run.gates.push({ attempt, ok, ms: Date.now() - t, checks: lastGates.map((r) => ({ name: r.name, ok: r.ok, skipped: r.skipped, ms: r.ms })) });
       mkdirSync(join(dir, 'gates'), { recursive: true });
-      writeFileSync(join(dir, 'gates', `run-${attempt}.txt`), `${describe(lastGates)}\n\n${lastGates.filter((r) => !r.skipped).map((r) => `=== ${r.name}: ${r.command}\n${r.output}`).join('\n')}`);
+      writeFileSync(join(dir, 'gates', `run-${attempt}.txt`), gateReport(lastGates));
       for (const line of describe(lastGates).split('\n').slice(0, lastGates.length)) log(`  ${line}`);
       if (ok) return;
       const used = slice ? rounds : run.fix_rounds - sliceRounds;

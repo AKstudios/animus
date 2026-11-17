@@ -134,9 +134,10 @@ export function appendRun(run: Run): void {
   appendFileSync(runLog(), `${JSON.stringify(run)}\n`);
 }
 
-export function readRuns(): Run[] {
-  if (!existsSync(runLog())) return [];
-  return readFileSync(runLog(), 'utf8').split('\n').filter(Boolean).flatMap((line) => {
+/** The run log's lines; file is another Animus home's run log (a Helix person's). */
+export function readRuns(file = runLog()): Run[] {
+  if (!existsSync(file)) return [];
+  return readFileSync(file, 'utf8').split('\n').filter(Boolean).flatMap((line) => {
     try { return [JSON.parse(line) as Run]; } catch { return []; }
   });
 }

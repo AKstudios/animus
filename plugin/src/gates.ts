@@ -119,6 +119,9 @@ export function findsNoTests(output: string): boolean {
   return NO_TESTS.test(output.replace(ANSI, ''));
 }
 
+/** A gate run as the job's folder keeps it (gates/run-N.txt): describe(), then each check that ran with all it printed. A job page reads it back. */
+export const gateReport = (results: readonly CheckResult[]) => `${describe(results)}\n\n${results.filter((r) => !r.skipped).map((r) => `=== ${r.name}: ${r.command}\n${r.output}`).join('\n')}`;
+
 /** One line per check (a skipped one says why), then the output of each failure, short. */
 export function describe(results: readonly CheckResult[]): string {
   const lines = results.map((r) => `${r.skipped ? 'skip' : r.ok ? 'ok  ' : 'FAIL'} ${r.name}: ${r.command} (${r.skipped ? r.output : `${(r.ms / 1000).toFixed(1)}s${r.note ? `; ${r.note}` : ''}`})`);

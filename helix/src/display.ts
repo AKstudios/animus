@@ -2,11 +2,12 @@
 // the slots, and each repository's base branch and gates. Read fresh on every
 // request from the table, Animus's job files and each clone's profile, so
 // Helix keeps nothing for it.
-import { statSync } from 'node:fs';
+import { readdirSync, readFileSync, statSync } from 'node:fs';
 import { hostname } from 'node:os';
 import { join } from 'node:path';
-import type { Display, DisplayJob, DisplayRepo, JobPage } from '../../plugin/display/shape.ts';
-import { STAGES } from '../../plugin/src/log.ts';
+import type { Display, DisplayJob, DisplayRepo, JobCheck, JobPage } from '../../plugin/display/shape.ts';
+import { readRuns, STAGES, type JobState } from '../../plugin/src/log.ts';
+import type { Review } from '../../plugin/src/review.ts';
 import { loadProfile, PROFILE_PATH } from '../../plugin/src/profile.ts';
 import { readyRepos, type Config } from './config.ts';
 import type { HelixJob, Store } from './store.ts';
@@ -48,10 +49,68 @@ function jobOf(job: HelixJob, supervisor: Supervisor): DisplayJob {
   };
 }
 
-/** What a job's page shows, or nothing when Helix has no such job. It needs a token: the server sees to that. */
+const read = (file: string) => { try { return readFileSync(file, 'utf8'); } catch { return undefined; } };
+const readJson = <T>(file: string): T | undefined => { try { return JSON.parse(readFileSync(file, 'utf8')) as T; } catch { return undefined; } };
+
+/** The files in a folder whose names match, oldest written first: a resumed job numbers its gate runs from 1 again. */
+function written(dir: string, name: RegExp): string[] {
+  try {
+    return readdirSync(dir).filter((f) => name.test(f)).map((f) => join(dir, f))
+      .map((file) => ({ file, mtime: statSync(file).mtimeMs })).sort((a, b) => a.mtime - b.mtime).map((f) => f.file);
+  } catch { return []; }
+}
+
+/** The checks of a gate run as the job's folder keeps it (gateReport): a line each, then what each that ran printed, of which a failed one's is kept. */
+function parseGates(text: string): JobCheck[] {
+  const checks: JobCheck[] = [];
+  for (const line of text.split('\n')) {
+    const m = /^(ok {2}|FAIL|skip) ([^:]+): (.*) \((.*)\)$/.exec(line);
+    if (!m) break;
+    checks.push({ name: m[2]!, command: m[3]!, status: m[1] === 'FAIL' ? 'fail' : m[1] === 'skip' ? 'skip' : 'ok', detail: m[4]! });
+  }
+  // Each check that ran has its section, in order: `=== name: command` and its output, up to the next one.
+  let from = 0;
+  const sections = checks.filter((c) => c.status !== 'skip').map((c) => {
+    const mark = `=== ${c.name}: ${c.command}\n`;
+    const at = text.indexOf(mark, from);
+    if (at >= 0) from = at + mark.length;
+    return { c, at, body: at + mark.length };
+  }).filter((s) => s.at >= 0);
+  sections.forEach((s, i) => {
+    if (s.c.status === 'fail') s.c.output = text.slice(s.body, sections[i + 1] ? sections[i + 1]!.at - 1 : undefined);
+  });
+  return checks;
+}
+
+/**
+ * What a job's page shows, or nothing when Helix has no such job: its row,
+ * the spec Helix was sent, and what its Animus folder and run log say, read
+ * fresh. It needs a token: the server sees to that.
+ */
 export function jobPage(opts: { store: Store; supervisor: Supervisor }, id: number): JobPage | undefined {
   const job = opts.store.get(id);
-  return job ? { at: new Date().toISOString(), stages: STAGES, job: jobOf(job, opts.supervisor) } : undefined;
+  if (!job) return undefined;
+  const spec = read(job.spec);
+  const page: JobPage = { at: new Date().toISOString(), stages: STAGES, job: jobOf(job, opts.supervisor), ...(spec !== undefined ? { spec } : {}), log: opts.supervisor.log(id, Infinity) };
+  // Its Animus id comes from what the job printed: only a plain name is taken as a folder.
+  if (!job.animus_job || !/^[A-Za-z0-9][\w.-]*$/.test(job.animus_job)) return page;
+  const home = opts.supervisor.animusHome(job.person);
+  const dir = join(home, 'jobs', job.animus_job);
+  const runs = readRuns(join(home, 'runs.jsonl')).filter((r) => r.job === job.animus_job);
+  if (runs.length) page.ms = Object.fromEntries(STAGES.map((s) => [s, runs.reduce((sum, r) => sum + (r.ms?.[s] ?? 0), 0)]));
+  const state = readJson<JobState>(join(dir, 'state.json'));
+  const cut = state?.slicing?.slices ?? [];
+  if (cut.length > 1) page.slices = cut.map((s, i) => ({ title: s.title, delivers: s.delivers, done: i < (state?.slices_done?.length ?? 0) }));
+  const gates = written(join(dir, 'gates'), /^run-\d+\.txt$/).at(-1);
+  const checks = gates ? parseGates(read(gates) ?? '') : [];
+  if (checks.length) page.checks = checks;
+  const reviews = written(dir, /^review-\d+\.json$/).flatMap((f) => readJson<Review>(f) ?? []).filter((r) => Array.isArray(r.findings));
+  if (reviews.length) page.reviews = reviews.map((r) => ({ summary: r.summary, findings: r.findings }));
+  // The question it stopped on is in its state until a run reads the answer, which Helix holds till then.
+  const open = state?.outcome === 'needs-input' && state.question ? [{ question: state.question, ...(job.answer ? { answer: job.answer } : {}) }] : [];
+  const questions = [...(state?.answers ?? []), ...open];
+  if (questions.length) page.questions = questions;
+  return page;
 }
 
 export function display(opts: { config: Config; store: Store; supervisor: Supervisor }): Display {
