@@ -132,7 +132,7 @@ export const publish: Publish = ({ cwd, branch, baseBranch, title, body, draft }
 
 function gh(cwd: string, args: string[], input?: string, quiet = false): string | undefined {
   const r = spawnSync('gh', args, { cwd, input, encoding: 'utf8' });
-  if (r.error) throw new AnimusError('gh is not installed; see https://cli.github.com');
+  if (r.error) throw new AnimusError((r.error as NodeJS.ErrnoException).code === 'ENOENT' ? 'gh is not installed; see https://cli.github.com' : `gh ${args.slice(0, 2).join(' ')}: ${r.error.message}`);
   if (r.status !== 0) {
     if (quiet) return undefined;
     throw new AnimusError(`gh ${args.slice(0, 2).join(' ')}: ${(r.stderr || r.stdout).trim()}`);

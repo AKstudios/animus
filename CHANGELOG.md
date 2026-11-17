@@ -8,6 +8,11 @@ clients with how to update.
 
 ## Unreleased
 
+- A pull request that `gh` fails to open or update says why, instead of
+  saying `gh` is not installed whenever it could not be run; "not installed"
+  is kept for when it is not found. The test of opening a pull request no
+  longer fails on a busy machine (it stopped 0.4.0 deploying to Helix).
+
 ## 0.4.0 (2026-11-17)
 
 - A job catches up with its base before the push: when the base branch

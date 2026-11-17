@@ -17,6 +17,8 @@ function setup(open: 'draft' | 'ready' | 'none') {
   const log = join(bin, 'calls.txt');
   writeFileSync(join(bin, 'gh'), `#!/bin/sh
 echo "$*" >> "${log}"
+# Read what Animus pipes in, as gh does: exiting with it unread breaks the pipe under load.
+case " $* " in *" - "*) cat >/dev/null ;; esac
 case "$1 $2" in
   "pr view") ${open === 'none' ? 'exit 1' : `echo "https://example.test/pr/7 ${open === 'draft'}"`} ;;
   "pr create") echo https://example.test/pr/8 ;;
