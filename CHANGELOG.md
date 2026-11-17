@@ -8,6 +8,8 @@ clients with how to update.
 
 ## Unreleased
 
+## 0.3.7 (2026-11-17)
+
 - `install.sh` no longer hides from setup that `~/.local/bin` is missing from
   the person's PATH, so setup offers to add it. `install.ps1` stops with an
   error instead of `exit`, which closed the PowerShell window it ran in.
