@@ -20,7 +20,7 @@ import { INVITE_HOURS, invite, takeOff } from './join.ts';
 import { ask } from '../../plugin/src/join.ts';
 import { describeInvite, describeRemoval } from '../../plugin/src/remote.ts';
 import { moveSlackOwner, setOwner } from './owner.ts';
-import { githubSetup } from './github-app.ts';
+import { beforeJob, checkSignIn, freshToken, githubSetup } from './github-app.ts';
 import { slackEnvFile, slackOwner, slackSetup, slackWeb } from './slack-api.ts';
 import { startSlack } from './slack-socket.ts';
 import { slackBot, slackInvite, slackNotifier } from './slack.ts';
@@ -133,7 +133,9 @@ const USAGE = `helix: runs Animus jobs for several people on one machine
   helix check [<name>]
         Try each person's credentials against GitHub and Claude: who the
         GitHub token is, when it ends, whether it may push to each repository,
-        and whether the Claude token answers. Exits 1 if any does not.
+        and whether the Claude token answers. Exits 1 if any does not. With
+        Helix's GitHub App, the person's sign-in is refreshed first; one
+        GitHub no longer takes is fixed by their animus github login.
 
 Its files are under ${helixHome()} (HELIX_HOME). People, projects and the
 queue are in helix.db; config.yaml holds the rest, and its slots are read
@@ -184,9 +186,10 @@ function main(argv: string[]): number | undefined | Promise<number> {
       }
       // Only with slack.enabled in config.yaml; turning it on or off takes a restart.
       const slack = startSlack(config, { say });
-      const supervisor = supervise({ store, config, home, preflight, say, ...isolation, ...(slack ? { notify: slackNotifier(slack, store, say) } : {}) });
+      // On a Helix with a GitHub App, each job and project check first trades the person's refresh token for a fresh access token.
+      const supervisor = supervise({ store, config, home, preflight, prepare: beforeJob(store, config), say, ...isolation, ...(slack ? { notify: slackNotifier(slack, store, say) } : {}) });
       if (slack) slackBot(slack, { store, config, supervisor });
-      const server = serve({ config, store, supervisor, home, startCheck: checkInChild(store, home, say), ...(config.container ? { reap: removeContainer } : {}), ...(slack ? { slack } : {}) });
+      const server = serve({ config, store, supervisor, home, startCheck: checkInChild(store, home, say, (person) => freshToken(store, config, person)),...(config.container ? { reap: removeContainer } : {}), ...(slack ? { slack } : {}) });
       server.listen(config.port, config.host, () => console.error(`helix ${animusVersion()}: listening on http://${config.host}:${config.port}, ${config.slots} job(s) at once${config.container ? ', each in a container' : ''}, projects: ${Object.keys(readyRepos(store)).join(', ') || 'none yet'}`));
       // Someone changed the slots or the container limits: the same config object, so everything sees it at once.
       watchFile(configFile(), { interval: 2000 }, () => {
@@ -222,18 +225,23 @@ function main(argv: string[]): number | undefined | Promise<number> {
       return undefined;
     }
     case 'check': {
-      return withStore((store) => {
-        const names = positionals[0] ? [positionals[0]] : Object.keys(store.people());
-        if (positionals[0] && !store.person(positionals[0])) throw new AnimusError(`Helix has no person named ${positionals[0]}`);
-        const agent = claudeAgent(loadFactory());
-        let ok = true;
-        for (const name of names) {
-          const findings = checkPerson(store, name, { agent });
-          console.log(describeFindings(name, findings));
-          ok &&= !failing(findings).length;
-        }
-        return ok ? 0 : 1;
-      });
+      const config = loadConfig();
+      const store = openHelix();
+      return (async () => {
+        try {
+          const names = positionals[0] ? [positionals[0]] : Object.keys(store.people());
+          if (positionals[0] && !store.person(positionals[0])) throw new AnimusError(`Helix has no person named ${positionals[0]}`);
+          const agent = claudeAgent(loadFactory());
+          let ok = true;
+          for (const name of names) {
+            // A sign-in through the GitHub App is refreshed first, so the token checked is the one jobs get.
+            const findings = [...await checkSignIn(store, config, name), ...checkPerson(store, name, { agent })];
+            console.log(describeFindings(name, findings));
+            ok &&= !failing(findings).length;
+          }
+          return ok ? 0 : 1;
+        } finally { store.close(); }
+      })();
     }
     case 'cleanup': {
       const days = values.days === undefined ? KEEP_DAYS : Number(values.days);

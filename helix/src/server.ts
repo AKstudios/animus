@@ -19,7 +19,7 @@ import { animusVersion, compatible } from '../../plugin/src/version.ts';
 import { parseSkills, type PersonalSkill } from '../../plugin/src/personal.ts';
 import { hashToken, helixHome, type Config } from './config.ts';
 import { display, jobPage, jobShot, peoplePage, personPage } from './display.ts';
-import { invite, inviteDetails, joinHelix, startDevice, StillWaiting, takeOff, verifyInChild, type JoinGitHub, type Verify } from './join.ts';
+import { invite, inviteDetails, joinHelix, loginDevice, relogin, startDevice, StillWaiting, takeOff, verifyInChild, type JoinGitHub, type Verify } from './join.ts';
 import { openPrs, type ListPrs } from './open-prs.ts';
 import { isOwner, requireOwner } from './owner.ts';
 import { addProject, checkInChild, projectView, removeProject, type StartCheck } from './projects.ts';
@@ -158,6 +158,9 @@ export function serve(opts: {
         requireOwner(config, person, 'invite people');
         return send(201, await invitePerson(await body(req)));
       }
+      // animus github login: a new sign-in with Helix's GitHub App, as the person they already are.
+      if (req.method === 'POST' && url.pathname === '/github/device') return send(200, await loginDevice(app()));
+      if (req.method === 'POST' && url.pathname === '/github/login') return send(200, await relogin(store, app(), person, await body(req)));
       if (req.method === 'POST' && url.pathname === '/leave') {
         const { cancelled, kept } = takeOff(person, store, config, opts.reap);
         return send(200, { name: person, cancelled: cancelled.map((j) => j.id), ...(kept ? { kept } : {}) });

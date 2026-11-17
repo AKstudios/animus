@@ -4,8 +4,11 @@
 // repositories the app reaches for them. No secret or key: GitHub needs none
 // for device-flow tokens. `helix github setup` is here too: it proves the
 // client ID with a device-code request before config.yaml keeps it.
+import { chmodSync, existsSync, writeFileSync } from 'node:fs';
 import { AnimusError } from '../../plugin/src/proc.ts';
-import { updateConfig } from './config.ts';
+import type { Finding } from './check.ts';
+import { envFileVars, updateConfig, type Config } from './config.ts';
+import type { Store } from './store.ts';
 
 /** Where GitHub's sign-in (web) and REST API live; tests point both at a fake. */
 export type GitHubUrls = { web: string; api: string };
@@ -116,6 +119,72 @@ async function pages(path: string, key: string, token: string, urls: GitHubUrls)
     const items = ((await api(`${path}?per_page=100&page=${page}`, token, urls))[key] ?? []) as unknown[];
     all.push(...items);
     if (items.length < 100) return all;
+  }
+}
+
+/** A repository's owner/name on GitHub, from its clone address (https or ssh). */
+export const githubRepo = (url: string) => /github\.com[:/]([^/]+\/[^/]+?)(?:\.git)?\/?$/.exec(url)?.[1];
+
+/** Puts a new pair in a person's credentials file, keeping its other lines, readable by Helix's account only. */
+export function keepTokens(file: string, tokens: Tokens): void {
+  const kept = { ...envFileVars(file), GH_TOKEN: tokens.access_token, GH_REFRESH_TOKEN: tokens.refresh_token };
+  writeFileSync(file, Object.entries(kept).map(([k, v]) => `${k}=${v}\n`).join(''), { mode: 0o600 });
+  chmodSync(file, 0o600);
+}
+
+/** Each credentials file's refresh in this process, one after another: a refresh token works once. */
+const refreshing = new Map<string, Promise<unknown>>();
+
+/**
+ * Trades the person's refresh token for a fresh access token, keeps the new
+ * pair in their credentials file and returns the access token. Undefined on
+ * a Helix without the app, or for a person who pasted a token instead.
+ * GitHub's refusal (revoked, or unused for six months) is the person's to fix.
+ */
+export function freshToken(store: Store, config: Pick<Config, 'github'>, name: string, urls = GITHUB): Promise<string | undefined> {
+  const file = store.person(name)?.env_file;
+  // A credentials file that is gone is said by whatever reads it next.
+  if (!config.github || !file || !existsSync(file)) return Promise.resolve(undefined);
+  const clientId = config.github.client_id;
+  const next = (refreshing.get(file) ?? Promise.resolve()).catch(() => {}).then(async () => {
+    const used = envFileVars(file).GH_REFRESH_TOKEN;
+    if (!used) return undefined;
+    try {
+      const tokens = await refreshTokens(clientId, used, urls);
+      keepTokens(file, tokens);
+      return tokens.access_token;
+    } catch (err) {
+      if (!(err instanceof GitHubRefused)) throw err;
+      // Another helix process (helix check beside helix serve) spent it a moment ago and kept the next.
+      const now = envFileVars(file);
+      if (now.GH_REFRESH_TOKEN !== used) return now.GH_TOKEN;
+      throw new AnimusError(`GitHub no longer takes your sign-in (${err.message}): run \`animus github login\``);
+    }
+  });
+  refreshing.set(file, next);
+  return next;
+}
+
+/**
+ * What runs before each job on a Helix with the app: a fresh token in the
+ * person's credentials file, and the project within the app's reach for
+ * them. Throws why the job cannot run.
+ */
+export const beforeJob = (store: Store, config: Pick<Config, 'github'>, urls = GITHUB) => async (person: string, repo: string): Promise<void> => {
+  const token = await freshToken(store, config, person, urls);
+  const full = githubRepo(store.project(repo)?.url ?? '');
+  if (!token || !full) return;
+  const reach = await reachableRepos(token, urls);
+  if (reach.repos.some((r) => r.toLowerCase() === full.toLowerCase())) return;
+  throw new AnimusError(`Helix's GitHub App cannot reach ${full} for you: ask its owner to install the app on it${reach.slug ? ` at ${installLink(reach.slug, urls)}` : ''}`);
+};
+
+/** helix check's line for a person who signed in with the app: their sign-in, refreshed. */
+export async function checkSignIn(store: Store, config: Pick<Config, 'github'>, name: string, urls = GITHUB): Promise<Finding[]> {
+  try {
+    return (await freshToken(store, config, name, urls)) ? [{ what: 'GitHub sign-in', ok: true, detail: 'refreshed: a new access token for eight hours' }] : [];
+  } catch (err) {
+    return [{ what: 'GitHub sign-in', ok: false, detail: (err as Error).message }];
   }
 }
 

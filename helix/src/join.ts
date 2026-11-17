@@ -21,7 +21,7 @@ import { failing, type Finding } from './check.ts';
 import { AnimusError } from '../../plugin/src/proc.ts';
 import { addPerson, checkName, hashToken, helixHome, removePerson, type Config } from './config.ts';
 import { personDirs } from './container.ts';
-import { deviceCode, GitHubRefused, githubUser, installLink, pollDevice, reachableRepos, sleep, type GitHubUrls, type Tokens } from './github-app.ts';
+import { deviceCode, GitHubRefused, githubRepo, githubUser, installLink, keepTokens, pollDevice, reachableRepos, sleep, type GitHubUrls, type Tokens } from './github-app.ts';
 import { keepOwner } from './owner.ts';
 import { SLACK_USER } from './slack-api.ts';
 import type { Invite, Store } from './store.ts';
@@ -64,25 +64,58 @@ export class StillWaiting extends Error {}
 
 const HOLD_SECONDS = 120;
 
-/** GitHub's refusal, or GitHub out of reach, as Helix's answer: the code was not taken, so it still works. */
-function refusedBy(err: unknown): never {
-  if (err instanceof GitHubRefused) throw new Refused(403, `GitHub refused the sign-in: ${err.message}. The code still works: run animus join again`);
-  if (err instanceof AnimusError && !(err instanceof Refused)) throw new Refused(502, `${err.message}. The code still works: run animus join again`);
+const JOIN_AGAIN = 'The code still works: run animus join again';
+const LOGIN_AGAIN = 'Run animus github login again';
+
+/** GitHub's refusal, or GitHub out of reach, as Helix's answer: nothing was kept, so the person tries again. */
+function refusedBy(err: unknown, again = JOIN_AGAIN): never {
+  if (err instanceof GitHubRefused) throw new Refused(403, `GitHub refused the sign-in: ${err.message}. ${again}`);
+  if (err instanceof AnimusError && !(err instanceof Refused)) throw new Refused(502, `${err.message}. ${again}`);
   throw err;
+}
+
+/** A device code from GitHub, for the person to type at its page. */
+async function newDevice(github: JoinGitHub, again: string): Promise<DeviceStart> {
+  try {
+    const d = await deviceCode(github.clientId, github.urls);
+    return { device_code: d.device_code, user_code: d.user_code, verification_uri: d.verification_uri, expires_in: d.expires_in };
+  } catch (err) { return refusedBy(err, again); }
 }
 
 /** POST /join/device: starts GitHub's device flow for a live invite's code. */
 export async function startDevice(store: Store, github: JoinGitHub | undefined, code: unknown, at?: Date): Promise<DeviceStart> {
   if (!github) throw new Refused(409, 'this Helix has no GitHub App: animus join asks for a GitHub token instead');
   liveInvite(store, code, at);
-  try {
-    const d = await deviceCode(github.clientId, github.urls);
-    return { device_code: d.device_code, user_code: d.user_code, verification_uri: d.verification_uri, expires_in: d.expires_in };
-  } catch (err) { return refusedBy(err); }
+  return newDevice(github, JOIN_AGAIN);
+}
+
+const NO_APP = 'this Helix has no GitHub App, so there is no sign-in to renew: its owner runs helix github setup first';
+
+/** POST /github/device: starts GitHub's device flow for a person already on Helix, for animus github login. */
+export async function loginDevice(github: JoinGitHub | undefined): Promise<DeviceStart> {
+  if (!github) throw new Refused(409, NO_APP);
+  return newDevice(github, LOGIN_AGAIN);
+}
+
+/**
+ * POST /github/login: the person signs in with GitHub again, when the
+ * refresh stopped working, and their tokens are replaced. Only the GitHub
+ * account they are on Helix as is taken; one that never had a login on
+ * Helix gets the one that approved. StillWaiting: not approved yet.
+ */
+export async function relogin(store: Store, github: JoinGitHub | undefined, name: string, body: Record<string, unknown>): Promise<{ name: string; github: string }> {
+  if (!github) throw new Refused(409, NO_APP);
+  const person = store.person(name)!;
+  if (!person.env_file) throw new Refused(409, `Helix keeps no credentials file for ${name}: ask its owner to add you again`);
+  const { tokens, login } = await approved(github, body.device_code, LOGIN_AGAIN);
+  if (person.github && login.toLowerCase() !== person.github.toLowerCase()) throw new Refused(403, `you are on Helix as the GitHub account ${person.github}, and ${login} approved the sign-in. Run animus github login again and approve as ${person.github}`);
+  keepTokens(person.env_file, tokens);
+  if (!person.github) store.putPerson(name, { ...person, github: login });
+  return { name, github: login };
 }
 
 /** Polls GitHub for the device code until the person approves, or holdSeconds pass (StillWaiting). */
-async function approved(github: JoinGitHub, device: unknown): Promise<{ tokens: Tokens; login: string }> {
+async function approved(github: JoinGitHub, device: unknown, again = JOIN_AGAIN): Promise<{ tokens: Tokens; login: string }> {
   if (typeof device !== 'string' || !device) throw new Refused(400, 'device_code is the one POST /join/device gave: this Helix signs you in with GitHub, not with a token');
   const wait = github.wait ?? sleep;
   const until = Date.now() + (github.holdSeconds ?? HOLD_SECONDS) * 1000;
@@ -95,7 +128,7 @@ async function approved(github: JoinGitHub, device: unknown): Promise<{ tokens: 
     return { tokens, login: (await githubUser(tokens.access_token, github.urls)).login };
   } catch (err) {
     if (err instanceof StillWaiting) throw err;
-    return refusedBy(err);
+    return refusedBy(err, again);
   }
 }
 
@@ -105,7 +138,7 @@ async function unreachable(store: Store, github: JoinGitHub, token: string): Pro
   try { reach = await reachableRepos(token, github.urls); } catch (err) { return refusedBy(err); }
   const repos = new Set(reach.repos.map((r) => r.toLowerCase()));
   return store.projects().filter((p) => p.state === 'ready').flatMap((p) => {
-    const full = /github\.com[:/]([^/]+\/[^/]+?)(?:\.git)?\/?$/.exec(p.url)?.[1];
+    const full = githubRepo(p.url);
     if (!full || repos.has(full.toLowerCase())) return [];
     return [{ project: p.name, owner: full.split('/')[0]!, ...(reach.slug ? { install: installLink(reach.slug, github.urls) } : {}) }];
   });

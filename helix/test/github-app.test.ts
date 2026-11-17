@@ -1,18 +1,21 @@
 import assert from 'node:assert/strict';
-import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import { chmodSync, mkdtempSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
 import { parse } from 'yaml';
 import type { AddressInfo } from 'node:net';
-import { describeUnreachable, signInWithGitHub } from '../../plugin/src/join.ts';
+import { describeUnreachable, githubLogin, signInWithGitHub } from '../../plugin/src/join.ts';
 import { configFile, saveConfig, type Config } from '../src/config.ts';
-import { deviceCode, githubSetup, githubUser, pollDevice, reachableRepos, refreshTokens } from '../src/github-app.ts';
+import { beforeJob, checkSignIn, deviceCode, freshToken, githubSetup, githubUser, pollDevice, reachableRepos, refreshTokens } from '../src/github-app.ts';
 import { credentialsFile, invite, type Verify } from '../src/join.ts';
+import { checkInChild } from '../src/projects.ts';
 import { serve } from '../src/server.ts';
+import { slackNotifier } from '../src/slack.ts';
 import { openStore } from '../src/store.ts';
 import { supervise } from '../src/supervisor.ts';
 import { fakeGitHub, type FakeGitHub } from './fake-github.ts';
+import { fakeTransport, until } from './fake-slack.ts';
 
 /** A Helix with a config.yaml of its own and no github: entry yet. */
 function home() {
@@ -115,9 +118,12 @@ async function helixWithApp(github: FakeGitHub) {
   store.putProject({ name: 'app', url: 'https://github.com/acme/app.git', dir: home, state: 'ready', added: '' });
   store.putProject({ name: 'site', url: 'https://github.com/AKstudios/site', dir: home, state: 'ready', added: '' });
   github.installed = { acme: ['app'] };
-  const h = { url: '', store, approver: { code: '', login: '' }, stop: () => {} };
+  const slack = fakeTransport();
   const verify: Verify = async (env) => ({ findings: [{ what: 'GitHub token', ok: true, detail: env.GH_TOKEN! }, { what: 'push to site', ok: false, detail: 'refused: 403', optional: true }], login: 'from-verify' });
-  const supervisor = supervise({ store, config, home, launch: () => ({ command: process.execPath, args: ['-e', ''] }) });
+  // Each job's variables, as it was launched with them.
+  const launched: Record<string, string>[] = [];
+  const supervisor = supervise({ store, config, home, launch: (_job, _dir, env) => { launched.push(env); return { command: process.execPath, args: ['-e', ''] }; }, prepare: beforeJob(store, config, github), notify: slackNotifier(slack.transport, store) });
+  const h = { url: '', home, config, store, supervisor, launched, slack, approver: { code: '', login: '' }, stop: () => {} };
   const server = serve({ config, store, supervisor, verify, github: { urls: github, holdSeconds: 0, wait: async () => { github.approve(h.approver.code, h.approver.login); } } });
   await new Promise<void>((r) => { server.listen(0, '127.0.0.1', r); });
   h.url = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
@@ -127,6 +133,128 @@ async function helixWithApp(github: FakeGitHub) {
 
 /** The person at the terminal: what animus join said and which page it opened. */
 const terminal = () => ({ said: [] as string[], opened: [] as string[], say(line = '') { this.said.push(line); }, open(url: string) { this.opened.push(url); } });
+
+/** cleo joins as cleo-gh, with the first tokens the fake GitHub hands out (ghu_1, ghr_1). Returns her Helix token. */
+async function joinCleo(h: Awaited<ReturnType<typeof helixWithApp>>): Promise<string> {
+  const { code } = invite(h.store, 'cleo');
+  h.approver = { code: 'WDJB-MJH1', login: 'cleo-gh' };
+  return (await signInWithGitHub(h.url, code, 'sk-ant-oat01-cleo', undefined, terminal())).token;
+}
+
+const SPEC = '---\nsize: small\n---\n# Add login\n\n## Acceptance criteria\n\n1. It works.\n';
+
+/** Submits cleo's job for a project and waits for it to end, however it ends. */
+async function cleosJob(h: Awaited<ReturnType<typeof helixWithApp>>, repo: string) {
+  const { id } = h.supervisor.submit('cleo', { repo, spec: SPEC });
+  await until(`job ${id} to end`, () => h.store.get(id)?.state === 'ended', 5000);
+  return h.store.get(id)!;
+}
+
+// Protects: criterion 4. Fails when: a job runs with the access token from join (ended after eight hours), the new refresh token is not kept with mode 600, or the refresh token reaches the job.
+test('each job gets a fresh access token as GH_TOKEN, the new refresh token is kept in the credentials file, and the job never sees it', async () => {
+  const github = await fakeGitHub();
+  const h = await helixWithApp(github);
+  await joinCleo(h);
+  chmodSync(credentialsFile('cleo'), 0o644);
+
+  await cleosJob(h, 'app');
+  const kept = readFileSync(credentialsFile('cleo'), 'utf8');
+  h.stop();
+  await github.close();
+
+  assert.equal(h.launched.length, 1);
+  assert.equal(h.launched[0]!.GH_TOKEN, 'ghu_2');
+  assert.equal(h.launched[0]!.GH_REFRESH_TOKEN, undefined);
+  assert.equal(kept, 'CLAUDE_CODE_OAUTH_TOKEN=sk-ant-oat01-cleo\nGH_TOKEN=ghu_2\nGH_REFRESH_TOKEN=ghr_2\n');
+  if (process.platform !== 'win32') assert.equal(statSync(credentialsFile('cleo')).mode & 0o777, 0o600);
+});
+
+// Protects: criterion 4's refusal. Fails when: a job for a repository the app cannot reach for the person starts anyway, or its reason lacks the install link.
+test('a job for a project the app cannot reach for the person fails before it starts, with the app\'s install link', async () => {
+  const github = await fakeGitHub();
+  const h = await helixWithApp(github);
+  await joinCleo(h);
+
+  const job = await cleosJob(h, 'site');
+  h.stop();
+  await github.close();
+
+  assert.equal(h.launched.length, 0);
+  assert.equal(job.outcome, 'failed');
+  assert.equal(job.reason, `Helix's GitHub App cannot reach AKstudios/site for you: ask its owner to install the app on it at ${github.web}/apps/animus-helix/installations/new`);
+});
+
+// Protects: criterion 5. Fails when: a refused refresh lets the job start with a stale token, the reason does not say to run animus github login, or the linked person is not told on Slack.
+test('a refresh GitHub refuses fails the job before it starts with "run animus github login", and DMs the person on Slack', async () => {
+  const github = await fakeGitHub();
+  const h = await helixWithApp(github);
+  await joinCleo(h);
+  h.store.linkSlack('cleo', 'U0CLEO');
+  writeFileSync(credentialsFile('cleo'), 'CLAUDE_CODE_OAUTH_TOKEN=sk-ant-oat01-cleo\nGH_TOKEN=ghu_1\nGH_REFRESH_TOKEN=ghr_revoked\n');
+
+  const job = await cleosJob(h, 'app');
+  await until('the DM', () => h.slack.sent.some((s) => s.method === 'post'));
+  h.stop();
+  await github.close();
+
+  assert.equal(h.launched.length, 0);
+  assert.match(job.reason!, /GitHub no longer takes your sign-in .*bad_refresh_token.*: run `animus github login`/);
+  assert.deepEqual(h.slack.sent.filter((s) => s.method === 'post').map((s) => [s.channel, s.text]), [['D-U0CLEO', `Job ${job.id} failed: ${job.reason}`]]);
+});
+
+// Protects: criterion 5's relogin. Fails when: animus github login does not replace the stored tokens, drops the Claude token, or takes another GitHub account's sign-in.
+test('animus github login replaces the stored tokens, and refuses a login other than the person\'s own', async () => {
+  const github = await fakeGitHub();
+  const h = await helixWithApp(github);
+  process.env.HELIX_URL = h.url;
+  process.env.HELIX_TOKEN = await joinCleo(h);
+
+  h.approver = { code: 'WDJB-MJH2', login: 'mallory' };
+  await assert.rejects(githubLogin(terminal()), /you are on Helix as the GitHub account cleo-gh, and mallory approved the sign-in/);
+  h.approver = { code: 'WDJB-MJH3', login: 'cleo-gh' };
+  const io = terminal();
+  await githubLogin(io);
+  const kept = readFileSync(credentialsFile('cleo'), 'utf8');
+  delete process.env.HELIX_URL;
+  delete process.env.HELIX_TOKEN;
+  h.stop();
+  await github.close();
+
+  assert.match(io.said.join('\n'), /Type WDJB-MJH3 at http:\/\/127\.0\.0\.1:\d+\/login\/device/);
+  assert.equal(kept, 'CLAUDE_CODE_OAUTH_TOKEN=sk-ant-oat01-cleo\nGH_TOKEN=ghu_3\nGH_REFRESH_TOKEN=ghr_3\n');
+});
+
+// Protects: criterion 4 in helix check. Fails when: helix check tries the access token from join instead of refreshing it first, or does not keep the new refresh token.
+test('helix check refreshes the person\'s sign-in first and keeps the new tokens', async () => {
+  const github = await fakeGitHub();
+  const h = await helixWithApp(github);
+  await joinCleo(h);
+
+  const found = await checkSignIn(h.store, h.config, 'cleo', github);
+  const kept = readFileSync(credentialsFile('cleo'), 'utf8');
+  h.stop();
+  await github.close();
+
+  assert.deepEqual(found.map((f) => [f.what, f.ok]), [['GitHub sign-in', true]]);
+  assert.match(kept, /GH_TOKEN=ghu_2\nGH_REFRESH_TOKEN=ghr_2\n/);
+});
+
+// Protects: criterion 4 before a project check. Fails when: a project is checked without refreshing its adder's sign-in, or a refused refresh leaves it checking.
+test('a project check refreshes its adder\'s sign-in first, and fails the project when GitHub refuses', async () => {
+  const github = await fakeGitHub();
+  const h = await helixWithApp(github);
+  await joinCleo(h);
+  writeFileSync(credentialsFile('cleo'), 'GH_TOKEN=ghu_1\nGH_REFRESH_TOKEN=ghr_revoked\n');
+  h.store.putProject({ name: 'new', url: 'https://github.com/acme/new.git', dir: join(h.home, 'new'), state: 'checking', added: '', added_by: 'cleo' });
+
+  checkInChild(h.store, h.home, () => {}, (person) => freshToken(h.store, h.config, person, github))('new');
+  await until('the check to fail', () => h.store.project('new')?.state === 'failed');
+  const reason = h.store.project('new')?.reason;
+  h.stop();
+  await github.close();
+
+  assert.match(reason!, /run `animus github login`/);
+});
 
 // Protects: criteria 2 and 3. Fails when: join still needs a GitHub token, the person is not joined as the login that approved, their tokens are not kept, or an unreachable project is not named with the install link.
 test('join shows GitHub\'s code, opens its page, waits for approval and joins as the approving login, naming the projects the app cannot reach', async () => {

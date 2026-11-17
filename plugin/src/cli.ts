@@ -7,7 +7,7 @@ import { cleanup, describeCleanup, KEEP_DAYS, type PrEnd } from './cleanup.ts';
 import { describeFindings, doctor } from './doctor.ts';
 import { enable, realRun, setup, terminalIo, thisMachine } from './setup.ts';
 import { initProfile } from './init.ts';
-import { joinHelix, leaveHelix, openPage } from './join.ts';
+import { githubLogin, joinHelix, leaveHelix, openPage } from './join.ts';
 import { addProject } from './project.ts';
 import { describe, failsOnBase, jobChecks, runChecks } from './gates.ts';
 import { githubUrl, mainCheckout, touchedFiles } from './git.ts';
@@ -92,6 +92,11 @@ With Helix, the machine that runs jobs for everyone:
   animus leave [--yes]
         Take yourself off it: your jobs there are cancelled, and it deletes
         your tokens.
+  animus github login
+        On a Helix with a GitHub App, sign in to GitHub again when your jobs
+        fail with "run animus github login" (the sign-in was revoked, or
+        unused for six months): approve GitHub's code as the account you
+        joined with, and Helix replaces the tokens it keeps.
   animus invite <name> [--github <login>] [--slack <member-id>]
         The owner only: what helix invite does on the machine, from here.
   animus remove-person <name>
@@ -241,6 +246,10 @@ async function main(argv: string[]): Promise<number> {
       return 0;
     case 'leave':
       console.log(await leaveHelix(Boolean(values.yes)));
+      return 0;
+    case 'github':
+      if (positionals[0] !== 'login') throw new AnimusError('usage: animus github login');
+      console.log(await githubLogin());
       return 0;
     case 'invite': {
       if (!positionals[0]) throw new AnimusError('usage: animus invite <name> [--github <login>] [--slack <member-id>]');

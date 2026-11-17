@@ -99,6 +99,8 @@ export function cancelJobsOf(store: Store, person: string, reap: (id: number) =>
 
 export function supervise(opts: {
   store: Store; config: Config; home: string; launch?: Launch; preflight?: Preflight; say?: (line: string) => void;
+  /** Runs before each job, ahead of preflight, while the job holds its slot: a fresh GitHub token (github-app.ts beforeJob). Throws why the job cannot run. */
+  prepare?: (person: string, repo: string) => Promise<void>;
   /** Ends what a job leaves running outside its process tree (its container). */
   reap?: (id: number) => void;
   /** The Animus home a person's jobs write their state to, when it is not Helix's own. */
@@ -189,10 +191,35 @@ export function supervise(opts: {
     });
   }
 
+  /** Jobs whose prepare is running: they hold a slot, and stay queued until it ends. */
+  const preparing = new Set<number>();
+
+  function prepareThenStart(job: HelixJob, prepare: NonNullable<typeof opts.prepare>): void {
+    preparing.add(job.id);
+    void prepare(job.person, job.repo).then(() => undefined, (err: unknown) => (err as Error).message).then((why) => {
+      preparing.delete(job.id);
+      if (stopped) return;
+      const current = store.get(job.id);
+      // Cancelled meanwhile: what the table says stands.
+      if (current?.state === 'queued') {
+        if (why === undefined) start(current);
+        else {
+          saveAndTell({ ...current, state: 'ended', ended: now(), outcome: 'failed', reason: why });
+          say(`job ${job.id} did not start: ${why}`);
+        }
+      }
+      tick();
+    });
+  }
+
   function tick(): void {
     if (stopped || existsSync(pauseFile(home))) return;
-    const queued = store.inState('queued');
-    while (children.size < config.slots && queued.length) start(queued.shift()!);
+    const queued = store.inState('queued').filter((j) => !preparing.has(j.id));
+    while (children.size + preparing.size < config.slots && queued.length) {
+      const job = queued.shift()!;
+      if (opts.prepare) prepareThenStart(job, opts.prepare);
+      else start(job);
+    }
   }
 
   // What the table calls running has no supervisor: end what is left of it and queue it again.

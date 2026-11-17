@@ -157,6 +157,15 @@ export async function join(url: string, code: string, tokens: { claude_token: st
   }
 }
 
+/** `animus github login`: GitHub's device flow again, for someone already on Helix whose sign-in GitHub no longer takes. */
+export const githubDevice = () => call<DeviceStart>('POST', '/github/device');
+export async function githubLogin(device_code: string): Promise<{ name: string; github: string }> {
+  for (;;) {
+    const answer = await call<{ name: string; github: string } | { pending: true }>('POST', '/github/login', { device_code });
+    if (!('pending' in answer)) return answer;
+  }
+}
+
 const how = (j: RemoteJob) => (j.state === 'ended' ? j.outcome ?? 'ended' : j.state);
 
 /** `animus status`: one line per job, newest last. */

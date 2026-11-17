@@ -123,6 +123,16 @@ export async function signInWithGitHub(base: string, code: string, claude: strin
   return helix.join(base, code, { claude_token: claude, device_code: device.device_code });
 }
 
+/** `animus github login`: signs in to Helix's GitHub App again when GitHub no longer takes the old sign-in, as the same account. */
+export async function githubLogin(io = { say, open: openPage }): Promise<string> {
+  const device = await helix.githubDevice();
+  io.say(`Type ${device.user_code} at ${device.verification_uri} (opening now) and approve as the GitHub account you joined with.`);
+  io.open(device.verification_uri);
+  io.say('Waiting for you to approve on GitHub.');
+  const done = await helix.githubLogin(device.device_code);
+  return `Helix has a new GitHub sign-in for ${done.name} (GitHub: ${done.github}): your jobs push as you again.`;
+}
+
 /** The projects Helix's app cannot reach for the person, each with the link its owner installs the app with. */
 export function describeUnreachable(list: readonly helix.Unreachable[]): string {
   return [
