@@ -38,6 +38,11 @@ One run of the factory on one spec, ending in a pull request, a question, or
 a failure.
 _Avoid_: Run, build, task
 
+**Catch-up**:
+Bringing what the base branch gained since a job started into the job's
+branch, just before its pull request opens.
+_Avoid_: Sync, rebase, update branch
+
 **Draft**:
 A spec written from a Slack message and its references, waiting for its
 person to submit, edit or discard it.
