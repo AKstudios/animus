@@ -22,7 +22,7 @@ Both modes call the same core command. Office mode is a queue and a container pl
 | Your laptop | Stays on and awake until the PR opens | Free once the job is submitted, or never needed |
 | Spec | Shaped with you in conversation | Shaped in conversation, or the message or issue is the spec |
 | Jobs at once | One or two, limited by the laptop | Several, each in its own container, from several people |
-| Pipeline | Set up, implement, gates, review, open the PR | The same |
+| Pipeline | Set up, implement, gates, review, catch up with the base, open the PR | The same |
 | Good for | Trying the factory, small changes, working away from the office network | Bigger jobs, overnight work, starting work from a phone, teammates |
 
 ## Starting a job
@@ -57,6 +57,7 @@ Scripts do everything that needs no judgment, one agent implements, a fresh agen
 | Implement | Agent | One fresh session per slice writes the code and checks its own work. The gates for the slices so far run before the next slice starts. |
 | Run the gates | Script | Lint, type-check, tests, build. Failures go back to the same agent. |
 | Review | Fresh agent | Sees only the spec and the diff, and checks the change and its tests against the criteria. |
+| Catch up with the base | Script; a fresh agent for conflicts | If the base branch moved during the job, merges it into the job's branch with one merge commit and runs every gate again, with their own fix rounds. A conflict goes to a fresh implementer session, and the script takes its resolution only with no conflict markers left and the gates green; the PR lists the resolved files. A conflict in a protected path, one the session cannot settle, or gates still failing end the job as needs input, and the answer picks it up here. |
 | Open the PR | Script | Pushes the branch and opens the PR with evidence for each criterion, then deletes the container. |
 | Review and merge | You | The factory never merges on its own. |
 
