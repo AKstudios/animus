@@ -8,6 +8,8 @@ clients with how to update.
 
 ## Unreleased
 
+## 0.3.5 (2026-11-17)
+
 - `helix cleanup` removes what finished jobs leave on a Helix machine, and
   `helix serve` runs it once a day: `animus cleanup` in each person's Animus
   home with their credentials, Helix's own folder of each job that ended over
