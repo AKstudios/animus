@@ -173,8 +173,13 @@ export function identityEnv(who: { name: string; email: string }): Record<string
 export function personEnv(person: Person | undefined): Record<string, string> {
   if (!person?.env_file) return {};
   if (!existsSync(person.env_file)) throw new AnimusError(`the credentials file ${person.env_file} is gone`);
+  return envFileVars(person.env_file);
+}
+
+/** The KEY=value lines of an env file. */
+export function envFileVars(file: string): Record<string, string> {
   const out: Record<string, string> = {};
-  for (const line of readFileSync(person.env_file, 'utf8').split(/\r?\n/)) {
+  for (const line of readFileSync(file, 'utf8').split(/\r?\n/)) {
     const m = /^\s*(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)=(.*)$/.exec(line);
     if (m) out[m[1]!] = m[2]!.trim().replace(/^(['"])(.*)\1$/, '$2');
   }

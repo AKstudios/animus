@@ -15,6 +15,9 @@ clients with how to update.
   keeps them in `~/.helix/credentials/slack.env` and turns the bot on in
   `config.yaml` (`slack: {enabled, owner}`). A refused token is reported with
   Slack's reason and nothing is written.
+- With `slack.enabled` in `config.yaml`, `helix serve` connects to Slack over
+  Socket Mode: every envelope is acknowledged at once, and a socket Slack
+  drops is replaced. With it off, Helix opens no connection to Slack.
 
 ## 0.3.8 (2026-11-17)
 
