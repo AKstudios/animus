@@ -21,6 +21,8 @@ export type Config = {
   name?: string;
   /** The address people reach Helix at, such as its Tailscale Serve address: what helix invite tells them to join. */
   url?: string;
+  /** The address on the office network, for when Tailscale is off (such as http://<host>.local:7420): invites show a second join line with it. */
+  lan_url?: string;
   /** The address to listen on: one on the private network, never a public one. */
   host: string;
   port: number;

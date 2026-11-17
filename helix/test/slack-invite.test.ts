@@ -123,3 +123,17 @@ test('a person taken off Helix loses their Slack link, and the bot then treats t
   store.close();
   assert.deepEqual(slack.sent, [{ method: 'ephemeral', channel: 'D0ANA', user: 'U0ANA', text: NOT_ON }]);
 });
+
+// Protects: the office-network join line. Fails when: a Helix with lan_url DMs only the Tailscale line, or the LAN line's code differs; or one without lan_url gains a second line.
+test('with lan_url set, the invite DM also has a join line for the office network with the same code', async () => {
+  const { store, slack } = helix();
+
+  const made = await slackInvite(slack.transport, { store, config: { ...CONFIG, lan_url: 'http://helix.local:7420' } }, 'alex', { github: 'alex-gh', slack: 'U123' });
+  await slackInvite(slack.transport, { store, config: CONFIG }, 'bea', { github: 'bea-gh', slack: 'U456' });
+
+  store.close();
+  const [withLan, without] = [(slack.sent[1] as { text: string }).text, (slack.sent[3] as { text: string }).text];
+  assert.equal(JOIN_LINE.exec(withLan)?.[1], made.code);
+  assert.match(withLan, new RegExp(`Tailscale off, paste this instead:\\n\`\`\`\\ncurl -fsSL \\S+ \\| bash -s -- join http://helix\\.local:7420 ${made.code}\\n`));
+  assert.doesNotMatch(without, /Tailscale off/);
+});

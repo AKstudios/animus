@@ -82,7 +82,7 @@ export function serve(opts: {
     if ((github !== undefined && typeof github !== 'string') || (slack !== undefined && typeof slack !== 'string')) throw new Refused(400, 'github and slack are text');
     const who = { ...(github ? { github } : {}), ...(slack ? { slack } : {}) };
     try {
-      if (!slack) return { name, ...invite(store, name, who), ...(config.url ? { url: config.url } : {}) };
+      if (!slack) return { name, ...invite(store, name, who), ...(config.url ? { url: config.url } : {}), ...(config.lan_url ? { lan_url: config.lan_url } : {}) };
       if (!opts.slack) throw new Refused(409, 'the Slack bot is not running on this Helix: helix slack setup on the machine, then restart helix serve');
       const { expires } = await slackInvite(opts.slack, { store, config }, name, { ...who, slack });
       return { name, expires, slack };

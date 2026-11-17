@@ -270,7 +270,8 @@ function main(argv: string[]): number | undefined | Promise<number> {
       if (!name) throw new AnimusError('usage: helix invite <name> [--github <login>] [--slack <member-id>]');
       if (values.slack) return inviteOnSlack(name, values.github, values.slack);
       const made = withStore((store) => invite(store, name, values.github ? { github: values.github } : {}));
-      console.log(describeInvite({ name, ...made }, loadConfig().url));
+      const { url, lan_url: lanUrl } = loadConfig();
+      console.log(describeInvite({ name, ...made }, url, lanUrl));
       return 0;
     }
     case 'owner': {

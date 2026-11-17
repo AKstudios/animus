@@ -255,7 +255,7 @@ async function main(argv: string[]): Promise<number> {
       if (!positionals[0]) throw new AnimusError('usage: animus invite <name> [--github <login>] [--slack <member-id>]');
       const made = await helix.invite({ name: positionals[0], ...(values.github ? { github: values.github } : {}), ...(values.slack ? { slack: values.slack } : {}) });
       // A Helix with no url: in its config.yaml is reached where this machine reaches it.
-      console.log(helix.describeInvite(made, made.url ?? helix.helixLogin()?.url));
+      console.log(helix.describeInvite(made, made.url ?? helix.helixLogin()?.url, made.lan_url));
       return 0;
     }
     case 'remove-person':

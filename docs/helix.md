@@ -12,7 +12,10 @@ a machine, or moving Helix to another one, is
 
 `~/.helix/config.yaml` sets `host` (default 127.0.0.1: never a public
 address), `port` (7420), `slots` (2), `url` (the address people reach Helix
-at, which `helix invite` puts in the join command it prints), `name` (what the
+at, which `helix invite` puts in the join command it prints), `lan_url` (the
+address on the office network, such as `http://<host>.local:7420`, for when
+Tailscale is off: invites then print, and the Slack bot DMs, a second join
+line with it), `name` (what the
 display calls the machine), `owner` ([The owner](#the-owner)), `container`
 and `slack` ([Slack](#slack)). Helix reads it again when it changes, for the
 slots and the owner; host, port and slack need a restart. People and projects are

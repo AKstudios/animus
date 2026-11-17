@@ -176,6 +176,7 @@ export async function slackInvite(transport: Pick<Transport, 'dm' | 'post'>, opt
   if (!url) throw new AnimusError('config.yaml has no url, the address people reach Helix at, which the join line needs');
   const made = invite(opts.store, name, who);
   const channel = await transport.dm(who.slack);
+  const lan = opts.config.lan_url;
   await transport.post(channel, [
     `You're invited to Helix as ${name}, with the GitHub login ${who.github}.`,
     `1. Connect Tailscale first: Helix is at ${url}, on the tailnet.`,
@@ -183,6 +184,12 @@ export async function slackInvite(transport: Pick<Transport, 'dm' | 'post'>, opt
     '```',
     `curl -fsSL ${INSTALL} | bash -s -- join ${url} ${made.code}`,
     '```',
+    ...(lan ? [
+      'In the office with Tailscale off, paste this instead:',
+      '```',
+      `curl -fsSL ${INSTALL} | bash -s -- join ${lan} ${made.code}`,
+      '```',
+    ] : []),
     `The code works once, for ${INVITE_HOURS} hours.`,
   ].join('\n'));
   return made;

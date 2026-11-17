@@ -84,6 +84,22 @@ test('the owner\'s animus invite prints the same lines helix invite does, with a
   assert.deepEqual([details.name, details.github], ['sam', 'sam-gh']);
 });
 
+// Protects: the office-network join line. Fails when: with lan_url set, helix invite or animus invite prints only one join line, the two lines carry different codes, or they are not labelled.
+test('with lan_url set, helix invite and animus invite print a Tailscale and an office-network join line with the same code', async (t) => {
+  const h = await helix(t, { owner: 'ajmal', lan_url: 'http://helix.local:7420' });
+
+  const onMachine = await cli(HELIX, ['invite', 'cleo']);
+  const fromLaptop = await cli(ANIMUS, ['invite', 'sam', '--github', 'sam-gh'], h.as('ajmal'));
+
+  for (const r of [onMachine, fromLaptop]) {
+    assert.equal(r.code, 0, r.err);
+    const tailnet = new RegExp(`^  With Tailscale on:\\n  animus join ${h.url} (\\S+)$`, 'm').exec(r.out)?.[1];
+    const lan = /^ {2}On the office network:\n {2}animus join http:\/\/helix\.local:7420 (\S+)$/m.exec(r.out)?.[1];
+    assert.ok(tailnet, r.out);
+    assert.equal(lan, tailnet);
+  }
+});
+
 // Protects: criterion 1, --slack from a laptop. Fails when: the invite is not DMed by Helix's Slack bot, or the printout is not helix invite --slack's.
 test('the owner\'s animus invite --slack has Helix\'s Slack bot DM that user the join line', async (t) => {
   const h = await helix(t, { owner: 'ajmal' });
