@@ -33,6 +33,9 @@ clients with how to update.
   pull request's link, or failed with the reason. `/helix notify off` stops
   these for that person and `/helix notify on` starts them again; they are on
   by default.
+- The Slack app's manifest is in `helix/deploy/slack/manifest.yaml`;
+  docs/helix-deploy.md walks from creating the app to `helix slack setup`,
+  and docs/helix.md describes the bot's commands.
 
 ## 0.3.8 (2026-11-17)
 

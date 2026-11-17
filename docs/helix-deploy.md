@@ -46,6 +46,44 @@ path. Keep the same account name and the same folders, and a copy of
    once in Tailscale's admin console (Services).
 8. From a laptop, `animus join <url> <code>`, then `animus doctor`, then
    `animus project add` from a checkout of each project.
+9. Optionally, the Slack bot ([below](#the-slack-bot)), so invites go out
+   from Slack and people follow their jobs there.
+
+## The Slack bot
+
+The bot lets you invite people from Slack and posts each job's progress to
+the person who started it ([helix.md](helix.md#slack)). It reaches Slack over
+Socket Mode, so Helix opens no port for it. You need to be allowed to add
+apps to the workspace.
+
+1. Go to <https://api.slack.com/apps>, **Create New App**, **From a
+   manifest**, and pick the workspace. Paste
+   [helix/deploy/slack/manifest.yaml](../helix/deploy/slack/manifest.yaml)
+   on the YAML tab, then **Create**. Rename the app if you like; keep the
+   `/helix` command, the scopes, the `message.im` event and Socket Mode as
+   they are, since Helix depends on each.
+2. **Install App** (or **OAuth & Permissions**), **Install to Workspace**,
+   and allow it. Keep the **Bot User OAuth Token** (`xoxb-…`) it shows.
+3. **Basic Information**, **App-Level Tokens**, **Generate Token and
+   Scopes**: any name, the scope `connections:write`. Keep the token
+   (`xapp-…`).
+4. In Slack, open your own profile, **⋮**, **Copy member ID** (`U…`). That
+   Slack user is the bot's owner, the only one who may invite and link.
+5. Check `url` is set in `config.yaml`: the line the bot DMs joins at it.
+6. On the Helix machine, as Helix's account: `helix/bin/helix slack setup`.
+   It asks for the two tokens and your member ID, tries both tokens against
+   Slack, keeps them in `~/.helix/credentials/slack.env` (mode 600) and adds
+   `slack: {enabled: true, owner: U…}` to `config.yaml`. A token Slack
+   refuses is reported with Slack's reason, and nothing is written.
+7. `sudo systemctl restart helix.service`. Its log says `Slack: connected`.
+8. In the bot's DM (**Apps**, Helix), send `/helix invite @alex alex-gh`.
+   Alex gets a DM to connect Tailscale, then one line that installs Animus
+   and joins. Someone who joined before the bot was there is linked with
+   `/helix link @alex alex`.
+
+To turn the bot off, set `enabled: false` under `slack:` in `config.yaml`
+and restart Helix. To give it a new token, run `helix slack setup` again.
+`slack.env` is under `~/.helix`, so it moves with the rest of it.
 
 ## Moving abstergo to new hardware, keeping everything
 
@@ -76,7 +114,8 @@ restart. `helix/deploy/ubuntu/setup.sh` is only the Ubuntu way to set this up.
 
 On the Helix machine, run `helix/bin/helix remove-person <name>`. Their token
 stops working within two seconds. Their queued and running jobs are
-cancelled, and their credentials file under `~/.helix` is deleted. It then
+cancelled, their credentials file under `~/.helix` is deleted, and their
+Slack link is removed. It then
 prints what is left to do elsewhere: revoke their GitHub token and take them
 off the organisation, take them off your Claude organisation, remove them
 from the tailnet, and deal with their open `animus/*` pull requests. Their
