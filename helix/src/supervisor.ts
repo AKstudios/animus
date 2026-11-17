@@ -101,11 +101,16 @@ export function supervise(opts: {
   reap?: (id: number) => void;
   /** The Animus home a person's jobs write their state to, when it is not Helix's own. */
   animusHomeOf?: (person: string) => string;
+  /** Told each job as it starts and as it ends, however it was submitted: the Slack bot posts it. */
+  notify?: (job: HelixJob) => void;
 }): Supervisor {
   const { store, config, home } = opts;
   const launch = opts.launch ?? animus;
   const say = opts.say ?? (() => {});
   const reap = opts.reap ?? (() => {});
+  const notify = opts.notify ?? (() => {});
+  /** Saves a job that started or ended, and says so to notify. */
+  const saveAndTell = (job: HelixJob) => { store.save(job); notify(job); };
   const children = new Map<number, ChildProcess>();
   const now = () => new Date().toISOString();
   const logFile = (id: number) => join(home, 'jobs', String(id), 'log.txt');
@@ -138,7 +143,7 @@ export function supervise(opts: {
       launched = launch(job, repoDir, jobEnv);
       env = { ...process.env, ...jobEnv, ...launched.env };
     } catch (err) {
-      store.save({ ...job, state: 'ended', ended: now(), outcome: 'failed', reason: (err as Error).message });
+      saveAndTell({ ...job, state: 'ended', ended: now(), outcome: 'failed', reason: (err as Error).message });
       say(`job ${job.id} did not start: ${(err as Error).message}`);
       return;
     }
@@ -146,7 +151,7 @@ export function supervise(opts: {
     children.set(job.id, child);
     const { answer: _used, ...rest } = job;
     let running: HelixJob = { ...rest, state: 'running', started: now(), ...(child.pid ? { pid: child.pid } : {}) };
-    store.save(running);
+    saveAndTell(running);
     say(`job ${job.id} started for ${job.person}: ${job.title}`);
 
     let out = '';
@@ -165,7 +170,7 @@ export function supervise(opts: {
         let result: { outcome?: string; pr?: string; reason?: string; question?: string; cost_usd?: number } = {};
         try { result = JSON.parse(out) as typeof result; } catch { /* it died before it could say */ }
         const { pid: _pid, ...kept } = current;
-        store.save({
+        saveAndTell({
           ...kept, state: 'ended', ended: now(), outcome: result.outcome ?? 'failed',
           ...(result.pr ? { pr: result.pr } : {}), ...(result.question ? { question: result.question } : {}), ...(result.cost_usd !== undefined ? { cost_usd: result.cost_usd } : {}),
           ...(result.reason ?? (result.outcome ? undefined : fallback) ? { reason: result.reason ?? fallback } : {}),
@@ -197,7 +202,7 @@ export function supervise(opts: {
     const { pid: _pid, ...rest } = job;
     const interrupted = (job.interrupted ?? 0) + 1;
     if (interrupted >= MAX_INTERRUPTIONS) {
-      store.save({ ...rest, interrupted, state: 'ended', ended: now(), outcome: 'failed', reason: `Helix stopped ${interrupted} times while this job ran, so it was not started again` });
+      saveAndTell({ ...rest, interrupted, state: 'ended', ended: now(), outcome: 'failed', reason: `Helix stopped ${interrupted} times while this job ran, so it was not started again` });
       say(`job ${job.id} was running when Helix stopped, for the ${interrupted}th time: ended`);
       continue;
     }

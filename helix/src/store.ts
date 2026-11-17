@@ -1,5 +1,5 @@
 // Helix's record: the queue (one row per submitted job), the people who may
-// submit and their Slack links, the projects they may submit for, and open invites, all in one
+// submit and their Slack links, each job's Slack thread, the projects they may submit for, and open invites, all in one
 // SQLite file. It is kept apart from the supervisor, so a supervisor that dies
 // is started again and carries on from what the tables say, and the helix
 // command changes it beside a running `helix serve`, which sees the change on
@@ -70,6 +70,9 @@ export type Invite = { code_sha256: string; name: string; github?: string; slack
 /** One try at moving this machine to a release (`helix upgrade`): when, and whether it went on. */
 export type Upgrade = { tag: string; at: string; ok: boolean; detail?: string };
 
+/** A DM channel and the ts of the message that opened the thread in it. */
+export type SlackThread = { channel: string; ts: string };
+
 export type Store = {
   add(job: Omit<HelixJob, 'id'>): HelixJob;
   get(id: number): HelixJob | undefined;
@@ -94,6 +97,14 @@ export type Store = {
   linkSlack(name: string, slackUser: string): void;
   /** The person a Slack user is linked to. */
   personBySlack(slackUser: string): string | undefined;
+  /** The Slack user a person is linked to. */
+  slackOf(name: string): string | undefined;
+  /** Whether a person's jobs post their progress to Slack: on unless they turned it off. */
+  notifies(name: string): boolean;
+  setNotify(name: string, on: boolean): void;
+  /** The DM thread a job posts its progress to, once it has one. */
+  slackThread(job: number): SlackThread | undefined;
+  putSlackThread(job: number, thread: SlackThread): void;
   project(name: string): Project | undefined;
   /** Every project, by name. */
   projects(): Project[];
@@ -119,6 +130,10 @@ export function openStore(file: string): Store {
   db.exec('create table if not exists upgrades (tag text primary key, data text not null)');
   // One Slack user per person and one person per Slack user: the Slack link.
   db.exec('create table if not exists slack_links (slack text primary key, name text not null unique)');
+  // The people who turned job notifications off: everyone else gets them.
+  db.exec('create table if not exists slack_quiet (name text primary key)');
+  // At most one thread per job: every notification for it goes there.
+  db.exec('create table if not exists slack_threads (job integer primary key, channel text not null, ts text not null)');
   const data = <T>(r: unknown): T => JSON.parse((r as { data: string }).data) as T;
   const asInvite = (r: unknown): Invite => JSON.parse((r as { data: string }).data) as Invite;
   const live = (i: Invite, at: Date) => Date.parse(i.expires) > at.getTime();
@@ -153,6 +168,7 @@ export function openStore(file: string): Store {
     putPerson(name, p) { db.prepare('insert into people (name, token_sha256, data) values (?, ?, ?) on conflict (name) do update set token_sha256 = excluded.token_sha256, data = excluded.data').run(name, p.token_sha256, JSON.stringify(p)); },
     dropPerson(name) {
       db.prepare('delete from slack_links where name = ?').run(name);
+      db.prepare('delete from slack_quiet where name = ?').run(name);
       return Number(db.prepare('delete from people where name = ?').run(name).changes) > 0;
     },
     linkSlack(name, slack) {
@@ -160,6 +176,11 @@ export function openStore(file: string): Store {
       db.prepare('insert into slack_links (slack, name) values (?, ?)').run(slack, name);
     },
     personBySlack: (slack) => (db.prepare('select name from slack_links where slack = ?').get(slack) as { name: string } | undefined)?.name,
+    slackOf: (name) => (db.prepare('select slack from slack_links where name = ?').get(name) as { slack: string } | undefined)?.slack,
+    notifies: (name) => !db.prepare('select 1 from slack_quiet where name = ?').get(name),
+    setNotify(name, on) { db.prepare(on ? 'delete from slack_quiet where name = ?' : 'insert or ignore into slack_quiet (name) values (?)').run(name); },
+    slackThread: (job) => db.prepare('select channel, ts from slack_threads where job = ?').get(job) as SlackThread | undefined,
+    putSlackThread(job, t) { db.prepare('insert or replace into slack_threads (job, channel, ts) values (?, ?, ?)').run(job, t.channel, t.ts); },
     project: (name) => { const r = db.prepare('select data from projects where name = ?').get(name); return r ? data<Project>(r) : undefined; },
     projects: () => db.prepare('select data from projects order by name').all().map((r) => data<Project>(r)),
     putProject(p) { db.prepare('insert into projects (name, data) values (?, ?) on conflict (name) do update set data = excluded.data').run(p.name, JSON.stringify(p)); },

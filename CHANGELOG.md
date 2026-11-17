@@ -28,6 +28,11 @@ clients with how to update.
   <login> --slack <member-id>`: the bot DMs them to connect Tailscale first,
   and one line that installs Animus and joins. An invite sent on Slack must
   name a GitHub login, and only the owner may send one.
+- A linked person's Helix jobs, however submitted, post to them on Slack, one
+  DM thread per job: started (or resumed), needs input with the question, the
+  pull request's link, or failed with the reason. `/helix notify off` stops
+  these for that person and `/helix notify on` starts them again; they are on
+  by default.
 
 ## 0.3.8 (2026-11-17)
 
