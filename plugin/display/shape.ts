@@ -6,8 +6,9 @@ import type { Review } from '../src/review.ts';
 
 /** A job as the display sees it: Helix's row without what is only Helix's business (the spec's path, the pid, the answer's text). */
 export type DisplayJob = {
-  id: number;
-  state: 'queued' | 'running' | 'ended' | 'cancelled';
+  /** Helix's number, or a local job's own id. */
+  id: number | string;
+  state: 'queued' | 'running' | 'ended' | 'cancelled' | 'stopped';
   person: string;
   /** The repository's name in Helix's config. */
   repo: string;
@@ -25,6 +26,8 @@ export type DisplayJob = {
   reason?: string;
   question?: string;
   cost_usd?: number;
+  /** A stopped job (its process is gone, with no outcome): the command that picks it up again. */
+  resume?: string;
   /** Why a queued job is in the queue a second time. */
   resumed?: 'answer' | 'restart';
   /** Running jobs: the stage and who is working, as the job last said. */
@@ -62,6 +65,9 @@ export type JobPage = {
   log: string;
 };
 
+/** An open pull request one of Helix's jobs opened, as GitHub lists it now. */
+export type DisplayPr = { job: number; repo: string; person: string; number: number; title: string; url: string; draft: boolean; created: string };
+
 export type DisplayRepo ={ name: string; base?: string; gates?: string[] };
 
 export type Display = {
@@ -72,6 +78,10 @@ export type Display = {
   stages: readonly string[];
   repos: DisplayRepo[];
   jobs: DisplayJob[];
+  /** Open PRs the jobs opened, any order; left out by a source that does not ask GitHub. */
+  prs?: DisplayPr[];
+  /** Set by the local display (`animus ui`): one person's own jobs, no sign-in and no people pages, listed by project rather than as a queue. */
+  local?: true;
 };
 
 /** One person on the people list: from Helix, GET /people/page-data, with a person's token. */
@@ -91,8 +101,8 @@ export type PersonRow = {
 
 export type PeoplePage = { at: string; people: PersonRow[] };
 
-/** A job on a person's page: enough to list it and link to its page. */
-export type PersonJob = Pick<DisplayJob, 'id' | 'title' | 'repo' | 'state' | 'submitted'> & Partial<Pick<DisplayJob, 'outcome' | 'pr' | 'cost_usd'>>;
+/** A job on a person's page: only Helix has people pages, so its id is Helix's number. */
+export type PersonJob = { id: number } & Pick<DisplayJob, 'title' | 'repo' | 'state' | 'submitted'> & Partial<Pick<DisplayJob, 'outcome' | 'pr' | 'cost_usd'>>;
 
 /** The most jobs a person's page is sent at a time. */
 export const PERSON_JOBS = 30;

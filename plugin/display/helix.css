@@ -225,3 +225,47 @@ a.title:hover, a.card-title:hover, .back:hover { text-decoration: underline; }
   .wordmark { letter-spacing: 0.3em; }
   .done-row .reason { padding-left: 0; }
 }
+
+/* ---------------------------------------------- the idle helix (SYNCHRONIZING) */
+.f-ink { fill: var(--ink); }
+.f-accent { fill: var(--accent); }
+.empty .sync { border: 0; min-height: 0; }
+.sync { flex-grow: 1; align-self: stretch; display: flex; align-items: center; justify-content: center; min-height: 340px; overflow: hidden; border: 1px dashed var(--line); }
+.sync-drift { width: 100%; max-width: 520px; text-align: center; animation: hxDrift 140s ease-in-out infinite alternate; }
+.sync svg { width: 100%; height: auto; overflow: visible; }
+.sync-rung { transform: scaleX(var(--s)); animation: hxTurn 12s ease-in-out infinite; }
+/* Each of the 16 rungs: its resting pose --s (cos of its turn; also what shows under reduced motion) and its phase. Here, not in style attributes: the CSP allows none. */
+.sync-helix > :nth-child(1) > .sync-rung { --s: 1; animation-delay: 0s; }
+.sync-helix > :nth-child(2) > .sync-rung { --s: 0.83; animation-delay: -1.125s; }
+.sync-helix > :nth-child(3) > .sync-rung { --s: 0.38; animation-delay: -2.25s; }
+.sync-helix > :nth-child(4) > .sync-rung { --s: -0.2; animation-delay: -3.375s; }
+.sync-helix > :nth-child(5) > .sync-rung { --s: -0.71; animation-delay: -4.5s; }
+.sync-helix > :nth-child(6) > .sync-rung { --s: -0.98; animation-delay: -5.625s; }
+.sync-helix > :nth-child(7) > .sync-rung { --s: -0.92; animation-delay: -6.75s; }
+.sync-helix > :nth-child(8) > .sync-rung { --s: -0.56; animation-delay: -7.875s; }
+.sync-helix > :nth-child(9) > .sync-rung { --s: 0; animation-delay: -9s; }
+.sync-helix > :nth-child(10) > .sync-rung { --s: 0.56; animation-delay: -10.125s; }
+.sync-helix > :nth-child(11) > .sync-rung { --s: 0.92; animation-delay: -11.25s; }
+.sync-helix > :nth-child(12) > .sync-rung { --s: 0.98; animation-delay: -12.375s; }
+.sync-helix > :nth-child(13) > .sync-rung { --s: 0.71; animation-delay: -13.5s; }
+.sync-helix > :nth-child(14) > .sync-rung { --s: 0.2; animation-delay: -14.625s; }
+.sync-helix > :nth-child(15) > .sync-rung { --s: -0.38; animation-delay: -15.75s; }
+.sync-helix > :nth-child(16) > .sync-rung { --s: -0.83; animation-delay: -16.875s; }
+.sync-rung circle { filter: drop-shadow(0 0 3px var(--accent)); }
+.sync-mark { opacity: 0; animation: hxMark 12s ease-in-out infinite; }
+.sync-unwind { animation: hxUnwind 12s ease-in infinite; }
+.sync-helix { animation: hxHelix 12s ease-in-out infinite; }
+.sync-glitch { opacity: 0; animation: hxGlitch 7s steps(1) infinite; }
+.sync-word { margin-top: 8px; font-family: var(--mono); font-size: 14px; letter-spacing: 0.5em; padding-left: 0.5em; color: var(--mute); animation: hxPulse 4s ease-in-out infinite; }
+/* The tab is hidden (app.ts): nothing moves, so nothing is drawn for nobody. */
+[data-hidden] .sync *, [data-hidden] .sync { animation-play-state: paused !important; }
+@keyframes hxTurn { 0%, 100% { transform: scaleX(1); } 50% { transform: scaleX(-1); } }
+@keyframes hxMark { 0%, 14% { opacity: 1; } 28% { opacity: 0; } 94% { opacity: 0; } 100% { opacity: 1; } }
+@keyframes hxUnwind { 0%, 14% { transform: scaleY(1); } 28%, 100% { transform: scaleY(2.4); } }
+@keyframes hxHelix { 0%, 14% { opacity: 0; } 30%, 88% { opacity: 1; } 96%, 100% { opacity: 0; } }
+@keyframes hxGlitch {
+  0%, 18%, 22%, 51%, 55%, 83%, 100% { opacity: 0; transform: translateX(0); }
+  19%, 54% { opacity: 1; transform: translateX(-14px); }
+  20%, 82% { opacity: 1; transform: translateX(18px); }
+}
+@keyframes hxDrift { from { transform: translate(-48px, -24px); } to { transform: translate(48px, 24px); } }

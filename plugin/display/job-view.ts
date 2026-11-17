@@ -7,7 +7,7 @@ import type { JobPage } from './shape.ts';
 import { clock, span, type Tone } from './view.ts';
 
 export type JobPageView = {
-  id: number;
+  id: number | string;
   title: string;
   /** The header's facts, in order: only the ones the job has. */
   facts: { k: string; v: string; href?: string; /** Another page of the display. */ page?: string }[];
@@ -34,13 +34,14 @@ const SEVERITY: Record<string, Tone> = { blocker: 'fail', 'should-fix': 'ask', n
 /** A time as the page shows it: in UTC, so every screen that shows the job says the same. */
 export const when = (iso: string) => `${iso.slice(0, 10)} ${iso.slice(11, 16)} UTC`;
 
-/** The job page for one moment: `now` is Helix's clock in ms. */
-export function jobView(p: JobPage, now: number): JobPageView {
+/** The job page for one moment: `now` is Helix's clock in ms; `local` for the local display, which has no people pages. */
+export function jobView(p: JobPage, now: number, local = false): JobPageView {
   const j = p.job;
   const pr = j.pr ? /(\d+)\/?$/.exec(j.pr)?.[1] : undefined;
   const facts = [
-    { k: 'project', v: j.repo }, { k: 'person', v: j.person, page: personPage(j.person) }, { k: 'state', v: j.state },
+    { k: 'project', v: j.repo }, { k: 'person', v: j.person, ...(local ? {} : { page: personPage(j.person) }) }, { k: 'state', v: j.state },
     ...(j.outcome ? [{ k: 'outcome', v: OUTCOMES[j.outcome] ?? j.outcome }] : []),
+    ...(j.resume ? [{ k: 'carry on', v: j.resume }] : []),
     ...(j.pr ? [{ k: 'PR', v: pr ? `#${pr}` : j.pr, ...(/^https?:\/\//.test(j.pr) ? { href: j.pr } : {}) }] : []),
     ...(j.cost_usd !== undefined ? [{ k: 'cost', v: `$${j.cost_usd.toFixed(2)}` }] : []),
     { k: 'submitted', v: when(j.submitted) },
@@ -69,7 +70,7 @@ export function jobView(p: JobPage, now: number): JobPageView {
     questions: (p.questions ?? []).map((q) => ({ question: q.question, answer: q.answer ?? 'Not answered yet.', answered: q.answer !== undefined })),
     shots: (p.shots?.files ?? []).map((f) => ({
       name: (f.split('/').at(-1) ?? f).replace(/\.[^.]+$/, ''),
-      src: `/jobs/${j.id}/shots/${f.split('/').map(encodeURIComponent).join('/')}`,
+      src: `/jobs/${encodeURIComponent(j.id)}/shots/${f.split('/').map(encodeURIComponent).join('/')}`,
     })),
     log: p.log,
     follow: j.state === 'running' || j.state === 'queued',

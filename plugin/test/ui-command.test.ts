@@ -1,32 +1,11 @@
 import { strict as assert } from 'node:assert';
 import { spawnSync } from 'node:child_process';
-import { chmodSync, existsSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { delimiter, join } from 'node:path';
-import { setTimeout as sleep } from 'node:timers/promises';
+import { join } from 'node:path';
 import { test } from 'node:test';
-import './helpers.ts';
+import { cli, fakeOpener } from './helpers.ts';
 import { saveHelixLogin } from '../src/remote.ts';
-
-const cli = join(import.meta.dirname, '..', 'src', 'cli.ts');
-
-/** The system's opener, faked: `open` and `xdg-open` on PATH that write down the address they were given. */
-function fakeOpener(): { path: string; opened: () => Promise<string | undefined> } {
-  const bin = mkdtempSync(join(tmpdir(), 'animus-opener-'));
-  const out = join(bin, 'opened.txt');
-  for (const name of ['open', 'xdg-open']) {
-    writeFileSync(join(bin, name), `#!/bin/sh\nprintf '%s' "$1" > "${out}"\n`);
-    chmodSync(join(bin, name), 0o755);
-  }
-  return {
-    path: `${bin}${delimiter}${process.env.PATH}`,
-    // The opener runs detached, so it may write after animus has exited.
-    opened: async () => {
-      for (let i = 0; i < 20 && !existsSync(out); i++) await sleep(50);
-      return existsSync(out) ? readFileSync(out, 'utf8') : undefined;
-    },
-  };
-}
 
 function animus(args: string[], env: NodeJS.ProcessEnv) {
   const { HELIX_URL: _url, HELIX_TOKEN: _token, ...rest } = process.env;

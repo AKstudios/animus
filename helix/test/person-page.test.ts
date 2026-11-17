@@ -63,11 +63,11 @@ test('every person named on the overview links to their person page', () => {
     job(1, { state: 'running', started: '2026-11-17T11:30:00Z' }),
     job(2, { person: 'ben' }),
     job(3, { state: 'ended', outcome: 'needs-input', question: 'Which?', person: 'cy' }),
-    job(4, { state: 'ended', outcome: 'pr', pr: 'https://github.com/o/app/pull/9', person: 'dee' }),
-  ] };
+    job(4, { state: 'ended', outcome: 'failed', person: 'dee' }),
+  ], prs: [{ job: 5, repo: 'app', person: 'eve', number: 9, title: 'x', url: 'https://github.com/o/app/pull/9', draft: false, created: '2026-11-17T11:00:00Z' }] };
   const v = view(d, null, NOW);
-  assert.deepEqual([...v.live, ...v.waiting, ...v.recent].map((j) => [j.person, j.personPage]), [
-    ['ana lee', '/people/ana%20lee'], ['cy', '/people/cy'], ['ben', '/people/ben'], ['dee', '/people/dee'],
+  assert.deepEqual([...v.live, ...v.waiting, ...v.recent, ...v.prs].map((j) => [j.person, j.personPage]), [
+    ['ana lee', '/people/ana%20lee'], ['cy', '/people/cy'], ['ben', '/people/ben'], ['dee', '/people/dee'], ['eve', '/people/eve'],
   ]);
   assert.equal(personPage('ana lee'), '/people/ana%20lee');
 });

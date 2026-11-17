@@ -16,14 +16,13 @@ import { parseSkills, type PersonalSkill } from '../../plugin/src/personal.ts';
 import { hashToken, helixHome, type Config } from './config.ts';
 import { display, jobPage, jobShot, peoplePage, personPage } from './display.ts';
 import { inviteDetails, joinHelix, takeOff, verifyInChild, type Verify } from './join.ts';
+import { openPrs, type ListPrs } from './open-prs.ts';
 import { addProject, checkInChild, projectView, removeProject, type StartCheck } from './projects.ts';
 import type { Store } from './store.ts';
 import { Refused, type Submission, type Supervisor } from './supervisor.ts';
-import { asset } from './ui.ts';
+import { asset, CSP } from '../../plugin/src/assets.ts';
 
 const MAX_BODY = 1024 * 1024;
-/** The display loads only what Helix serves and talks only to Helix. A job's screenshots need a token, so the page fetches them and shows them as blobs. */
-const CSP = "default-src 'none'; script-src 'self'; style-src 'self'; font-src 'self'; img-src 'self' data: blob:; connect-src 'self'; base-uri 'none'; form-action 'none'";
 
 /** Who holds the request's token. Only its hash is looked up: a token is long and random, so the lookup's timing gives nothing away. */
 function whoIs(store: Store, req: IncomingMessage): string | undefined {
@@ -54,12 +53,15 @@ export function serve(opts: {
   startCheck?: StartCheck;
   /** Helix's home: where projects' clones and checks go. */
   home?: string;
+  /** How a project's open PRs are listed on GitHub, with a person's token; by default GitHub's API. */
+  listPrs?: ListPrs;
 }): Server {
   const { config, store, supervisor } = opts;
   const verify = opts.verify ?? verifyInChild;
   const home = opts.home ?? helixHome();
   const startCheck = opts.startCheck ?? checkInChild(store, home);
   const version = animusVersion();
+  const prs = openPrs({ store, ...(opts.listPrs ? { list: opts.listPrs } : {}) });
   return createServer((req, res) => {
     const send = (status: number, value: unknown) => {
       res.writeHead(status, { 'content-type': 'application/json', 'helix-version': version });
@@ -75,7 +77,7 @@ export function serve(opts: {
         return res.end(file.body);
       }
       // What the display shows needs no token either: Helix listens on a private network only, and this only reads.
-      if (req.method === 'GET' && url.pathname === '/display') return send(200, display(opts));
+      if (req.method === 'GET' && url.pathname === '/display') return send(200, { ...display(opts), prs: await prs() });
       // Which release this is, for `animus doctor`; it says no more than the display does.
       if (req.method === 'GET' && url.pathname === '/version') return send(200, { version });
       // A client from a release this one cannot work with is told how to catch up, before anything is done for it.

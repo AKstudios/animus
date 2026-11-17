@@ -16,6 +16,7 @@ import { factoryVersion, jobOf, onPath, runJob, uiJobOf } from './pipeline.ts';
 import { describeNumbers, numbers, refreshOutcomes } from './outcomes.ts';
 import { prFacts, publish, pushEvidence } from './pr.ts';
 import { personalFor, readSkillsFile, skillsForRole, snapshotSkills, whereToRun, type PersonalSkill, type Where } from './personal.ts';
+import { listenLocal, localServer } from './local-display.ts';
 import { loadProfile } from './profile.ts';
 import { describePlan, loadFactory, resolvePlan } from './profiles.ts';
 import { git, tryGit, AnimusError, GitError } from './proc.ts';
@@ -107,6 +108,9 @@ With Helix, the machine that runs jobs for everyone:
   animus result <id>        One job as JSON; exits 0 once it ended in a pull request.
   animus answer <id> <text> Answer a job's question; it is queued again.
   animus cancel <id>
+  animus ui                 Show the jobs this machine ran in your browser, by
+                            project, at 127.0.0.1 (port 7420 or the next free
+                            one). Ctrl-C stops it.
   animus ui --helix         Open Helix's display in your browser, signed in.
 
 Inside a job's worktree (the implementer runs these):
@@ -117,6 +121,9 @@ Inside a job's worktree (the implementer runs these):
   animus version`;
 
 const say = (line: string) => console.error(line);
+
+/** Where `animus ui` listens first; the next free port when it is taken. */
+const LOCAL_PORT = 7420;
 
 /** The submitter's skills for a job here: given as a file (how Helix passes them), none on Helix, else from their config. */
 function localSkills(repo: string, file: string | undefined): PersonalSkill[] {
@@ -310,6 +317,15 @@ async function main(argv: string[]): Promise<number> {
         // The token goes only to the browser, which keeps it and takes it out of the address bar.
         openPage(`${base}/#token=${encodeURIComponent(login.token)}`);
         say(`Opening ${base} in your browser, signed in${login.name ? ` as ${login.name}` : ''}. If none opens, open ${base} and paste your Helix token from ${login.from}.`);
+        return 0;
+      }
+      if (command === 'ui' && !positionals.length) {
+        const server = localServer();
+        const url = `http://127.0.0.1:${await listenLocal(server, LOCAL_PORT)}`;
+        openPage(url);
+        say(`The jobs this machine ran, at ${url}. Press Ctrl-C to stop.`);
+        // Listening keeps the process alive; Ctrl-C ends it cleanly.
+        await new Promise<void>((done) => { process.once('SIGINT', () => { server.close(); done(); }); });
         return 0;
       }
       const root = git(cwd, ['rev-parse', '--show-toplevel']);

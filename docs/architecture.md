@@ -78,7 +78,7 @@ A job leaves nothing in the target repository but its branch.
 | Where | What |
 | --- | --- |
 | `~/.animus/runs.jsonl` | One line per run: job, labels, outcome, cost, duration, PR |
-| `~/.animus/jobs/<job>/` | Its state, spec, gate output, reviews, PR body, screenshots, transcripts, `progress.json` |
+| `~/.animus/jobs/<job>/` | Its state, spec, gate output, reviews, PR body, screenshots, transcripts, `progress.json` (stage, who, and the `pid` and `host` of the `animus run` writing it: a job with no outcome is running only on that host with that process alive, and stopped otherwise) |
 | `../.worktrees/<repo>/` | The job's worktree, removed when the job ends unless `--keep` |
 | `<repo>/.git/animus/installs/` | The install cache: the two saves used last per install path, and any used in the last hour |
 | `~/.claude/projects/<worktree>/` | Claude Code's transcripts of the job's sessions, kept |
@@ -132,7 +132,9 @@ Helix serves; ADR 0004), `bin/animus`.
 | `projects.ts` | Adding a project and its check |
 | `check.ts` | Trying a person's GitHub and Claude tokens |
 | `container.ts` | Running a job in its own container |
-| `display.ts`, `ui.ts` | What the display page shows, and serving it (`plugin/display/`) |
+| `local-display.ts` | `animus ui`: the display page's local source, reading `~/.animus` |
+| `job-folder.ts`, `assets.ts` | Reading a job's folder for a job page, and serving the page's files (`plugin/display/`); Helix's display uses both too |
+| `display.ts` | What the display page shows from Helix |
 
 `helix/deploy/` holds the job image's Dockerfile and the Ubuntu setup
 scripts.

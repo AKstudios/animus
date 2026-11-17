@@ -170,7 +170,11 @@ process ends, however it ends, so a cancelled job leaves nothing serving.
 ## The display
 
 Helix serves a page at its own address showing the slots, each running job's
-stage, the queue, jobs waiting for an answer, and jobs that ended. It needs
+stage, the queue, jobs waiting for an answer, the ten newest open pull
+requests its jobs opened (drafts marked), and the jobs that failed or were
+cancelled. Helix finds the open PRs by asking GitHub, once a minute per
+project, with the GitHub token of the person whose job opened one; a PR
+whose person has left Helix is not listed. It needs
 no sign-in: anyone who can reach Helix can read it. It only reads; submitting,
 answering and cancelling need a person's token. Click a project to narrow the
 page to it; `?theme=dark` or `?theme=light` fixes the theme.
@@ -195,6 +199,13 @@ and their activity newest first: what they submitted, answered (with the
 answer's text), cancelled, joined, left, and the projects they added or
 removed. Their jobs come from the jobs table, so jobs from before Helix kept
 activity show too. Someone who has left keeps a page that says so.
+
+The same page is also the local display, `animus ui`, which answers the same
+shapes from `~/.animus` with `local` set on `GET /display`. Its job ids are
+the jobs' folder names (`/jobs/<name>`), it needs no sign-in, and it has no
+people pages: those are Helix's alone. The files both serve and the reading of
+a job's folder live in the plugin (`plugin/src/assets.ts`,
+`plugin/src/job-folder.ts`), which Helix imports.
 
 A job page shows the job's project, person, state, outcome, pull request,
 cost and times; its spec as submitted; how long it spent in each stage,
@@ -222,7 +233,7 @@ the display's own request for a job page's data sends none.
 | `GET /people/page-data` | What the people list shows, for any person |
 | `GET /people/<name>/page-data[?before=<job id>]` | What a person's page shows: their numbers, thirty jobs older than that one, and all their activity; 404 for a name Helix never heard of |
 | `GET /jobs/<id>/shots/<name>` | One of a job's screenshots, by its name in `shots/manifest.json`; nothing outside its shots folder |
-| `GET /display` | What the display shows, as JSON |
+| `GET /display` | What the display shows, as JSON, with the open PRs of the jobs (`prs`) |
 | `GET /version` | Helix's version |
 | `POST /invite` | Who an invite code is for, and the projects there |
 | `POST /join` | Join with a code and both tokens; returns the Helix token |

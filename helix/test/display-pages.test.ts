@@ -56,7 +56,7 @@ test('a job page and the people pages load the display, also when the address is
 test('the display draws the page its address names', () => {
   assert.deepEqual(
     ['/', '/jobs/12', '/people', '/people/ana%20lee', '/jobs/x', '/elsewhere'].map(route),
-    [{ page: 'overview' }, { page: 'job', id: 12 }, { page: 'people' }, { page: 'people', name: 'ana lee' }, { page: 'overview' }, { page: 'overview' }],
+    [{ page: 'overview' }, { page: 'job', id: 12 }, { page: 'people' }, { page: 'people', name: 'ana lee' }, { page: 'job', id: 'x' }, { page: 'overview' }],
   );
 });
 
@@ -73,7 +73,7 @@ test('every job on the overview links to its job page', () => {
   ] };
   const v = view(d, null, now);
   assert.deepEqual([...v.live, ...v.waiting, ...v.recent].map((j) => [j.id, j.page]), [
-    [1, '/jobs/1'], [3, '/jobs/3'], [2, '/jobs/2'], [5, '/jobs/5'], [4, '/jobs/4'],
+    [1, '/jobs/1'], [3, '/jobs/3'], [2, '/jobs/2'], [5, '/jobs/5'],
   ]);
 });
 

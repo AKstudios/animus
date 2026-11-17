@@ -34,6 +34,30 @@ clients with how to update.
   at a time, each linking to its job page (those from before activity was kept
   too), and their activity newest first, and says when they left, from a new
   authenticated route, `GET /people/<name>/page-data[?before=<job id>]`.
+- `animus ui` serves the local display on 127.0.0.1 (port 7420 or the next
+  free one) and opens it: every job in `~/.animus`, grouped by project, newest
+  first, each with its job page, and no people pages or sign-in. Ctrl-C stops
+  it. The display page tells its source apart by the new `local` flag on
+  `Display`; `animus ui --helix` is unchanged. Not breaking: Helix's API and
+  the job's files keep their shape.
+- `animus run` records its process in the job's `progress.json` (`pid` and
+  `host`, added to `stage`, `who` and `at`). A job counts as running only on
+  that host with that process alive; one whose process is gone and that has no
+  outcome is stopped, and the local display's reader of `~/.animus` shows it
+  with `animus resume <job>` as the way on.
+- With no job running or queued and no project picked, the display's overview
+  shows an original synchronizing-helix animation (inline SVG and CSS only: the
+  Helix mark unwinds into a slowly turning double helix, with glitch fragments
+  and "SYNCHRONIZING") in place of the empty working box. It holds still when
+  the browser asks for reduced motion, pauses while the tab is hidden and
+  drifts slowly so nothing burns into a wall screen. A job that only waits for
+  an answer does not keep it away.
+- The display's overview lists the ten newest open PRs Helix's jobs opened
+  (for the picked project when one is picked), drafts marked, in place of
+  merged and closed ones. Helix lists a project's open PRs on GitHub with the
+  token of the person whose job opened one, at most once a minute per project;
+  a PR whose person has left is not listed. RECENT now keeps only failed and
+  cancelled jobs. `GET /display` gains `prs`.
 - The installers take `join <url> <code>`: after setup they run `animus join`
   with them, so one line installs Animus and joins a Helix
   (`curl -fsSL …/install.sh | bash -s -- join <url> <code>`).

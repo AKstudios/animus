@@ -6,16 +6,16 @@
 // guarded: without it the person is signed out. No DOM here, so it is tested
 // without a browser (helix/test/display-pages.test.ts).
 
-export type Route = { page: 'overview' } | { page: 'job'; id: number } | { page: 'people'; name?: string };
+export type Route = { page: 'overview' } | { page: 'job'; id: number | string } | { page: 'people'; name?: string };
 
-/** A job's own page. */
-export const jobPage = (id: number) => `/jobs/${id}`;
+/** A job's own page: Helix's job numbers, or a local job's own id. */
+export const jobPage = (id: number | string) => `/jobs/${encodeURIComponent(id)}`;
 
 export function route(pathname: string): Route {
-  const job = /^\/jobs\/(\d+)$/.exec(pathname);
-  if (job) return { page: 'job', id: Number(job[1]) };
+  const job = /^\/jobs\/([^/]+)$/.exec(pathname);
   const people = /^\/people(?:\/([^/]+))?$/.exec(pathname);
   try {
+    if (job) return { page: 'job', id: /^\d+$/.test(job[1]!) ? Number(job[1]) : decodeURIComponent(job[1]!) };
     if (people) return people[1] ? { page: 'people', name: decodeURIComponent(people[1]) } : { page: 'people' };
   } catch { /* a name that does not decode: the overview */ }
   return { page: 'overview' };
@@ -50,7 +50,9 @@ export function takeToken(hash: string, storage: Kept): boolean {
 }
 
 /** What a job page says in place of the job, or nothing when it has the job. `status` is how Helix answered for its data. */
-export function jobNotice(id: number, signedIn: boolean, status?: number): { signIn: boolean; text: string } | undefined {
+export function jobNotice(id: number | string, signedIn: boolean, status?: number, local = false): { signIn: boolean; text: string } | undefined {
+  // The local display has no sign-in: its job pages are read as they are.
+  if (local) return status === 404 ? { signIn: false, text: `This machine has no job ${id}.` } : undefined;
   if (!signedIn) {
     return { signIn: true, text: status === 401 ? `Helix did not take that token, so this browser forgot it. Sign in again to see job #${id}.` : `Sign in to see job #${id}. Paste your Helix token: animus join kept it in ~/.animus/helix.json.` };
   }

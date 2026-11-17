@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import { test } from 'node:test';
 import type { Display, DisplayJob } from '../../plugin/display/shape.ts';
 import { clock, span, view } from '../../plugin/display/view.ts';
@@ -41,21 +42,18 @@ test('waiting lists the jobs that ask first, then the queue in order with each j
   assert.deepEqual([v.queued, v.asks], [3, 1]);
 });
 
-test('recent lists ended jobs newest first, each with how it ended, what it took and why', () => {
+test('recent lists only the jobs that failed or were cancelled, newest first, each with what it took and why', () => {
   const v = view(shown([
-    job({ id: 1, state: 'ended', outcome: 'pr', pr: 'https://github.com/o/r/pull/112', started: ago(40), ended: ago(18), cost_usd: 2.1, reason: 'not shown for a pull request' }),
-    job({ id: 2, state: 'ended', outcome: 'draft-pr', pr: 'https://github.com/o/r/pull/31', started: ago(31), ended: ago(0), cost_usd: 3.4, reason: 'the gates still fail after 2 fix round(s):\nFAIL test' }),
+    job({ id: 1, state: 'ended', outcome: 'pr', pr: 'https://github.com/o/r/pull/112', started: ago(40), ended: ago(18) }),
+    job({ id: 2, state: 'ended', outcome: 'draft-pr', pr: 'https://github.com/o/r/pull/31' }),
     job({ id: 3, state: 'ended', outcome: 'failed', ended: ago(5), reason: 'the GitHub token in the env file does not work' }),
     job({ id: 4, state: 'cancelled', started: ago(10), ended: ago(9.25), person: 'ben' }),
     job({ id: 5, state: 'ended', outcome: 'dry-run', started: ago(11), ended: ago(0), cost_usd: 0 }),
     job({ id: 6, state: 'ended', outcome: 'needs-input', question: '?' }),
   ]), null, NOW);
-  assert.deepEqual(v.recent.map((r) => [r.id, r.tag, r.tone, r.meta, r.reason, r.href]), [
-    [5, 'DRY RUN', 'mute', '11m · $0.00', undefined, undefined],
-    [4, 'CANCELLED', 'mute', '45s', undefined, undefined],
-    [3, 'FAILED', 'fail', '', 'the GitHub token in the env file does not work', undefined],
-    [2, 'DRAFT PR #31', 'ask', '31m · $3.40', 'the gates still fail after 2 fix round(s):', 'https://github.com/o/r/pull/31'],
-    [1, 'PR #112', 'ink', '22m · $2.10', undefined, 'https://github.com/o/r/pull/112'],
+  assert.deepEqual(v.recent.map((r) => [r.id, r.tag, r.tone, r.repo, r.person, r.personPage, r.meta, r.reason]), [
+    [4, 'CANCELLED', 'mute', 'app', 'ben', '/people/ben', '45s', undefined],
+    [3, 'FAILED', 'fail', 'app', 'ana', '/people/ana', '', 'the GitHub token in the env file does not work'],
   ]);
 });
 
@@ -74,7 +72,7 @@ test('each project is summed up from its own jobs, and picking one narrows every
     { id: 'app', summary: '1 running · 1 queued · 1 ask', on: false, busy: true, ticks: ['ended', 'failed', 'ask', 'running', 'queued', 'queued'] },
     { id: 'site', summary: '1 queued', on: false, busy: false, ticks: ['queued'] },
   ]);
-  assert.deepEqual([all.title, all.sel, all.live.length, all.waiting.length, all.recent.length], ['All projects', undefined, 1, 3, 3]);
+  assert.deepEqual([all.title, all.sel, all.live.length, all.waiting.length, all.recent.length], ['All projects', undefined, 1, 3, 2]);
 
   const app = view(d, 'app', NOW);
   assert.deepEqual(app.sel, { id: 'app', base: 'main', gates: 'test, typecheck', prs: 1, spent: '$1.75' });
@@ -87,9 +85,9 @@ test('each project is summed up from its own jobs, and picking one narrows every
 
 test('with no job to list, the display says so and how to send one', () => {
   const none = view(shown([], 8), null, NOW);
-  assert.deepEqual(none.empty, { title: 'Nothing is running', text: 'No job has been submitted to this machine yet. From any project, send a spec:', free: '8 of 8 slots free' });
+  assert.deepEqual(none.empty, { title: 'Nothing is running', text: 'No job has been submitted to this machine yet. From any project, send a spec:', free: '8 of 8 slots free', command: 'animus submit <spec file>' });
   const d = shown([job({ repo: 'app', state: 'running', started: ago(1) })], 8);
-  assert.deepEqual(view(d, 'site', NOW).empty, { title: 'No jobs for site yet', text: 'Nobody has sent this project a spec. From its folder, run:', free: '7 of 8 slots free' });
+  assert.deepEqual(view(d, 'site', NOW).empty, { title: 'No jobs for site yet', text: 'Nobody has sent this project a spec. From its folder, run:', free: '7 of 8 slots free', command: 'animus submit <spec file>' });
   assert.equal(view(d, 'app', NOW).empty, undefined);
   assert.equal(view(shown([job({ state: 'queued' })], 1), null, NOW).noLive, 'No agent is working right now. The one slot is free.');
 });
@@ -97,4 +95,27 @@ test('with no job to list, the display says so and how to send one', () => {
 test('times read at a glance', () => {
   assert.deepEqual([clock(0), clock(462_000), clock(7_925_000), clock(-5)], ['00:00', '07:42', '132:05', '00:00']);
   assert.deepEqual([span(45_000), span(60_000), span(22 * 60_000), span(190 * 60_000)], ['45s', '1m', '22m', '3h 10m']);
+});
+
+// Protects: the idle animation only shows when nothing runs or is queued and no project is picked. Fails when: a queued job, a running job or a picked project still gets the animation, or a job waiting for an answer keeps it away.
+test('the idle animation shows only with nothing running or queued and no project picked', () => {
+  const asking = job({ repo: 'app', state: 'ended', outcome: 'needs-input', question: '?' });
+  assert.equal(view(shown([], 8), null, NOW).idle, true);
+  assert.equal(view(shown([asking], 8), null, NOW).idle, true);
+  assert.equal(view(shown([job({ state: 'running', started: ago(1) })], 8), null, NOW).idle, false);
+  assert.equal(view(shown([job({ state: 'queued' })], 8), null, NOW).idle, false);
+  // A job on another project still counts: the slots are machine-wide.
+  assert.equal(view(shown([job({ repo: 'site', state: 'running', started: ago(1) })], 8), 'app', NOW).idle, false);
+  assert.equal(view(shown([asking], 8), 'app', NOW).idle, false);
+  // A picked project Helix no longer has is the same as none picked.
+  assert.equal(view(shown([], 8), 'gone', NOW).idle, true);
+});
+
+// Protects: the idle helix's rungs are out of phase under the CSP (style-src 'self' drops style attributes). Fails when app.ts sets a rung's pose inline, or helix.css lacks a pose and phase for one of the 16 rungs.
+test('the idle helix gives every rung its pose and phase in the stylesheet, not in a style attribute', () => {
+  const css = readFileSync(new URL('../../plugin/display/helix.css', import.meta.url), 'utf8');
+  const app = readFileSync(new URL('../../plugin/display/app.ts', import.meta.url), 'utf8');
+  const phases = [...css.matchAll(/\.sync-helix > :nth-child\((\d+)\) > \.sync-rung \{ --s: [-\d.]+; animation-delay: (-?[\d.]+)s; \}/g)].map((m) => m[2]);
+  assert.equal(new Set(phases).size, 16);
+  assert.doesNotMatch(app, /style="/);
 });
