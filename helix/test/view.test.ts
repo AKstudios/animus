@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import type { Display, DisplayJob } from '../src/display.ts';
-import { clock, span, view } from '../ui/view.ts';
+import type { Display, DisplayJob } from '../../plugin/display/shape.ts';
+import { clock, span, view } from '../../plugin/display/view.ts';
 
 const NOW = Date.parse('2026-11-16T12:00:00Z');
 const ago = (minutes: number) => new Date(NOW - minutes * 60_000).toISOString();

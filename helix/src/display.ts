@@ -1,37 +1,18 @@
-// What the display shows (helix/ui): every job with where it is now, the
-// slots, and each repository's base branch and gates. Read fresh on every
+// What the display (plugin/display) shows: every job with where it is now,
+// the slots, and each repository's base branch and gates. Read fresh on every
 // request from the table, Animus's job files and each clone's profile, so
 // Helix keeps nothing for it.
 import { statSync } from 'node:fs';
 import { hostname } from 'node:os';
 import { join } from 'node:path';
-import { STAGES, type Progress } from '../../plugin/src/log.ts';
+import type { Display, DisplayJob, DisplayRepo } from '../../plugin/display/shape.ts';
+import { STAGES } from '../../plugin/src/log.ts';
 import { loadProfile, PROFILE_PATH } from '../../plugin/src/profile.ts';
 import { readyRepos, type Config } from './config.ts';
 import type { HelixJob, Store } from './store.ts';
 import type { Supervisor } from './supervisor.ts';
 
-/** A job without what is only Helix's business: the spec's path, the pid, the answer's text. */
-export type DisplayJob = Omit<HelixJob, 'spec' | 'pid' | 'answer' | 'draft' | 'interrupted'> & {
-  /** Why a queued job is in the queue a second time. */
-  resumed?: 'answer' | 'restart';
-  /** Running jobs: the stage and who is working, as the job last said. */
-  progress?: Progress;
-  /** Running jobs: the last line of the job's output. */
-  now?: string;
-};
-
-export type DisplayRepo = { name: string; base?: string; gates?: string[] };
-
-export type Display = {
-  name: string;
-  /** Helix's clock, so a display with another clock still counts elapsed time right. */
-  at: string;
-  slots: number;
-  stages: readonly string[];
-  repos: DisplayRepo[];
-  jobs: DisplayJob[];
-};
+export type { Display, DisplayJob, DisplayRepo };
 
 /** The most jobs the display is sent, newest kept. */
 const SHOWN = 200;

@@ -1,7 +1,7 @@
 // The display in the browser: asks Helix for /display every two seconds and
 // draws what view.ts makes of the answer. It needs no sign-in.
 // It only reads. Sent to the browser with its types stripped (helix/src/ui.ts).
-import type { Display } from '../src/display.ts';
+import type { Display } from './shape.ts';
 import { view, type Live, type Project, type Recent, type View, type Waiting } from './view.ts';
 
 const POLL_MS = 2000;

@@ -1,7 +1,7 @@
 // What the display says, worked out from what Helix sent: which jobs go in
 // which section, and every label, note and count. No DOM here, so the
 // wording is tested without a browser (helix/test/view.test.ts).
-import type { Display, DisplayJob } from '../src/display.ts';
+import type { Display, DisplayJob } from './shape.ts';
 
 export type Tone = 'ink' | 'mute' | 'ask' | 'fail';
 export type Tick = 'running' | 'ask' | 'failed' | 'queued' | 'ended';
