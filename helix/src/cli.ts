@@ -246,9 +246,11 @@ function main(argv: string[]): number | undefined | Promise<number> {
     case 'cleanup': {
       const days = values.days === undefined ? KEEP_DAYS : Number(values.days);
       if (!Number.isFinite(days) || days < 0) throw new AnimusError(`--days takes a number of days, not ${values.days}`);
-      const contained = Boolean(loadConfig().container);
-      const ok = withStore((store) => helixCleanup(store, { home: helixHome(), contained, days, dryRun: Boolean(values['dry-run']), version: animusVersion() }, (line) => console.log(line)));
-      return ok ? 0 : 1;
+      const config = loadConfig();
+      const store = openHelix();
+      return helixCleanup(store, { home: helixHome(), contained: Boolean(config.container), days, dryRun: Boolean(values['dry-run']), version: animusVersion(), fresh: (person) => freshToken(store, config, person) }, (line) => console.log(line))
+        .then((ok) => (ok ? 0 : 1))
+        .finally(() => store.close());
     }
     case 'add-repo':
       if (!positionals[0] || !positionals[1]) throw new AnimusError('usage: helix add-repo <name> <dir>');

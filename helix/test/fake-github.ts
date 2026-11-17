@@ -13,6 +13,8 @@ export type FakeGitHub = GitHubUrls & {
   approve(userCode: string, login: string): void;
   /** The person cancels at github.com/login/device. */
   deny(userCode: string): void;
+  /** An access token's eight hours are up: the API answers 401 for it; its refresh token still works. */
+  expire(accessToken: string): void;
   /** How many polls to answer with slow_down before anything else. */
   slowDowns: number;
   /** The repositories the app is installed on, by owner. */
@@ -43,6 +45,7 @@ export async function fakeGitHub(opts: { clientId?: string; deviceFlow?: boolean
     web: '', api: '', calls: [], slowDowns: 0, installed: {}, access: {},
     approve: (userCode, login) => Object.assign(devices.find((d) => d.user === userCode)!, { state: 'approved', login }),
     deny: (userCode) => { devices.find((d) => d.user === userCode)!.state = 'denied'; },
+    expire: (accessToken) => { access.delete(accessToken); },
     close: () => new Promise((r) => { server.close(() => r()); }),
   };
   const reaches = (login: string, owner: string, repo: string) => !fake.access[login] || fake.access[login]!.includes(`${owner}/${repo}`);

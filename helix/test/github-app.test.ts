@@ -1,12 +1,16 @@
 import assert from 'node:assert/strict';
-import { chmodSync, mkdtempSync, readFileSync, statSync, writeFileSync } from 'node:fs';
+import { chmodSync, mkdirSync, mkdtempSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
 import { parse } from 'yaml';
 import type { AddressInfo } from 'node:net';
 import { describeUnreachable, githubLogin, signInWithGitHub } from '../../plugin/src/join.ts';
+import { inviteDetails } from '../../plugin/src/remote.ts';
+import type { Display } from '../../plugin/display/shape.ts';
+import { animusCleanups } from '../src/cleanup.ts';
 import { configFile, saveConfig, type Config } from '../src/config.ts';
+import { personDirs } from '../src/container.ts';
 import { beforeJob, checkSignIn, deviceCode, freshToken, githubSetup, githubUser, pollDevice, reachableRepos, refreshTokens } from '../src/github-app.ts';
 import { credentialsFile, invite, type Verify } from '../src/join.ts';
 import { checkInChild } from '../src/projects.ts';
@@ -124,7 +128,13 @@ async function helixWithApp(github: FakeGitHub) {
   const launched: Record<string, string>[] = [];
   const supervisor = supervise({ store, config, home, launch: (_job, _dir, env) => { launched.push(env); return { command: process.execPath, args: ['-e', ''] }; }, prepare: beforeJob(store, config, github), notify: slackNotifier(slack.transport, store) });
   const h = { url: '', home, config, store, supervisor, launched, slack, approver: { code: '', login: '' }, stop: () => {} };
-  const server = serve({ config, store, supervisor, verify, github: { urls: github, holdSeconds: 0, wait: async () => { github.approve(h.approver.code, h.approver.login); } } });
+  // GitHub's open PRs of a project: PR 7 of acme/app, for a token the fake GitHub takes.
+  const listPrs = async (_repo: string, token: string) => {
+    const res = await fetch(`${github.api}/user`, { headers: { authorization: `Bearer ${token}` } });
+    if (!res.ok) throw new Error(`GitHub answered ${res.status}`);
+    return [{ html_url: 'https://github.com/acme/app/pull/7', number: 7, title: 'Add login', created_at: '2026-11-17T10:00:00Z' }];
+  };
+  const server = serve({ config, store, supervisor, verify, listPrs, github: { urls: github, holdSeconds: 0, wait: async () => { github.approve(h.approver.code, h.approver.login); } } });
   await new Promise<void>((r) => { server.listen(0, '127.0.0.1', r); });
   h.url = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
   h.stop = () => { supervisor.stop(); server.close(); store.close(); };
@@ -256,6 +266,37 @@ test('a project check refreshes its adder\'s sign-in first, and fails the projec
   assert.match(reason!, /run `animus github login`/);
 });
 
+// Protects: the display's open PRs on a Helix with the app. Fails when: GitHub is asked with the access token from join after its eight hours, so the PRs drop off.
+test('the display asks GitHub for open PRs with a refreshed token once the access token has expired', async () => {
+  const github = await fakeGitHub();
+  const h = await helixWithApp(github);
+  await joinCleo(h);
+  github.expire('ghu_1');
+  h.store.add({ state: 'ended', person: 'cleo', repo: 'app', spec: '', title: 'Add login', draft: false, submitted: '2026-11-17T10:00:00Z', outcome: 'pr', pr: 'https://github.com/acme/app/pull/7' });
+
+  const d = (await (await fetch(`${h.url}/display`)).json()) as Display;
+  h.stop();
+  await github.close();
+
+  assert.deepEqual(d.prs?.map((p) => [p.number, p.person]), [[7, 'cleo']]);
+});
+
+// Protects: the daily animus cleanup on a Helix with the app. Fails when: it runs with the access token from join after its eight hours, so no PR's state can be read.
+test('animus cleanup runs with a refreshed token once the access token has expired', async () => {
+  const github = await fakeGitHub();
+  const h = await helixWithApp(github);
+  await joinCleo(h);
+  github.expire('ghu_1');
+  mkdirSync(join(personDirs(h.home, 'cleo').animus, 'jobs'), { recursive: true });
+
+  const [run] = await animusCleanups(h.store, { home: h.home, contained: true, fresh: (person) => freshToken(h.store, h.config, person, github) });
+  const user = await githubUser(run!.env!.GH_TOKEN!, github);
+  h.stop();
+  await github.close();
+
+  assert.equal(user.login, 'cleo-gh');
+});
+
 // Protects: criteria 2 and 3. Fails when: join still needs a GitHub token, the person is not joined as the login that approved, their tokens are not kept, or an unreachable project is not named with the install link.
 test('join shows GitHub\'s code, opens its page, waits for approval and joins as the approving login, naming the projects the app cannot reach', async () => {
   const github = await fakeGitHub();
@@ -264,11 +305,14 @@ test('join shows GitHub\'s code, opens its page, waits for approval and joins as
   h.approver = { code: 'WDJB-MJH1', login: 'cleo-gh' };
   const io = terminal();
 
+  // animus join takes the GitHub sign-in over a pasted token only when the invite says the Helix has the app.
+  const details = await inviteDetails(h.url, code);
   const joined = await signInWithGitHub(h.url, code, 'sk-ant-oat01-cleo', undefined, io);
   const person = h.store.person('cleo');
   h.stop();
   await github.close();
 
+  assert.equal(details.github_app, true);
   assert.match(io.said.join('\n'), /Type WDJB-MJH1 at http:\/\/127\.0\.0\.1:\d+\/login\/device/);
   assert.deepEqual(io.opened, [`${github.web}/login/device`]);
   assert.deepEqual([joined.name, joined.github, person?.github], ['cleo', 'cleo-gh', 'cleo-gh']);

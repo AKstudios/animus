@@ -19,6 +19,7 @@ import { animusVersion, compatible } from '../../plugin/src/version.ts';
 import { parseSkills, type PersonalSkill } from '../../plugin/src/personal.ts';
 import { hashToken, helixHome, type Config } from './config.ts';
 import { display, jobPage, jobShot, peoplePage, personPage } from './display.ts';
+import { freshToken } from './github-app.ts';
 import { invite, inviteDetails, joinHelix, loginDevice, relogin, startDevice, StillWaiting, takeOff, verifyInChild, type JoinGitHub, type Verify } from './join.ts';
 import { openPrs, type ListPrs } from './open-prs.ts';
 import { isOwner, requireOwner } from './owner.ts';
@@ -91,7 +92,7 @@ export function serve(opts: {
       throw err;
     }
   };
-  const prs = openPrs({ store, ...(opts.listPrs ? { list: opts.listPrs } : {}) });
+  const prs = openPrs({ store, fresh: (person) => freshToken(store, config, person, opts.github?.urls), ...(opts.listPrs ? { list: opts.listPrs } : {}) });
   return createServer((req, res) => {
     const send = (status: number, value: unknown) => {
       res.writeHead(status, { 'content-type': 'application/json', 'helix-version': version });
