@@ -65,6 +65,9 @@ clients with how to update.
   keeps them in `~/.helix/credentials/slack.env` and turns the bot on in
   `config.yaml` (`slack: {enabled, owner}`). A refused token is reported with
   Slack's reason and nothing is written.
+- `helix github setup <client-id>` proves Helix's GitHub App's client ID with
+  a device-code request and writes `github: {client_id}` to `config.yaml`. An
+  ID GitHub refuses is reported with GitHub's reason and nothing is written.
 - With `slack.enabled` in `config.yaml`, `helix serve` connects to Slack over
   Socket Mode: every envelope is acknowledged at once, and a socket Slack
   drops is replaced. With it off, Helix opens no connection to Slack.

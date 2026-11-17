@@ -35,6 +35,8 @@ export type Config = {
   owner?: string;
   /** The Slack bot, set by helix slack setup; its tokens are in credentials/slack.env. Its owner is the Slack user linked to owner. */
   slack?: { enabled: boolean };
+  /** Helix's GitHub App, set by helix github setup (github-app.ts): people join with its device flow instead of a pasted token. */
+  github?: { client_id: string };
 };
 
 const DEFAULTS: Config = { host: '127.0.0.1', port: 7420, slots: 2 };

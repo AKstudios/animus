@@ -20,6 +20,7 @@ import { INVITE_HOURS, invite, takeOff } from './join.ts';
 import { ask } from '../../plugin/src/join.ts';
 import { describeInvite, describeRemoval } from '../../plugin/src/remote.ts';
 import { moveSlackOwner, setOwner } from './owner.ts';
+import { githubSetup } from './github-app.ts';
 import { slackEnvFile, slackOwner, slackSetup, slackWeb } from './slack-api.ts';
 import { startSlack } from './slack-socket.ts';
 import { slackBot, slackInvite, slackNotifier } from './slack.ts';
@@ -122,6 +123,11 @@ const USAGE = `helix: runs Animus jobs for several people on one machine
         it links to the owner (helix owner first). Both tokens are tried
         against Slack, then kept in ${helixHome()}/credentials/slack.env;
         config.yaml gets slack: {enabled: true}.
+  helix github setup <client-id>
+        Use Helix's GitHub App: its client ID (on GitHub, the app's
+        settings, under About) is tried with a device-code request, then
+        kept in config.yaml as github: {client_id}. An ID GitHub refuses is
+        reported with GitHub's reason, and nothing is written.
   helix check [<name>]
         Try each person's credentials against GitHub and Claude: who the
         GitHub token is, when it ends, whether it may push to each repository,
@@ -305,6 +311,12 @@ function main(argv: string[]): number | undefined | Promise<number> {
     case 'slack':
       if (positionals[0] !== 'setup') throw new AnimusError('usage: helix slack setup');
       return setupSlack();
+    case 'github':
+      if (positionals[0] !== 'setup' || !positionals[1]) throw new AnimusError('usage: helix github setup <client-id>');
+      return githubSetup(positionals[1]).then(() => {
+        console.log(`GitHub took the client ID: config.yaml has github: {client_id: ${positionals[1]!.trim()}}. Restart helix serve for people to join with GitHub's sign-in.`);
+        return 0;
+      });
     case 'image':
       return buildImage() ? 0 : 1;
     case 'upgrade':
