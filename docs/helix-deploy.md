@@ -67,14 +67,16 @@ apps to the workspace.
 3. **Basic Information**, **App-Level Tokens**, **Generate Token and
    Scopes**: any name, the scope `connections:write`. Keep the token
    (`xapp-…`).
-4. In Slack, open your own profile, **⋮**, **Copy member ID** (`U…`). That
-   Slack user is the bot's owner, the only one who may invite and link.
+4. In Slack, open the owner's profile, **⋮**, **Copy member ID** (`U…`).
+   That Slack user is the bot's owner, the only one who may invite and link.
 5. Check `url` is set in `config.yaml`: the line the bot DMs joins at it.
-6. On the Helix machine, as Helix's account: `helix/bin/helix slack setup`.
-   It asks for the two tokens and your member ID, tries both tokens against
-   Slack, keeps them in `~/.helix/credentials/slack.env` (mode 600) and adds
-   `slack: {enabled: true, owner: U…}` to `config.yaml`. A token Slack
-   refuses is reported with Slack's reason, and nothing is written.
+6. On the Helix machine, as Helix's account, name the owner first if there
+   is none (`helix/bin/helix owner <person>`), then run
+   `helix/bin/helix slack setup`. It asks for the two tokens and the owner's
+   member ID, tries both tokens against Slack, keeps them in
+   `~/.helix/credentials/slack.env` (mode 600), adds `slack: {enabled:
+   true}` to `config.yaml` and links that Slack user to the owner. A token
+   Slack refuses is reported with Slack's reason, and nothing is written.
 7. `sudo systemctl restart helix.service`. Its log says `Slack: connected`.
 8. Anywhere in Slack, send `/helix invite @alex alex-gh`; only you see the
    bot's reply.

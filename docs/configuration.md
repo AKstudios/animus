@@ -111,6 +111,17 @@ repos:
 
 `animus doctor` checks the file, and `animus plan` lists your skills by role.
 
+## Helix's settings
+
+On the Helix machine, `~/.helix/config.yaml` (under `HELIX_HOME`) holds
+Helix's own settings, listed in [helix.md](helix.md#configyaml). One of them
+is `owner:`, the person who may invite and remove people, remove any project,
+cancel any job and see every job, from their own laptop
+([helix.md](helix.md#the-owner)). Set it with `helix owner <person>` on the
+machine, not by hand: it refuses anyone who has not joined. Nothing on a
+laptop sets it, and the owner's own `~/.animus` holds nothing more than
+anyone else's.
+
 ## Environment
 
 | Variable | What it does |

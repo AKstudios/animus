@@ -13,9 +13,9 @@ a machine, or moving Helix to another one, is
 `~/.helix/config.yaml` sets `host` (default 127.0.0.1: never a public
 address), `port` (7420), `slots` (2), `url` (the address people reach Helix
 at, which `helix invite` puts in the join command it prints), `name` (what the
-display calls the machine), `container` and `slack` ([Slack](#slack)).
-Helix reads it again when it changes, for the slots; host, port and slack
-need a restart. People and projects are
+display calls the machine), `owner` ([The owner](#the-owner)), `container`
+and `slack` ([Slack](#slack)). Helix reads it again when it changes, for the
+slots and the owner; host, port and slack need a restart. People and projects are
 in `helix.db`, so changing either needs no restart. A `config.yaml` from
 before 0.3.3 that names `people` and `repos` has them moved into `helix.db`
 the first time a `helix` command runs.
@@ -38,6 +38,33 @@ Each job runs with its submitter's tokens only, so its pull request is
 theirs. `animus leave`, or `helix remove-person`, takes someone off; the
 latter prints what is left to revoke on GitHub, Claude and Tailscale.
 
+### The owner
+
+The owner is the one person who may invite and remove people and act on any
+project or job. `helix owner <person>` on the machine names them, as `owner:
+<person>` in `config.yaml`; the person must have joined already. Only shell
+access to the machine sets it, and running it again names another. There is
+no second token: on each request Helix compares the person the caller's own
+Helix token belongs to with `owner`.
+
+From their own laptop, the owner:
+
+- invites people with `animus invite <name> [--github <login>] [--slack
+  <member-id>]`, which prints what `helix invite` does (`--slack` needs the
+  Slack bot running);
+- removes people with `animus remove-person <name>`, which does what `helix
+  remove-person` does and prints the same checklist;
+- removes any project with `animus project remove`, still refused while one
+  of its jobs is queued or running;
+- cancels anyone's job with `animus cancel`;
+- sees every person's jobs, with whose each is, with `animus status --all`.
+
+Anyone else is refused these with the owner's name, and sees and cancels
+only their own jobs. `helix upgrade`, `helix image`, `helix slack setup`,
+`helix owner` and editing `config.yaml` stay on the machine. The owner
+cannot `animus leave`, and no path removes them: both are refused with "name
+another owner first: helix owner <person> on the machine".
+
 `helix check` asks the services themselves: who the GitHub token is and when
 it ends, whether it may push to each project (a push that sends nothing), and
 whether the Claude token answers. It exits 1 if anything but a push fails. A
@@ -53,14 +80,18 @@ up, from creating the Slack app with
 [helix/deploy/slack/manifest.yaml](../helix/deploy/slack/manifest.yaml), is
 in [helix-deploy.md](helix-deploy.md#the-slack-bot).
 
-- `helix slack setup` asks for the app's bot token (`xoxb-`), its app token
-  (`xapp-`, with `connections:write`) and the owner's Slack member ID (`U…`).
-  It tries both tokens against Slack, keeps them in
-  `~/.helix/credentials/slack.env` (mode 600), and sets `slack: {enabled:
-  true, owner: U…}` in `config.yaml`. A token Slack refuses is reported with
-  Slack's reason and nothing is written. `helix serve` connects only while
-  `slack.enabled` is on; turning it on or off takes a restart. The owner is
-  read from `config.yaml`, so changing it is an edit there.
+- In Slack, the owner is the Slack user linked to the owner person
+  ([The owner](#the-owner)), so `helix owner` changes who it is.
+- `helix slack setup` refuses to run while there is no owner. It asks for
+  the app's bot token (`xoxb-`), its app token (`xapp-`, with
+  `connections:write`) and the owner's Slack member ID (`U…`). It tries both
+  tokens against Slack, keeps them in `~/.helix/credentials/slack.env` (mode
+  600), sets `slack: {enabled: true}` in `config.yaml` and links that Slack
+  user to the owner. A token Slack refuses is reported with Slack's reason
+  and nothing is written. `helix serve` connects only while `slack.enabled`
+  is on; turning it on or off takes a restart. A `slack.owner` left in
+  `config.yaml` by an earlier setup becomes the owner's Slack link when
+  `helix serve` starts, unless the owner has one already, and is dropped.
 - `/helix invite @alex alex-gh`, sent by the owner, or `helix invite alex
   --github alex-gh --slack U123` on the machine, makes an invite and has the
   bot DM Alex: connect Tailscale first, then one line, `curl -fsSL
@@ -87,10 +118,9 @@ in [helix-deploy.md](helix-deploy.md#the-slack-bot).
   first post has a **Cancel job** button, which cancels the job for its person
   or the owner; anyone else gets a private refusal.
 
-Anyone without a Slack link, but the owner, who writes to the bot or sends
-any `/helix` command gets a private "You're not on this Helix. Ask <owner>
-for an invite.", and nothing they sent is kept. Only the owner may invite
-and link. Every command is acknowledged at once and answered privately; one
+Anyone without a Slack link who writes to the bot or sends any `/helix`
+command gets a private "You're not on this Helix. Ask <owner> for an
+invite.", and nothing they sent is kept. Only the owner may invite and link. Every command is acknowledged at once and answered privately; one
 sent while Helix is down gets Slack's own error and is not queued.
 
 ## Projects
@@ -103,8 +133,8 @@ containers. Only then are jobs taken for it. A project that fails the check
 says why and can be added again.
 
 GitHub is the member list: anyone on Helix whose token may push to a project
-may submit for it. Only whoever added a project removes it over the API;
-`helix remove-repo` removes any. Removing one deletes the clones Helix and
+may submit for it. Only whoever added a project, or the owner, removes it
+over the API; `helix remove-repo` removes any. Removing one deletes the clones Helix and
 people's jobs made of it, and keeps a clone added with `add-repo`.
 
 ## Containers
@@ -188,13 +218,15 @@ version, and Helix answers 426 to one it cannot work with.
 | `GET /version` | Helix's version |
 | `POST /invite` | Who an invite code is for, and the projects there |
 | `POST /join` | Join with a code and both tokens; returns the Helix token |
-| `POST /leave` | Take yourself off |
+| `POST /leave` | Take yourself off; refused for the owner |
+| `POST /people` | The owner only: invite `name`, optionally with `github` and `slack` |
+| `DELETE /people/<name>` | The owner only: take a person off, as `helix remove-person` does |
 | `GET /projects` | The projects |
 | `POST /projects` | Add a project; its check runs in the background (202) |
 | `GET /projects/<name>` | One project, with its check's log |
-| `DELETE /projects/<name>` | Remove a project you added |
-| `GET /jobs` | The slots and the queue |
+| `DELETE /projects/<name>` | Remove a project you added, or any for the owner |
+| `GET /jobs` | The slots and your jobs; `?all`, every person's, for the owner only |
 | `POST /jobs` | Submit: `repo`, `spec`, and optionally `name`, `draft`, `skills` |
 | `GET /jobs/<id>` | One job, with the end of its log |
 | `POST /jobs/<id>/answer` | Answer its question (`answer`); it is queued again |
-| `POST /jobs/<id>/cancel` | Cancel it |
+| `POST /jobs/<id>/cancel` | Cancel your job, or anyone's for the owner |

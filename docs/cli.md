@@ -158,6 +158,21 @@ with the reason if either fails. The Helix token it returns is kept in
 
 Takes you off Helix: your queued and running jobs are cancelled and your
 tokens there deleted. Asks first unless `--yes`, which a session without a terminal needs.
+The owner is refused until another is named with `helix owner` on the
+machine.
+
+#### `animus invite <name> [--github <login>] [--slack <member-id>]`
+
+The owner only ([helix.md](helix.md#the-owner)): makes an invite as `helix
+invite` does on the machine, and prints the same code and `animus join`
+line, or where the Slack bot sent it. `--slack` needs the bot running.
+Anyone else is refused with the owner's name.
+
+#### `animus remove-person <name>`
+
+The owner only: takes a person off as `helix remove-person` does, and prints
+the same list of what is left to revoke. The owner cannot be removed until
+another is named.
 
 #### `animus project add [<name>]`
 
@@ -173,8 +188,8 @@ The projects on Helix: state (ready, checking or failed, with the reason), GitHu
 
 #### `animus project remove <name>`
 
-Removes a project you added. Refused while any of its jobs is queued or
-running. The clones Helix and people's jobs made of it are deleted.
+Removes a project you added, or any project for the owner. Refused while any
+of its jobs is queued or running. The clones Helix and people's jobs made of it are deleted.
 
 #### `animus submit <spec.md> [--repo <dir>] [--draft]`
 
@@ -182,10 +197,11 @@ Queues a spec on Helix for the project with this checkout's GitHub address
 (or, failing that, the one named after its folder), with your personal
 skills. Returns the job's number at once.
 
-#### `animus status [<id>]`
+#### `animus status [<id>] [--all]`
 
-With no id, the queue and the slots. With one, that job and the end of its
-log.
+With no id, your jobs on Helix. With one, that job and the end of its log.
+`--all` lists every person's jobs, with whose each is; only the owner may
+use it.
 
 #### `animus result <id>`
 
@@ -197,7 +213,7 @@ Answers a job's question. The job is queued again and resumes with it.
 
 #### `animus cancel <id>`
 
-Cancels a queued or running job.
+Cancels a queued or running job of yours, or anyone's for the owner.
 
 ### Inside a job's worktree
 
@@ -218,10 +234,11 @@ Run on the Helix machine as `helix/bin/helix`, with its files under
 | Command | What it does |
 | --- | --- |
 | `helix serve` | Listens for submissions and runs them, as many at once as `slots` in `config.yaml`. The service manager runs this. |
-| `helix invite <name> [--github <login>] [--slack <member-id>]` | Prints a one-time join code for a person, good for 24 hours, and the `animus join` command to send them. A new invite replaces the old. `--github` takes only a GitHub token that signs in as that login. `--slack` (which needs `--github`) has the Slack bot DM that member the code instead, in one line that installs Animus and joins; joining links their Slack user to the person. |
-| `helix slack setup` | Turns the Slack bot on: asks for the app's bot token, its app token and your Slack member ID, tries both tokens against Slack, keeps them in `~/.helix/credentials/slack.env` and sets `slack: {enabled: true, owner}` in `config.yaml`. Restart `helix serve` to connect. See [helix-deploy.md](helix-deploy.md#the-slack-bot). |
+| `helix invite <name> [--github <login>] [--slack <member-id>]` | Prints a one-time join code for a person, good for 24 hours, and the `animus join` command to send them. A new invite replaces the old. `--github` takes only a GitHub token that signs in as that login. `--slack` (which needs `--github`) has the Slack bot DM that member the code instead, in one line that installs Animus and joins; joining links their Slack user to the person. The owner runs the same from their laptop as `animus invite`. |
+| `helix owner <person>` | Makes someone who has joined the owner (`owner:` in `config.yaml`), replacing any other. From their own laptop the owner invites and removes people, removes any project, cancels any job and sees every job ([helix.md](helix.md#the-owner)). |
+| `helix slack setup` | Turns the Slack bot on: asks for the app's bot token, its app token and the owner's Slack member ID, tries both tokens against Slack, keeps them in `~/.helix/credentials/slack.env`, sets `slack: {enabled: true}` in `config.yaml` and links that Slack user to the owner. Refused while there is no owner. Restart `helix serve` to connect. See [helix-deploy.md](helix-deploy.md#the-slack-bot). |
 | `helix add-person <name> [--env-file <file>]` | Adds a person by hand instead of an invite, and prints their Helix token once. The file holds `KEY=VALUE` lines set for their jobs only (`CLAUDE_CODE_OAUTH_TOKEN`, `GH_TOKEN`). Run again for a new token. |
-| `helix remove-person <name>` | Their token stops working, their queued and running jobs are cancelled, their credentials file and folder are deleted. Prints what is left to revoke on GitHub, Claude and Tailscale. |
+| `helix remove-person <name>` | Their token stops working, their queued and running jobs are cancelled, their credentials file and folder are deleted. Prints what is left to revoke on GitHub, Claude and Tailscale. Refused for the owner until another is named. The owner runs the same from their laptop as `animus remove-person`. |
 | `helix check [<name>]` | Tries each person's tokens for real: who the GitHub token is, when it ends, whether it may push to each project, whether the Claude token answers. Exits 1 if anything but a push fails. |
 | `helix add-repo <name> <dir>` | Adds a clone made by hand, ready at once. People add theirs with `animus project add` instead. |
 | `helix remove-repo <name>` | Removes any project, whoever added it. Refused while any of its jobs is queued or running. A clone added with `add-repo` stays on disk. |
