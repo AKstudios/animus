@@ -8,6 +8,8 @@ clients with how to update.
 
 ## Unreleased
 
+## 0.4.0 (2026-11-17)
+
 - A job catches up with its base before the push: when the base branch
   gained commits while the job ran and they merge cleanly, the job merges
   them in with one merge commit, runs every gate again with two fix rounds of
