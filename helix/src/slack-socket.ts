@@ -6,7 +6,7 @@
 import { existsSync } from 'node:fs';
 import { AnimusError } from '../../plugin/src/proc.ts';
 import { envFileVars, type Config } from './config.ts';
-import { SLACK_API, slackCall, slackEnvFile, type SlackEvent, type Transport } from './slack-api.ts';
+import { SLACK_API, slackCall, slackEnvFile, slackWeb, type SlackEvent, type Transport } from './slack-api.ts';
 
 const MAX_RETRY_MS = 30_000;
 
@@ -87,9 +87,7 @@ export function startSlack(config: Config, opts: { say: (line: string) => void; 
   void connect();
   return {
     onEvent: (h) => { handle = h; },
-    post: async (channel, text, thread) => String((await slackCall(bot, 'chat.postMessage', { channel, text, ...(thread ? { thread_ts: thread } : {}) }, api)).ts),
-    dm: async (user) => String(((await slackCall(bot, 'conversations.open', { users: user }, api)).channel as { id: string }).id),
-    ephemeral: async (channel, user, text) => { await slackCall(bot, 'chat.postEphemeral', { channel, user, text }, api); },
+    ...slackWeb(bot, api),
     close: () => { closed = true; clearTimeout(timer); socket?.close(); },
   };
 }

@@ -43,6 +43,13 @@ export async function slackCall(token: string, method: string, body: Record<stri
   return answer;
 }
 
+/** The transport's way out: Web API calls with the bot token. */
+export const slackWeb = (bot: string, api = SLACK_API): Omit<Transport, 'onEvent'> => ({
+  post: async (channel, text, thread) => String((await slackCall(bot, 'chat.postMessage', { channel, text, ...(thread ? { thread_ts: thread } : {}) }, api)).ts),
+  dm: async (user) => String(((await slackCall(bot, 'conversations.open', { users: user }, api)).channel as { id: string }).id),
+  ephemeral: async (channel, user, text) => { await slackCall(bot, 'chat.postEphemeral', { channel, user, text }, api); },
+});
+
 /**
  * Tries both tokens against Slack, then keeps them in slack.env and turns the
  * bot on in config.yaml for the owner. A token Slack refuses leaves nothing

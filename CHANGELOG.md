@@ -23,6 +23,11 @@ clients with how to update.
   keeps nothing. An invite may carry a Slack user, linked to the person when
   they join; the owner's `/helix link @user <person>` links someone who joined
   before. Leaving Helix, or `helix remove-person`, removes the link.
+- The owner invites someone from Slack with `/helix invite @user
+  <github-login>`, or on the machine with `helix invite <name> --github
+  <login> --slack <member-id>`: the bot DMs them to connect Tailscale first,
+  and one line that installs Animus and joins. An invite sent on Slack must
+  name a GitHub login, and only the owner may send one.
 
 ## 0.3.8 (2026-11-17)
 

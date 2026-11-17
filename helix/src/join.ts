@@ -43,6 +43,8 @@ export function invite(store: Store, name: string, opts: { github?: string; slac
   if (store.person(name)) throw new Refused(409, `${name} is already on Helix: helix remove-person ${name} first, or helix add-person ${name} for a new token`);
   if (opts.github !== undefined && !/^[A-Za-z0-9-]{1,39}$/.test(opts.github)) throw new Refused(400, `${opts.github} is not a GitHub login`);
   if (opts.slack !== undefined && !SLACK_USER.test(opts.slack)) throw new Refused(400, `${opts.slack} is not a Slack user id: one starts with U, as in U0123ABCD`);
+  // A code sent on Slack could be read by someone else: the login keeps it to one GitHub account.
+  if (opts.slack !== undefined && !opts.github) throw new Refused(400, 'an invite sent on Slack names their GitHub login, so only a token that signs in as it is taken');
   // Four groups of four from an alphabet with no look-alikes: easy to read out, close to 80 bits to guess.
   const alphabet = 'abcdefghjkmnpqrstuvwxyz23456789';
   const bytes = randomBytes(16);

@@ -12,15 +12,15 @@ import { KEEP_DAYS } from '../../plugin/src/cleanup.ts';
 import { checkEnv, checkPerson, describeFindings, failing, githubPush, githubToken } from './check.ts';
 import { animusVersion } from '../../plugin/src/version.ts';
 import { containerLaunch, containerProblem, imageName, personDirs, removeContainer } from './container.ts';
-import { addPerson, addRepo, configFile, helixHome, identityEnv, importRegistry, loadConfig, readyRepos, removeRepo } from './config.ts';
+import { addPerson, addRepo, configFile, envFileVars, helixHome, identityEnv, importRegistry, loadConfig, readyRepos, removeRepo } from './config.ts';
 import { ensureSetup } from '../../plugin/src/workspace.ts';
 import { loadProfile } from '../../plugin/src/profile.ts';
 import { checkInChild, checkProject, failInterruptedChecks, forgetProject, setupHere, setupInContainer } from './projects.ts';
 import { INVITE_HOURS, invite, takeOff } from './join.ts';
 import { ask } from '../../plugin/src/join.ts';
-import { slackEnvFile, slackSetup } from './slack-api.ts';
+import { slackEnvFile, slackSetup, slackWeb } from './slack-api.ts';
 import { startSlack } from './slack-socket.ts';
-import { slackBot } from './slack.ts';
+import { slackBot, slackInvite } from './slack.ts';
 import { serve } from './server.ts';
 import { openStore, type Store } from './store.ts';
 import { releaseToFollow } from './upgrade.ts';
@@ -67,12 +67,15 @@ const USAGE = `helix: runs Animus jobs for several people on one machine
         A clone on this machine that jobs may be submitted for, ready at
         once. People add projects themselves with animus project add, which
         Helix checks first; this is for one cloned here by hand.
-  helix invite <name> [--github <login>]
+  helix invite <name> [--github <login>] [--slack <member-id>]
         Let a person join from their own machine: prints a one-time code that
         ends in ${INVITE_HOURS} hours. They run animus join <this Helix's address> <code>,
         which sends their Claude and GitHub tokens; Helix tries both, keeps
         them under ${helixHome()}/credentials and gives them their Helix token.
         --github: only a GitHub token that signs in as this login is taken.
+        --slack: the Slack bot DMs the code to this member ID (U…) instead,
+        in one line that installs Animus and joins; it needs --github, and
+        joining links that Slack user to the person.
         Run again for a new code; the earlier one stops working.
   helix add-person <name> [--env-file <file>]
         Let a person submit, and print their token once. The file holds
@@ -119,7 +122,7 @@ again whenever it changes. Host and port need a restart.`;
 
 function main(argv: string[]): number | undefined | Promise<number> {
   const [command, ...rest] = argv;
-  const { values, positionals } = parseArgs({ args: rest, allowPositionals: true, options: { 'env-file': { type: 'string' }, github: { type: 'string' }, follow: { type: 'boolean' }, days: { type: 'string' }, 'dry-run': { type: 'boolean' } } });
+  const { values, positionals } = parseArgs({ args: rest, allowPositionals: true, options: { 'env-file': { type: 'string' }, github: { type: 'string' }, slack: { type: 'string' }, follow: { type: 'boolean' }, days: { type: 'string' }, 'dry-run': { type: 'boolean' } } });
   switch (command) {
     case 'serve': {
       const store = openHelix();
@@ -244,7 +247,8 @@ function main(argv: string[]): number | undefined | Promise<number> {
     }
     case 'invite': {
       const name = positionals[0];
-      if (!name) throw new AnimusError('usage: helix invite <name> [--github <login>]');
+      if (!name) throw new AnimusError('usage: helix invite <name> [--github <login>] [--slack <member-id>]');
+      if (values.slack) return inviteOnSlack(name, values.github, values.slack);
       const made = withStore((store) => invite(store, name, values.github ? { github: values.github } : {}));
       console.log([
         `${name}'s code, shown this once, good until ${made.expires.slice(0, 16).replace('T', ' ')} UTC:`,
@@ -326,6 +330,19 @@ async function setupSlack(): Promise<number> {
   const { team } = await slackSetup({ bot, app, owner });
   console.log(`Slack works${team ? ` for ${team}` : ''}: the tokens are in ${slackEnvFile()}, and config.yaml has slack: {enabled: true, owner: ${owner.trim()}}. Restart helix serve to connect.`);
   return 0;
+}
+
+/** helix invite --slack: the bot DMs the invite, so the code is never printed here. */
+async function inviteOnSlack(name: string, github: string | undefined, user: string): Promise<number> {
+  const file = slackEnvFile();
+  const bot = existsSync(file) ? envFileVars(file).SLACK_BOT_TOKEN : undefined;
+  if (!bot) throw new AnimusError(`--slack sends the invite from the Slack bot, and ${file} holds no bot token: run helix slack setup`);
+  const store = openHelix();
+  try {
+    const made = await slackInvite(slackWeb(bot), { store, config: loadConfig() }, name, { ...(github ? { github } : {}), slack: user });
+    console.log(`The Slack bot sent ${user} the line that installs Animus and joins as ${name}; its code is good until ${made.expires.slice(0, 16).replace('T', ' ')} UTC.`);
+    return 0;
+  } finally { store.close(); }
 }
 
 /** Runs a command in this checkout; its output goes to the terminal. */
