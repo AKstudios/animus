@@ -32,6 +32,8 @@ export type PrInput = {
   escalations: readonly { size?: string; difficulty?: string; why: string }[];
   /** A job done in more than one slice: each slice's title, and its session's summary once its gates passed. */
   slices?: readonly { title: string; summary?: string }[];
+  /** The base commit the branch was caught up to before the push, when the base had moved. */
+  caughtUp?: { branch: string; commit: string };
   /** Why the job failed; makes this a failure report. */
   failure?: string;
   models: string;
@@ -103,7 +105,7 @@ export function prBody(p: PrInput): string {
   if (followUps.length) out.push('## Follow-ups', '', 'Should-fix findings that did not go back for a fix:', '', ...followUps.map((f) => `- ${finding(f)}`), '');
 
   const review = !p.review ? 'no review' : `${p.reviewRounds} review round(s): ${p.review.summary}`;
-  out.push('## Run', '', `- Profile: ${p.plan.size}, ${p.plan.difficulty}, ${p.plan.type}`, `- Models: ${p.models}`, `- Gates: ${p.gateAttempts} run(s), sent back ${p.fixRounds} time(s)`, `- Review: ${cell(review)}`, `- Cost: $${p.cost_usd.toFixed(2)} (API-equivalent)`, '', `Built by Animus, job \`${p.job}\`.`);
+  out.push('## Run', '', `- Profile: ${p.plan.size}, ${p.plan.difficulty}, ${p.plan.type}`, `- Models: ${p.models}`, `- Gates: ${p.gateAttempts} run(s), sent back ${p.fixRounds} time(s)`, `- Review: ${cell(review)}`, ...(p.caughtUp ? [`- Caught up with ${p.caughtUp.branch} at ${p.caughtUp.commit}, merged in before the push`] : []), `- Cost: $${p.cost_usd.toFixed(2)} (API-equivalent)`, '', `Built by Animus, job \`${p.job}\`.`);
   return out.join('\n');
 }
 

@@ -8,6 +8,12 @@ clients with how to update.
 
 ## Unreleased
 
+- A job catches up with its base before the push: when the base branch
+  gained commits while the job ran and they merge cleanly, the job merges
+  them in with one merge commit, runs every gate again with two fix rounds of
+  its own, and the pull request names the base commit it caught up to. A
+  failed job's draft pull request goes through the same catch-up. A base that
+  did not move is left alone.
 - The installers take `join <url> <code>`: after setup they run `animus join`
   with them, so one line installs Animus and joins a Helix
   (`curl -fsSL …/install.sh | bash -s -- join <url> <code>`).

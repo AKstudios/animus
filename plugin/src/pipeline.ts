@@ -24,7 +24,7 @@ import { roleSkills } from './skills.ts';
 import { criteriaSoFar, isPlanned, oneSlice, planSlices, type Slicing } from './slices.ts';
 import { loadSpec, type Spec } from './spec.ts';
 import { describeShots, designOf, JOB_PID, takeShots, uiProblem, uiTarget, type UiJob } from './ui.ts';
-import { createWorkspace, ensureSetup, removeWorkspace, reopenWorkspace, type Workspace } from './workspace.ts';
+import { baseCommit, createWorkspace, ensureSetup, removeWorkspace, reopenWorkspace, type Workspace } from './workspace.ts';
 
 export type Deps = {
   factory: Factory;
@@ -183,8 +183,10 @@ export async function runJob(opts: RunOptions, deps: Deps): Promise<Run> {
   let shots: { dir: string; files: string[]; urls?: Record<string, string>; branch?: string } | undefined;
   const found = new Map<string, Finding>();
   let actedOn = 0;
-  /** Gate fix rounds spent inside slices: each slice has its own allowance, and so has the finished branch. */
-  let sliceRounds = 0;
+  /** Gate fix rounds spent outside the current allowance: each slice has its own, and so have the finished branch and its catch-up. */
+  let spentBefore = 0;
+  /** The base commit the branch caught up to before the push, once it has. */
+  let caughtUp: string | undefined;
   let planFallback: string | undefined;
   /** The slice being worked on, for whoever watches the job: "slice 2 of 4". */
   let inSlice = '';
@@ -266,9 +268,10 @@ export async function runJob(opts: RunOptions, deps: Deps): Promise<Run> {
   /**
    * Runs the gates until they pass, sending failures back to the implementer
    * while rounds are left. For a slice, only the criteria of the slices so
-   * far are checked, and the rounds are that slice's own.
+   * far are checked, and the rounds are that slice's own. `why` goes in front
+   * of each failure sent back.
    */
-  const gate = async (slice?: { name: string; only: ReadonlySet<number> }): Promise<void> => {
+  const gate = async (slice?: { name: string; only: ReadonlySet<number> }, why = ''): Promise<void> => {
     const of = slice ? ` for ${slice.name}` : '';
     let rounds = 0;
     for (;;) {
@@ -292,13 +295,36 @@ export async function runJob(opts: RunOptions, deps: Deps): Promise<Run> {
       writeFileSync(join(dir, 'gates', `run-${attempt}.txt`), gateReport(lastGates));
       for (const line of describe(lastGates).split('\n').slice(0, lastGates.length)) log(`  ${line}`);
       if (ok) return;
-      const used = slice ? rounds : run.fix_rounds - sliceRounds;
+      const used = slice ? rounds : run.fix_rounds - spentBefore;
       if (used >= factory.limits.gate_rounds) throw new Stop('failed', `the gates${of} still fail after ${used} fix round(s):\n${describe(lastGates.filter((r) => !r.ok))}`);
       run.fix_rounds++;
-      if (slice) { rounds++; sliceRounds++; }
+      if (slice) { rounds++; spentBefore++; }
       // A failed gate round raises the model tier by one for the next.
-      await implementer(`gate-fix-${run.fix_rounds}`, gateFixPrompt(describe(lastGates), factory.limits.gate_rounds - used - 1), raise(plan.implement.tier));
+      await implementer(`gate-fix-${run.fix_rounds}`, `${why}${gateFixPrompt(describe(lastGates), factory.limits.gate_rounds - used - 1)}`, raise(plan.implement.tier));
     }
+  };
+
+  /**
+   * The catch-up: merges what the base gained since the job started into its
+   * branch, with one merge commit (no rebase: each of a sliced job's commits
+   * would meet the same conflict). Returns whether it merged. The merged base
+   * becomes the job's base, so the job's own changes stay what is diffed. A
+   * merge that conflicts is undone, and the branch opens as it was.
+   */
+  const catchUp = (): boolean => {
+    at('gates', `catch-up · ${ws.baseBranch}`);
+    const latest = baseCommit(repo, ws.baseBranch, log);
+    // Holding it already covers a base that did not move, and one rewound to an earlier commit.
+    if (tryGit(wt, ['merge-base', '--is-ancestor', latest, 'HEAD']) !== undefined) return false;
+    if (tryGit(wt, ['merge', '--no-ff', '--no-verify', '-m', `Merge ${ws.baseBranch} at ${latest.slice(0, 12)} into ${ws.branch}`, latest]) === undefined) {
+      tryGit(wt, ['merge', '--abort']);
+      log(`catch-up: ${ws.baseBranch} at ${latest} conflicts with the job's branch; the pull request opens without it`);
+      return false;
+    }
+    log(`catch-up: merged ${ws.baseBranch} at ${latest}`);
+    ws.base = caughtUp = latest;
+    saveState(state);
+    return true;
   };
 
   /** Screenshots for the reviewer are part of the review; the ones taken after it are the evidence. */
@@ -420,6 +446,13 @@ export async function runJob(opts: RunOptions, deps: Deps): Promise<Run> {
       }
     } else log('review: skipped for this profile');
 
+    // ------------------------------------------------------------- catch-up
+    if (catchUp()) {
+      // The merged branch is new code: every gate runs on it, with fix rounds of its own.
+      spentBefore = run.fix_rounds;
+      await gate(undefined, `The base moved while the job ran, and Animus merged ${ws.baseBranch} at ${caughtUp} into this branch. The gates failed on the merged branch: make your change work with what the base changed.\n\n`);
+    }
+
     // ------------------------------------------------------------- evidence
     if (ui) await shoot();
     else {
@@ -444,7 +477,16 @@ export async function runJob(opts: RunOptions, deps: Deps): Promise<Run> {
   }
 
   // ------------------------------------------------------------------- PR
-  at('pr', outcome === 'needs-input' ? 'pr · stopping to ask' : outcome === 'failed' ? 'pr · writing the failure report' : 'pr · writing the description');
+  // A failure's draft opens after the same catch-up, so it too has no conflict with the base where the merge is clean.
+  if (outcome === 'failed' && git(wt, ['rev-parse', 'HEAD']) !== ws.base) {
+    try {
+      catchUp();
+    } catch (err) {
+      if (!(err instanceof AnimusError)) throw err;
+      log(`catch-up: ${err.message.split('\n')[0]}`);
+    }
+  }
+  at('pr',outcome === 'needs-input' ? 'pr · stopping to ask' : outcome === 'failed' ? 'pr · writing the failure report' : 'pr · writing the description');
   const head = git(wt, ['rev-parse', 'HEAD']);
   run.head = head;
   run.protected_touched = touchedFiles(wt, ws.base, head).filter((f) => matchesAny(f, repoProfile.protected));
@@ -469,7 +511,7 @@ export async function runJob(opts: RunOptions, deps: Deps): Promise<Run> {
     const body = prBody({
       job, spec, plan, summary, ...(sliced ? { slices: sliced } : {}), gates: lastGates, gateAttempts: run.gates.length, fixRounds: run.fix_rounds, reviewRounds, open: failed ? open : [],
       protectedTouched: run.protected_touched, escalations: run.escalations, models, cost_usd: run.cost_usd,
-      ...(notes ? { notes } : {}), ...(review ? { review } : {}), ...(shots ? { shots } : {}), ...(failed && reason ? { failure: reason } : {}),
+      ...(notes ? { notes } : {}), ...(review ? { review } : {}), ...(shots ? { shots } : {}), ...(caughtUp ? { caughtUp: { branch: ws.baseBranch, commit: caughtUp } } : {}), ...(failed && reason ? { failure: reason } : {}),
     });
     writeFileSync(join(dir, 'pr-body.md'), `${body}\n`);
     if (!opts.dryRun) {
