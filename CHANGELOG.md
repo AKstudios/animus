@@ -21,6 +21,8 @@ clients with how to update.
 - A job page shows the job's latest screenshots. Helix serves each, to a
   valid token only, at `GET /jobs/<id>/shots/<name>`, and only names the
   job's `shots/manifest.json` lists, never a file outside its shots folder.
+- `animus ui --helix` opens the Helix this machine joined in the browser,
+  already signed in with its token.
 
 ## 0.3.8 (2026-11-17)
 

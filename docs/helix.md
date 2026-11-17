@@ -128,7 +128,8 @@ page to it; `?theme=dark` or `?theme=light` fixes the theme.
 Every job on it links to its own page, `/jobs/<id>`, an address that can be
 shared and opened cold. A job page needs a sign-in: paste your Helix token
 (`~/.animus/helix.json`), or open an address ending `#token=<token>`, which
-that browser keeps and takes out of the address bar. Sign out from the
+that browser keeps and takes out of the address bar; `animus ui --helix`
+opens Helix that way, signed in as you. Sign out from the
 header. Do not sign in on a shared wall screen: the token can also submit and
 cancel jobs as you. `/people` and `/people/<name>` are still to come.
 

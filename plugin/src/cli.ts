@@ -7,7 +7,7 @@ import { cleanup, describeCleanup, KEEP_DAYS, type PrEnd } from './cleanup.ts';
 import { describeFindings, doctor } from './doctor.ts';
 import { enable, realRun, setup, terminalIo, thisMachine } from './setup.ts';
 import { initProfile } from './init.ts';
-import { joinHelix, leaveHelix } from './join.ts';
+import { joinHelix, leaveHelix, openPage } from './join.ts';
 import { addProject } from './project.ts';
 import { describe, failsOnBase, jobChecks, runChecks } from './gates.ts';
 import { githubUrl, mainCheckout, touchedFiles } from './git.ts';
@@ -107,6 +107,7 @@ With Helix, the machine that runs jobs for everyone:
   animus result <id>        One job as JSON; exits 0 once it ended in a pull request.
   animus answer <id> <text> Answer a job's question; it is queued again.
   animus cancel <id>
+  animus ui --helix         Open Helix's display in your browser, signed in.
 
 Inside a job's worktree (the implementer runs these):
   animus check              Run the job's gates now.
@@ -302,6 +303,15 @@ async function main(argv: string[]): Promise<number> {
       return 0;
     }
     case 'check': case 'shots': case 'ui': {
+      if (command === 'ui' && values.helix) {
+        const login = helix.helixLogin();
+        if (!login) throw new AnimusError('this machine has not joined a Helix: animus join <url> <code>, with a code from whoever runs it (or set HELIX_URL and HELIX_TOKEN)');
+        const base = login.url.replace(/\/+$/, '');
+        // The token goes only to the browser, which keeps it and takes it out of the address bar.
+        openPage(`${base}/#token=${encodeURIComponent(login.token)}`);
+        say(`Opening ${base} in your browser, signed in${login.name ? ` as ${login.name}` : ''}. If none opens, open ${base} and paste your Helix token from ${login.from}.`);
+        return 0;
+      }
       const root = git(cwd, ['rev-parse', '--show-toplevel']);
       const job = jobOf(root);
       const state = job ? loadState(job) : undefined;

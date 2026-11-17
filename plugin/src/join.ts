@@ -32,7 +32,7 @@ export function tokenPage(details: helix.InviteDetails): string {
 }
 
 /** Opens a page in the person's browser, on any system; they get the address printed too. */
-function openPage(url: string): void {
+export function openPage(url: string): void {
   const [command, args] = process.platform === 'darwin' ? ['open', [url]] : process.platform === 'win32' ? ['cmd', ['/c', 'start', '""', url.replace(/&/g, '^&')]] : ['xdg-open', [url]];
   try { spawn(command, args as string[], { stdio: 'ignore', detached: true }).on('error', () => {}).unref(); } catch { /* the printed address will do */ }
 }
