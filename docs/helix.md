@@ -13,8 +13,9 @@ a machine, or moving Helix to another one, is
 `~/.helix/config.yaml` sets `host` (default 127.0.0.1: never a public
 address), `port` (7420), `slots` (2), `url` (the address people reach Helix
 at, which `helix invite` puts in the join command it prints), `name` (what the
-display calls the machine) and `container`. Helix reads it again when it
-changes, for the slots; host and port need a restart. People and projects are
+display calls the machine), `container` and `slack` ([Slack](#slack)).
+Helix reads it again when it changes, for the slots; host, port and slack
+need a restart. People and projects are
 in `helix.db`, so changing either needs no restart. A `config.yaml` from
 before 0.3.3 that names `people` and `repos` has them moved into `helix.db`
 the first time a `helix` command runs.
@@ -30,7 +31,8 @@ usable, if either fails. A project the GitHub token may not push to does not
 stop the join; the person is told which. Helix keeps the tokens in
 `~/.helix/credentials/<name>.env` and returns a Helix token, which the laptop
 keeps in `~/.animus/helix.json`. With `--github`, only a token that signs in
-as that login is taken.
+as that login is taken. With `--slack`, the Slack bot sends the invite
+instead ([Slack](#slack)).
 
 Each job runs with its submitter's tokens only, so its pull request is
 theirs. `animus leave`, or `helix remove-person`, takes someone off; the
@@ -42,6 +44,54 @@ whether the Claude token answers. It exits 1 if anything but a push fails. A
 refused push shows as `no`: nobody has to reach every project. Before each
 job, Helix checks the GitHub token again with a push to that job's project,
 so a token that ended or may not push fails the job at once with the reason.
+
+## Slack
+
+Helix has an optional Slack bot, inside `helix serve` over Socket Mode
+([ADR 0002](adr/0002-slack-over-socket-mode-without-an-sdk.md)). Setting it
+up, from creating the Slack app with
+[helix/deploy/slack/manifest.yaml](../helix/deploy/slack/manifest.yaml), is
+in [helix-deploy.md](helix-deploy.md#the-slack-bot).
+
+- `helix slack setup` asks for the app's bot token (`xoxb-`), its app token
+  (`xapp-`, with `connections:write`) and the owner's Slack member ID (`U…`).
+  It tries both tokens against Slack, keeps them in
+  `~/.helix/credentials/slack.env` (mode 600), and sets `slack: {enabled:
+  true, owner: U…}` in `config.yaml`. A token Slack refuses is reported with
+  Slack's reason and nothing is written. `helix serve` connects only while
+  `slack.enabled` is on; turning it on or off takes a restart. The owner is
+  read from `config.yaml`, so changing it is an edit there.
+- `/helix invite @alex alex-gh`, sent by the owner, or `helix invite alex
+  --github alex-gh --slack U123` on the machine, makes an invite and has the
+  bot DM Alex: connect Tailscale first, then one line, `curl -fsSL
+  …/install.sh | bash -s -- join <url> <code>`, that installs Animus where
+  it is missing and joins. The code is only in that DM. An invite sent on
+  Slack must name a GitHub login, so a stolen code cannot join with another
+  login's token. Joining with it links Alex's Slack user to the person
+  `alex` (their Slack link).
+- `/helix link @alex alex`, sent by the owner, links someone who joined
+  before. `animus leave` and `helix remove-person` remove the link.
+- Every job a linked person starts, from `animus submit` or anywhere else,
+  posts to one DM thread of its own: started (or resumed), needs input with
+  the question, the pull request's link, or failed with the reason.
+  `/helix notify off` stops these for the person who sends it and `/helix
+  notify on` starts them again; they are on by default.
+- `/helix jobs` answers privately with the sender's queued, running and
+  needs-input jobs, each with its thread or pull request link. `/helix
+  status` answers with Helix's slots in use, the queue's length and its
+  version.
+- A job that needs input is answered by replying in its thread: any reply in
+  the DM, or a reply that mentions @Helix in a channel. It resumes as after
+  `animus answer`, and the thread says so. Replies from anyone but the job's
+  person, and channel replies without the mention, are ignored. The thread's
+  first post has a **Cancel job** button, which cancels the job for its person
+  or the owner; anyone else gets a private refusal.
+
+Anyone without a Slack link, but the owner, who writes to the bot or sends
+any `/helix` command gets a private "You're not on this Helix. Ask <owner>
+for an invite.", and nothing they sent is kept. Only the owner may invite
+and link. Every command is acknowledged at once and answered privately; one
+sent while Helix is down gets Slack's own error and is not queued.
 
 ## Projects
 

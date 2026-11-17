@@ -5,7 +5,12 @@
 # It gets what Animus's own setup needs before it can start (git, Node 24 and
 # Claude Code), asking before it installs any of them with winget, adds the
 # akstudios marketplace to Claude Code, and hands over to `animus setup` for
-# the rest. macOS and Linux: install.sh.
+# the rest. macOS and Linux: install.sh. Given `join <url> <code>`, it then
+# runs `animus join <url> <code>`; iex passes no arguments, so that is:
+#
+#   & ([scriptblock]::Create((irm https://raw.githubusercontent.com/AKstudios/animus/stable/install.ps1))) join <url> <code>
+$Join = @($args)
+if ($Join.Count -and ($Join.Count -ne 3 -or $Join[0] -ne 'join')) { throw 'usage: install.ps1 [join <url> <code>]' }
 $ErrorActionPreference = 'Stop'
 # Run through iex, this is the person's own session: it stops with throw,
 # since exit would close their window.
@@ -81,3 +86,10 @@ $where = $ours.installLocation
 $setup = Join-Path $where 'plugin\src\setup.ts'
 if (-not (Test-Path $setup)) { Stop-Install "Animus's marketplace has no plugin\src\setup.ts at $where." }
 node --disable-warning=ExperimentalWarning $setup
+if ($Join.Count) {
+  if ($LASTEXITCODE -ne 0) { throw 'Setup did not finish, so this machine has not joined the Helix.' }
+  # Setup put animus in ~/.local/bin, which this terminal may not have on PATH yet.
+  $env:Path = "$env:USERPROFILE\.local\bin;$env:Path"
+  Write-Host ''
+  animus join $Join[1] $Join[2]
+}

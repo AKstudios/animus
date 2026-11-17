@@ -6,8 +6,13 @@
 # It gets what Animus's own setup needs before it can start (git, Node 24 and
 # Claude Code), asking before it installs any of them, adds the akstudios
 # marketplace to Claude Code, and hands over to `animus setup` for the rest.
+# With `bash -s -- join <url> <code>` it then runs `animus join <url> <code>`.
 # Windows: install.ps1.
 set -euo pipefail
+
+if (( $# )) && [[ $# -ne 3 || $1 != join ]]; then
+  printf 'animus install: usage: install.sh [join <url> <code>]\n' >&2; exit 1
+fi
 
 # Setup asks to put ~/.local/bin on PATH if the person's own PATH lacks it;
 # this script adds it to its own, so it passes the one it started with.
@@ -24,10 +29,11 @@ have() { command -v "$1" >/dev/null 2>&1; }
 os="$(uname -s)"
 
 # Piped into bash, the script is stdin: questions are asked on the terminal.
-if ! { : </dev/tty; } 2>/dev/null; then die "run this from a terminal: it asks before installing anything"; fi
+tty="${ANIMUS_TTY:-/dev/tty}" # tests have no terminal
+if ! { : <"$tty"; } 2>/dev/null; then die "run this from a terminal: it asks before installing anything"; fi
 ask() {
   local answer
-  read -r -p "$1 [Y/n] " answer </dev/tty || true
+  read -r -p "$1 [Y/n] " answer <"$tty" || true
   [[ -z $answer || $answer =~ ^[Yy] ]]
 }
 stop() { say "$1"; say "Then run the install command again."; exit 1; }
@@ -118,4 +124,8 @@ where="$(ours installLocation)"
 [[ -n $where && -f $where/plugin/src/setup.ts ]] || die "Animus's marketplace has no plugin/src/setup.ts at ${where:-an unknown place}"
 ok "Animus's marketplace is in Claude Code"
 say ""
-exec node --disable-warning=ExperimentalWarning "$where/plugin/src/setup.ts" </dev/tty
+if (( ! $# )); then exec node --disable-warning=ExperimentalWarning "$where/plugin/src/setup.ts" <"$tty"; fi
+node --disable-warning=ExperimentalWarning "$where/plugin/src/setup.ts" <"$tty"
+say ""
+# Setup put animus in ~/.local/bin, which is on this script's PATH.
+exec animus join "$2" "$3" <"$tty"

@@ -31,6 +31,8 @@ export type Config = {
    * Left out, jobs run on the machine as Helix's account, sharing it.
    */
   container?: { memory?: string; cpus?: number };
+  /** The Slack bot, set by helix slack setup; its tokens are in credentials/slack.env. owner is a Slack user id (U…). */
+  slack?: { enabled: boolean; owner: string };
 };
 
 const DEFAULTS: Config = { host: '127.0.0.1', port: 7420, slots: 2 };
@@ -60,6 +62,11 @@ export function saveConfig(config: Config, file = configFile()): void {
   mkdirSync(helixHome(), { recursive: true });
   writeFileSync(file, stringify(config));
   chmodSync(file, 0o600);
+}
+
+/** Sets some of config.yaml's keys and leaves the others as written, defaults left out. */
+export function updateConfig(patch: Partial<Config>, file = configFile()): void {
+  saveConfig({ ...readRaw(file), ...patch } as Config, file);
 }
 
 /**
@@ -166,8 +173,13 @@ export function identityEnv(who: { name: string; email: string }): Record<string
 export function personEnv(person: Person | undefined): Record<string, string> {
   if (!person?.env_file) return {};
   if (!existsSync(person.env_file)) throw new AnimusError(`the credentials file ${person.env_file} is gone`);
+  return envFileVars(person.env_file);
+}
+
+/** The KEY=value lines of an env file. */
+export function envFileVars(file: string): Record<string, string> {
   const out: Record<string, string> = {};
-  for (const line of readFileSync(person.env_file, 'utf8').split(/\r?\n/)) {
+  for (const line of readFileSync(file, 'utf8').split(/\r?\n/)) {
     const m = /^\s*(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)=(.*)$/.exec(line);
     if (m) out[m[1]!] = m[2]!.trim().replace(/^(['"])(.*)\1$/, '$2');
   }
