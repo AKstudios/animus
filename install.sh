@@ -9,6 +9,10 @@
 # Windows: install.ps1.
 set -euo pipefail
 
+# Setup asks to put ~/.local/bin on PATH if the person's own PATH lacks it;
+# this script adds it to its own, so it passes the one it started with.
+export ANIMUS_PATH_BEFORE="${ANIMUS_PATH_BEFORE:-$PATH}"
+
 REPO="AKstudios/animus"
 REF="${ANIMUS_REF:-stable}"
 MARKET="akstudios"

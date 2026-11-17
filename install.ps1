@@ -7,6 +7,10 @@
 # akstudios marketplace to Claude Code, and hands over to `animus setup` for
 # the rest. macOS and Linux: install.sh.
 $ErrorActionPreference = 'Stop'
+# Run through iex, this is the person's own session: it stops with throw,
+# since exit would close their window.
+# Setup checks the PATH the person started with, not the one this script adds to.
+$env:ANIMUS_PATH_BEFORE = $env:Path
 
 $Repo = 'AKstudios/animus'
 $Ref = if ($env:ANIMUS_REF) { $env:ANIMUS_REF } else { 'stable' }
@@ -20,8 +24,7 @@ function Ask($question) {
 }
 function Stop-Install($why) {
   Write-Host $why
-  Write-Host 'Then run the install command again.'
-  exit 1
+  throw 'Then run the install command again.'
 }
 # winget changes PATH for new terminals only; this one reads it again.
 function Update-Path {
@@ -74,4 +77,3 @@ $where = ($known | Where-Object { $_.name -eq $Market }).installLocation
 $setup = Join-Path $where 'plugin\src\setup.ts'
 if (-not (Test-Path $setup)) { Stop-Install "The $Market marketplace has no plugin\src\setup.ts at $where." }
 node --disable-warning=ExperimentalWarning $setup
-exit $LASTEXITCODE

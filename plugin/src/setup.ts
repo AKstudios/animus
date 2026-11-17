@@ -36,7 +36,7 @@ export type Machine = {
   home: string;
   claudeDir: string;
   platform: NodeJS.Platform;
-  /** PATH, to see whether ~/.local/bin is on it. */
+  /** PATH as the person's shell has it (the install scripts pass theirs from before they changed it), to see whether ~/.local/bin is on it. */
   path: string;
   /** The shell the person uses, for the line that puts ~/.local/bin on PATH. */
   shell?: string;
@@ -44,7 +44,7 @@ export type Machine = {
 
 export function thisMachine(env = process.env): Machine {
   const home = homedir();
-  return { home, claudeDir: env.CLAUDE_CONFIG_DIR ?? join(home, '.claude'), platform: process.platform, path: env.PATH ?? env.Path ?? '', shell: env.SHELL };
+  return { home, claudeDir: env.CLAUDE_CONFIG_DIR ?? join(home, '.claude'), platform: process.platform, path: env.ANIMUS_PATH_BEFORE ?? env.PATH ?? env.Path ?? '', shell: env.SHELL };
 }
 
 export const realRun: Run = (command, args, opts = {}) => {
