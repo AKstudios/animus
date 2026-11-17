@@ -2,7 +2,7 @@
 // which section, and every label, note and count. No DOM here, so the
 // wording is tested without a browser (helix/test/view.test.ts).
 import { jobPage } from './pages.ts';
-import type { Display, DisplayJob } from './shape.ts';
+import type { Display, DisplayJob, DisplayPr } from './shape.ts';
 
 export type Tone = 'ink' | 'mute' | 'ask' | 'fail';
 export type Tick = 'running' | 'ask' | 'failed' | 'queued' | 'ended';
@@ -18,7 +18,10 @@ export type Live = {
 
 export type Waiting = { id: number; page: string; ask: boolean; tag: string; title: string; repo: string; person: string; note: string };
 
-export type Recent = { id: number; page: string; tag: string; tone: Tone; href?: string; title: string; meta: string; reason?: string };
+export type Recent = { id: number; page: string; tag: string; tone: Tone; title: string; meta: string; reason?: string };
+
+/** An open pull request on the overview; it links to GitHub and to the job that opened it. */
+export type Pr = { id: number; page: string; href: string; tag: string; draft: boolean; title: string; meta: string };
 
 export type View = {
   name: string;
@@ -32,12 +35,15 @@ export type View = {
   empty?: { title: string; text: string; free: string };
   live: Live[]; noLive: string;
   waiting: Waiting[];
+  /** The newest open PRs the jobs opened. */
+  prs: Pr[];
   recent: Recent[];
 };
 
-/** How many of a project's latest jobs its row of ticks shows, and how many ended jobs are listed. */
+/** How many of a project's latest jobs its row of ticks shows, how many failed or cancelled jobs are listed, and how many open PRs. */
 const TICKS = 10;
 const RECENT = 30;
+const PRS = 10;
 
 const pad = (n: number) => String(n).padStart(2, '0');
 
@@ -55,7 +61,6 @@ export function span(ms: number): string {
 const usd = (n: number) => `$${n.toFixed(2)}`;
 const isAsk = (j: DisplayJob) => j.state === 'ended' && j.outcome === 'needs-input';
 const firstLine = (s: string) => { const line = s.trim().split('\n')[0] ?? ''; return line.length > 240 ? `${line.slice(0, 239)}…` : line; };
-const prNumber = (url: string) => /(\d+)\/?$/.exec(url)?.[1];
 
 function tick(j: DisplayJob): Tick {
   if (j.state === 'running') return 'running';
@@ -64,21 +69,21 @@ function tick(j: DisplayJob): Tick {
   return j.outcome === 'failed' ? 'failed' : 'ended';
 }
 
+/** Recent is where a job that did not deliver is read; what it delivered is a PR, listed while it is open. */
+const isMiss = (j: DisplayJob) => j.state === 'cancelled' || (j.state === 'ended' && j.outcome === 'failed');
+
 function recent(j: DisplayJob): Recent {
-  const n = j.pr ? prNumber(j.pr) : undefined;
-  const pr = j.pr ? `PR${n ? ` #${n}` : ''}` : '';
-  const [tag, tone]: [string, Tone] = j.state === 'cancelled' ? ['CANCELLED', 'mute']
-    : j.outcome === 'pr' ? [pr || 'PR', 'ink']
-    : j.outcome === 'draft-pr' ? [`DRAFT ${pr || 'PR'}`, 'ask']
-    : j.outcome === 'dry-run' ? ['DRY RUN', 'mute']
-    : ['FAILED', 'fail'];
+  const [tag, tone]: [string, Tone] = j.state === 'cancelled' ? ['CANCELLED', 'mute'] : ['FAILED', 'fail'];
   const took = j.started && j.ended ? span(Date.parse(j.ended) - Date.parse(j.started)) : '';
   return {
     id: j.id, page: jobPage(j.id), tag, tone, title: j.title,
     meta: [j.repo, j.person, took, j.cost_usd !== undefined ? usd(j.cost_usd) : ''].filter(Boolean).join(' · '),
-    ...(j.pr && /^https?:\/\//.test(j.pr) ? { href: j.pr } : {}),
-    ...(j.reason && j.outcome !== 'pr' ? { reason: firstLine(j.reason) } : {}),
+    ...(j.reason ? { reason: firstLine(j.reason) } : {}),
   };
+}
+
+function pr(p: DisplayPr): Pr {
+  return { id: p.job, page: jobPage(p.job), href: p.url, tag: `${p.draft ? 'DRAFT ' : ''}PR #${p.number}`, draft: p.draft, title: p.title, meta: `${p.repo} · ${p.person}` };
 }
 
 /** The display for one moment: `now` is Helix's clock in ms, `picked` the project chosen in the list. */
@@ -116,7 +121,8 @@ export function view(d: Display, picked: string | null, now: number): View {
     }),
   ];
 
-  const ended = shown.filter((j) => (j.state === 'ended' || j.state === 'cancelled') && !isAsk(j)).reverse();
+  const ended = shown.filter(isMiss).reverse();
+  const prs = (d.prs ?? []).filter((p) => !sel || p.repo === sel.name).sort((a, b) => Date.parse(b.created) - Date.parse(a.created)).slice(0, PRS).map(pr);
 
   return {
     name: d.name,
@@ -142,6 +148,7 @@ export function view(d: Display, picked: string | null, now: number): View {
     live,
     noLive: sel ? 'No agent is working on this project.' : `No agent is working right now. ${d.slots === 1 ? 'The one slot is' : `All ${d.slots} slots are`} free.`,
     waiting,
+    prs,
     recent: ended.slice(0, RECENT).map(recent),
   };
 }

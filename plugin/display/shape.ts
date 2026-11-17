@@ -62,6 +62,9 @@ export type JobPage = {
   log: string;
 };
 
+/** An open pull request one of Helix's jobs opened, as GitHub lists it now. */
+export type DisplayPr = { job: number; repo: string; person: string; number: number; title: string; url: string; draft: boolean; created: string };
+
 export type DisplayRepo ={ name: string; base?: string; gates?: string[] };
 
 export type Display = {
@@ -72,4 +75,6 @@ export type Display = {
   stages: readonly string[];
   repos: DisplayRepo[];
   jobs: DisplayJob[];
+  /** Open PRs the jobs opened, any order; left out by a source that does not ask GitHub. */
+  prs?: DisplayPr[];
 };

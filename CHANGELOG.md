@@ -8,6 +8,12 @@ clients with how to update.
 
 ## Unreleased
 
+- The display's overview lists the ten newest open PRs Helix's jobs opened
+  (for the picked project when one is picked), drafts marked, in place of
+  merged and closed ones. Helix lists a project's open PRs on GitHub with the
+  token of the person whose job opened one, at most once a minute per project;
+  a PR whose person has left is not listed. RECENT now keeps only failed and
+  cancelled jobs. `GET /display` gains `prs`.
 - The installers take `join <url> <code>`: after setup they run `animus join`
   with them, so one line installs Animus and joins a Helix
   (`curl -fsSL …/install.sh | bash -s -- join <url> <code>`).

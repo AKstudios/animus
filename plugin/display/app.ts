@@ -6,7 +6,7 @@
 import { forgetToken, jobNotice, keepToken, readToken, route, takeToken } from './pages.ts';
 import { atEnd, jobView, type JobPageView } from './job-view.ts';
 import type { Display, JobPage } from './shape.ts';
-import { view, type Live, type Project, type Recent, type View, type Waiting } from './view.ts';
+import { view, type Live, type Pr, type Project, type Recent, type View, type Waiting } from './view.ts';
 
 const POLL_MS = 2000;
 const RETRY_MS = 5000;
@@ -118,9 +118,15 @@ const waiting = (j: Waiting) => `<div class="wait${j.ask ? ' ask' : ''}" data-ke
 
 const recent = (j: Recent) => `<div class="done-row" data-key="j-${j.id}">
   <span class="id">#${j.id}</span>
-  ${j.href ? `<a class="tag tone-${j.tone}" href="${esc(j.href)}" target="_blank" rel="noopener noreferrer">${esc(j.tag)}</a>` : `<span class="tag tone-${j.tone}">${esc(j.tag)}</span>`}
+  <span class="tag tone-${j.tone}">${esc(j.tag)}</span>
   <a class="title" href="${esc(j.page)}">${esc(j.title)}</a><span class="by">${esc(j.meta)}</span>
   ${j.reason ? `<span class="reason tone-${j.tone}">${esc(j.reason)}</span>` : ''}
+</div>`;
+
+const openPr = (p: Pr) => `<div class="done-row" data-key="pr-${esc(p.href)}">
+  <span class="id">#${p.id}</span>
+  <a class="tag tone-${p.draft ? 'ask' : 'ink'}" href="${esc(p.href)}" target="_blank" rel="noopener noreferrer">${esc(p.tag)}</a>
+  <a class="title" href="${esc(p.page)}">${esc(p.title)}</a><span class="by">${esc(p.meta)}</span>
 </div>`;
 
 const section = (name: string, title: string, body: string, pulse = false) => `<section class="section ${name}">
@@ -150,7 +156,8 @@ function main(v: View): string {
   return `<main class="main">${scope}
     ${section('live', `AGENTS WORKING NOW · ${v.live.length}`, live, true)}
     ${section('waiting', `WAITING · ${v.waiting.length}`, v.waiting.length ? v.waiting.map(waiting).join('') : '<div class="none">Nothing queued, and no job is waiting for an answer.</div>')}
-    ${section('recent', `RECENT · ${v.recent.length}`, v.recent.length ? v.recent.map(recent).join('') : '<div class="none">No job has ended here yet.</div>')}
+    ${section('prs', `OPEN PRS · ${v.prs.length}`, v.prs.length ? v.prs.map(openPr).join('') : '<div class="none">No pull request opened by these jobs is open.</div>')}
+    ${section('recent', `RECENT · ${v.recent.length}`, v.recent.length ? v.recent.map(recent).join('') : '<div class="none">No job has failed or been cancelled here.</div>')}
   </main>`;
 }
 

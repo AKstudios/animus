@@ -15,6 +15,7 @@ import { parseSkills, type PersonalSkill } from '../../plugin/src/personal.ts';
 import { hashToken, helixHome, type Config } from './config.ts';
 import { display, jobPage, jobShot } from './display.ts';
 import { inviteDetails, joinHelix, takeOff, verifyInChild, type Verify } from './join.ts';
+import { openPrs, type ListPrs } from './open-prs.ts';
 import { addProject, checkInChild, projectView, removeProject, type StartCheck } from './projects.ts';
 import type { Store } from './store.ts';
 import { Refused, type Submission, type Supervisor } from './supervisor.ts';
@@ -53,12 +54,15 @@ export function serve(opts: {
   startCheck?: StartCheck;
   /** Helix's home: where projects' clones and checks go. */
   home?: string;
+  /** How a project's open PRs are listed on GitHub, with a person's token; by default GitHub's API. */
+  listPrs?: ListPrs;
 }): Server {
   const { config, store, supervisor } = opts;
   const verify = opts.verify ?? verifyInChild;
   const home = opts.home ?? helixHome();
   const startCheck = opts.startCheck ?? checkInChild(store, home);
   const version = animusVersion();
+  const prs = openPrs({ store, ...(opts.listPrs ? { list: opts.listPrs } : {}) });
   return createServer((req, res) => {
     const send = (status: number, value: unknown) => {
       res.writeHead(status, { 'content-type': 'application/json', 'helix-version': version });
@@ -74,7 +78,7 @@ export function serve(opts: {
         return res.end(file.body);
       }
       // What the display shows needs no token either: Helix listens on a private network only, and this only reads.
-      if (req.method === 'GET' && url.pathname === '/display') return send(200, display(opts));
+      if (req.method === 'GET' && url.pathname === '/display') return send(200, { ...display(opts), prs: await prs() });
       // Which release this is, for `animus doctor`; it says no more than the display does.
       if (req.method === 'GET' && url.pathname === '/version') return send(200, { version });
       // A client from a release this one cannot work with is told how to catch up, before anything is done for it.

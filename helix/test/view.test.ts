@@ -41,21 +41,18 @@ test('waiting lists the jobs that ask first, then the queue in order with each j
   assert.deepEqual([v.queued, v.asks], [3, 1]);
 });
 
-test('recent lists ended jobs newest first, each with how it ended, what it took and why', () => {
+test('recent lists only the jobs that failed or were cancelled, newest first, each with what it took and why', () => {
   const v = view(shown([
-    job({ id: 1, state: 'ended', outcome: 'pr', pr: 'https://github.com/o/r/pull/112', started: ago(40), ended: ago(18), cost_usd: 2.1, reason: 'not shown for a pull request' }),
-    job({ id: 2, state: 'ended', outcome: 'draft-pr', pr: 'https://github.com/o/r/pull/31', started: ago(31), ended: ago(0), cost_usd: 3.4, reason: 'the gates still fail after 2 fix round(s):\nFAIL test' }),
+    job({ id: 1, state: 'ended', outcome: 'pr', pr: 'https://github.com/o/r/pull/112', started: ago(40), ended: ago(18) }),
+    job({ id: 2, state: 'ended', outcome: 'draft-pr', pr: 'https://github.com/o/r/pull/31' }),
     job({ id: 3, state: 'ended', outcome: 'failed', ended: ago(5), reason: 'the GitHub token in the env file does not work' }),
     job({ id: 4, state: 'cancelled', started: ago(10), ended: ago(9.25), person: 'ben' }),
     job({ id: 5, state: 'ended', outcome: 'dry-run', started: ago(11), ended: ago(0), cost_usd: 0 }),
     job({ id: 6, state: 'ended', outcome: 'needs-input', question: '?' }),
   ]), null, NOW);
-  assert.deepEqual(v.recent.map((r) => [r.id, r.tag, r.tone, r.meta, r.reason, r.href]), [
-    [5, 'DRY RUN', 'mute', 'app · ana · 11m · $0.00', undefined, undefined],
-    [4, 'CANCELLED', 'mute', 'app · ben · 45s', undefined, undefined],
-    [3, 'FAILED', 'fail', 'app · ana', 'the GitHub token in the env file does not work', undefined],
-    [2, 'DRAFT PR #31', 'ask', 'app · ana · 31m · $3.40', 'the gates still fail after 2 fix round(s):', 'https://github.com/o/r/pull/31'],
-    [1, 'PR #112', 'ink', 'app · ana · 22m · $2.10', undefined, 'https://github.com/o/r/pull/112'],
+  assert.deepEqual(v.recent.map((r) => [r.id, r.tag, r.tone, r.meta, r.reason]), [
+    [4, 'CANCELLED', 'mute', 'app · ben · 45s', undefined],
+    [3, 'FAILED', 'fail', 'app · ana', 'the GitHub token in the env file does not work'],
   ]);
 });
 
@@ -74,7 +71,7 @@ test('each project is summed up from its own jobs, and picking one narrows every
     { id: 'app', summary: '1 running · 1 queued · 1 ask', on: false, busy: true, ticks: ['ended', 'failed', 'ask', 'running', 'queued', 'queued'] },
     { id: 'site', summary: '1 queued', on: false, busy: false, ticks: ['queued'] },
   ]);
-  assert.deepEqual([all.title, all.sel, all.live.length, all.waiting.length, all.recent.length], ['All projects', undefined, 1, 3, 3]);
+  assert.deepEqual([all.title, all.sel, all.live.length, all.waiting.length, all.recent.length], ['All projects', undefined, 1, 3, 2]);
 
   const app = view(d, 'app', NOW);
   assert.deepEqual(app.sel, { id: 'app', base: 'main', gates: 'test, typecheck', prs: 1, spent: '$1.75' });
