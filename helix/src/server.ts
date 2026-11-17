@@ -1,11 +1,13 @@
 // Helix's HTTP API: five actions on jobs (submit, status, result, cancel,
 // answer) and three on projects (add, list, remove), over JSON, for the
-// private network only. Each of those carries a person's token; a job can be
-// cancelled or answered only by whoever submitted it, and a project removed
-// only by whoever added it (projects.ts).
+// private network only. Each of those carries a person's token; the queue
+// lists a person's own jobs, a job can be answered only by whoever submitted
+// it and cancelled by them or the owner, and a project removed only by whoever
+// added it or the owner (projects.ts).
 // Joining (invite, join) carries a one-time code instead, and leave the
 // person's own token (join.ts). Inviting and removing people (POST /people,
-// DELETE /people/<name>) is the owner's alone (owner.ts).
+// DELETE /people/<name>) and every person's queue (GET /jobs?all) are the
+// owner's alone (owner.ts).
 // It also serves the display: its page at /, and what it shows at /display.
 import { createServer, type IncomingMessage, type Server } from 'node:http';
 import { AnimusError } from '../../plugin/src/proc.ts';
@@ -15,7 +17,7 @@ import { parseSkills, type PersonalSkill } from '../../plugin/src/personal.ts';
 import { hashToken, helixHome, type Config } from './config.ts';
 import { display } from './display.ts';
 import { invite, inviteDetails, joinHelix, takeOff, verifyInChild, type Verify } from './join.ts';
-import { requireOwner } from './owner.ts';
+import { isOwner, requireOwner } from './owner.ts';
 import { addProject, checkInChild, projectView, removeProject, type StartCheck } from './projects.ts';
 import type { Transport } from './slack-api.ts';
 import { slackInvite } from './slack.ts';
@@ -132,12 +134,15 @@ export function serve(opts: {
         if (!name && req.method === 'GET') return send(200, { projects: store.projects().map(({ dir: _dir, ...p }) => p) });
         if (!name && req.method === 'POST') { const { dir: _dir, ...p } = addProject({ store, home, startCheck }, person, await body(req)); return send(202, p); }
         if (name && !action && req.method === 'GET') { const { dir: _dir, ...p } = projectView(store, home, name); return send(200, p); }
-        if (name && !action && req.method === 'DELETE') { const { dir: _dir, ...p } = removeProject({ store, home }, person, name); return send(200, p); }
+        if (name && !action && req.method === 'DELETE') { const { dir: _dir, ...p } = removeProject({ store, home, config }, person, name); return send(200, p); }
         return send(404, { error: `nothing at ${req.method} ${url.pathname}` });
       }
       if (root !== 'jobs') return send(404, { error: `nothing at ${url.pathname}` });
       if (!id) {
-        if (req.method === 'GET') return send(200, { slots: config.slots, jobs: store.list() });
+        if (req.method === 'GET') {
+          if (url.searchParams.has('all')) requireOwner(config, person, 'see every job');
+          return send(200, { slots: config.slots, jobs: url.searchParams.has('all') ? store.list() : store.list().filter((j) => j.person === person) });
+        }
         if (req.method === 'POST') {
           const b = await body(req);
           if (typeof b.repo !== 'string' || typeof b.spec !== 'string') throw new Refused(400, 'a submission needs repo (its name here) and spec (the file\'s text)');
@@ -153,7 +158,8 @@ export function serve(opts: {
           const job = store.get(n);
           return job ? send(200, { ...job, log: supervisor.log(n) }) : send(404, { error: `no job ${n}` });
         }
-        if (req.method === 'POST' && action === 'cancel') return send(200, supervisor.cancel(person, n));
+        // The owner cancels anyone's job as if it were theirs, as the Slack owner's Cancel button does.
+        if (req.method === 'POST' && action === 'cancel') return send(200, supervisor.cancel(isOwner(config, person) ? (store.get(n)?.person ?? person) : person, n));
         if (req.method === 'POST' && action === 'answer') {
           const b = await body(req);
           if (typeof b.answer !== 'string' || !b.answer.trim()) throw new Refused(400, 'answer must be text');

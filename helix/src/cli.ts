@@ -83,8 +83,9 @@ const USAGE = `helix: runs Animus jobs for several people on one machine
   helix owner <person>
         Make someone who has joined the owner, in config.yaml: from their
         own laptop they invite and remove people (animus invite, animus
-        remove-person). The owner cannot leave or be removed until another
-        is named.
+        remove-person), remove any project, cancel any job and see every
+        job (animus status --all). The owner cannot leave or be removed
+        until another is named.
   helix add-person <name> [--env-file <file>]
         Let a person submit, and print their token once. The file holds
         KEY=VALUE lines set for their jobs only (CLAUDE_CODE_OAUTH_TOKEN, GH_TOKEN).

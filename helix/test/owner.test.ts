@@ -153,3 +153,84 @@ for (const [what, file, args, as] of [
     assert.ok(h.store.person('ajmal'));
   });
 }
+
+/** A job of the person's for the project, queued and never started: the test supervisor is not woken for it. */
+const queue = (store: ReturnType<typeof openStore>, person: string, repo: string) => store.add({ state: 'queued', person, repo, spec: '', title: `${person}'s job`, draft: false, submitted: new Date().toISOString() });
+const project = (store: ReturnType<typeof openStore>, name: string, added_by?: string) => store.putProject({ name, url: `https://github.com/o/${name}.git`, dir: join(tmpdir(), 'nowhere', name), state: 'ready', added: '', ...(added_by ? { added_by } : {}) });
+
+// Protects: criterion 3, the owner removes any project. Fails when: the owner is refused a project someone else, or the machine, added.
+for (const added_by of ['ana', undefined]) {
+  test(`the owner's animus project remove removes a project added ${added_by ? `by ${added_by}` : 'on the machine'}`, async (t) => {
+    const h = await helix(t, { owner: 'ajmal' });
+    project(h.store, 'app', added_by);
+
+    const r = await cli(ANIMUS, ['project', 'remove', 'app'], h.as('ajmal'));
+
+    assert.equal(r.code, 0, r.err);
+    assert.equal(h.store.project('app'), undefined);
+  });
+}
+
+// Protects: criterion 3, the rule still holds for the owner. Fails when: the owner removes a project with a job queued for it.
+test('the owner\'s animus project remove is refused while one of its jobs is queued', async (t) => {
+  const h = await helix(t, { owner: 'ajmal' });
+  project(h.store, 'app', 'ana');
+  const job = queue(h.store, 'ana', 'app');
+
+  const r = await cli(ANIMUS, ['project', 'remove', 'app'], h.as('ajmal'));
+
+  assert.equal(r.code, 2);
+  assert.match(r.err, new RegExp(`job\\(s\\) ${job.id} are queued or running for app`));
+  assert.ok(h.store.project('app'));
+});
+
+// Protects: criterion 4, the owner cancels anyone's job. Fails when: cancel is refused for a job the owner did not submit.
+test('the owner\'s animus cancel cancels someone else\'s job', async (t) => {
+  const h = await helix(t, { owner: 'ajmal' });
+  const job = queue(h.store, 'ana', 'app');
+
+  const r = await cli(ANIMUS, ['cancel', String(job.id)], h.as('ajmal'));
+
+  assert.equal(r.code, 0, r.err);
+  assert.equal(h.store.get(job.id)?.state, 'cancelled');
+});
+
+// Protects: criterion 4, cancel stays own-only for others. Fails when: someone but the owner cancels another person's job.
+test('animus cancel from someone but the owner is refused for another person\'s job', async (t) => {
+  const h = await helix(t, { owner: 'ajmal' });
+  const job = queue(h.store, 'ajmal', 'app');
+
+  const r = await cli(ANIMUS, ['cancel', String(job.id)], h.as('ana'));
+
+  assert.equal(r.code, 2);
+  assert.match(r.err, new RegExp(`job ${job.id} is ajmal's`));
+  assert.equal(h.store.get(job.id)?.state, 'queued');
+});
+
+// Protects: criterion 4, status --all. Fails when: the owner's --all leaves out someone's jobs or whose they are, or plain status shows other people's jobs.
+test('the owner\'s animus status --all lists every person\'s jobs with whose each is; plain status only their own', async (t) => {
+  const h = await helix(t, { owner: 'ajmal' });
+  const mine = queue(h.store, 'ajmal', 'app');
+  const anas = queue(h.store, 'ana', 'site');
+
+  const all = await cli(ANIMUS, ['status', '--all'], h.as('ajmal'));
+  const own = await cli(ANIMUS, ['status'], h.as('ajmal'));
+
+  assert.equal(all.code, 0, all.err);
+  assert.match(all.out, new RegExp(`^${mine.id}\\s+ajmal\\s+app\\b`, 'm'));
+  assert.match(all.out, new RegExp(`^${anas.id}\\s+ana\\s+site\\b`, 'm'));
+  assert.match(own.out, new RegExp(`^${mine.id}\\s+ajmal\\s+app\\b`, 'm'));
+  assert.doesNotMatch(own.out, /\bana\b/);
+});
+
+// Protects: criterion 4, --all is the owner's. Fails when: someone but the owner sees every person's jobs.
+test('animus status --all from someone but the owner is refused', async (t) => {
+  const h = await helix(t, { owner: 'ajmal' });
+  queue(h.store, 'ajmal', 'app');
+
+  const r = await cli(ANIMUS, ['status', '--all'], h.as('ana'));
+
+  assert.equal(r.code, 2);
+  assert.match(r.err, /only the owner, ajmal, may see every job/);
+  assert.doesNotMatch(r.out, /ajmal/);
+});

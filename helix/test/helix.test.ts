@@ -75,7 +75,8 @@ test('submitted jobs run one per slot, in order, each as its submitter with only
   assert.deepEqual([a.outcome, a.pr, a.reason], ['pr', 'https://example.test/pr/hold one', 'user=ana secret=anas answer=']);
   assert.deepEqual([b.outcome, b.person, b.reason], ['pr', 'ben', 'user=ben secret= answer=']);
   assert.match(a.log!, /job fake-hold-one: hold one/);
-  assert.deepEqual((await client.jobs()).jobs.map((j) => j.id), [first.id, second.id]);
+  // The queue is ben's own; every person's is the owner's alone (owner.test.ts).
+  assert.deepEqual((await client.jobs()).jobs.map((j) => j.id), [second.id]);
   h.stop();
 });
 

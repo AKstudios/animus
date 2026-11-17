@@ -72,7 +72,8 @@ export async function helixVersion(url: string): Promise<string> {
 
 export type SentSkill = { name: string; roles: string[]; types?: string[]; text: string };
 export const submit = (s: { repo: string; spec: string; name: string; draft?: boolean; skills?: SentSkill[] }) => call<RemoteJob>('POST', '/jobs', s);
-export const jobs = () => call<{ slots: number; jobs: RemoteJob[] }>('GET', '/jobs');
+/** The person's own jobs; with all, every person's, which only the owner may see. */
+export const jobs = (all = false) => call<{ slots: number; jobs: RemoteJob[] }>('GET', all ? '/jobs?all' : '/jobs');
 export const job = (id: string) => call<RemoteJob>('GET', `/jobs/${encodeURIComponent(id)}`);
 export const cancel = (id: string) => call<RemoteJob>('POST', `/jobs/${encodeURIComponent(id)}/cancel`);
 export const answer = (id: string, text: string) => call<RemoteJob>('POST', `/jobs/${encodeURIComponent(id)}/answer`, { answer: text });

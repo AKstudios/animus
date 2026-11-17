@@ -103,15 +103,18 @@ With Helix, the machine that runs jobs for everyone:
         for it.
   animus project list
   animus project remove <name>
-        Only whoever added it; its people's clones on Helix are deleted.
+        Only whoever added it, or the owner; its people's clones on Helix are
+        deleted.
   animus submit <spec.md> [--repo <dir>] [--draft]
         Queue the spec there, for the project with this checkout's GitHub
         address (or, failing that, named after its folder), with your own
         skills from ANIMUS_HOME/config.yaml.
-  animus status [<id>]      Its queue, or one job with the end of its log.
+  animus status [<id>] [--all]
+        Your jobs there, or one job with the end of its log. --all: every
+        person's jobs, for the owner only.
   animus result <id>        One job as JSON; exits 0 once it ended in a pull request.
   animus answer <id> <text> Answer a job's question; it is queued again.
-  animus cancel <id>
+  animus cancel <id>        Your own job, or the owner cancels anyone's.
 
 Inside a job's worktree (the implementer runs these):
   animus check              Run the job's gates now.
@@ -163,7 +166,7 @@ async function main(argv: string[]): Promise<number> {
     args: rest, allowPositionals: true,
     options: {
       repo: { type: 'string' }, 'dry-run': { type: 'boolean' }, keep: { type: 'boolean' }, draft: { type: 'boolean' }, answer: { type: 'string' },
-      json: { type: 'boolean' }, skills: { type: 'string' }, local: { type: 'boolean' }, helix: { type: 'boolean' }, n: { type: 'string', short: 'n' }, again: { type: 'boolean' }, days: { type: 'string' }, force: { type: 'boolean' }, slices: { type: 'boolean' }, yes: { type: 'boolean' }, github: { type: 'string' }, slack: { type: 'string' },
+      json: { type: 'boolean' }, skills: { type: 'string' }, local: { type: 'boolean' }, helix: { type: 'boolean' }, n: { type: 'string', short: 'n' }, again: { type: 'boolean' }, days: { type: 'string' }, force: { type: 'boolean' }, slices: { type: 'boolean' }, yes: { type: 'boolean' }, github: { type: 'string' }, slack: { type: 'string' }, all: { type: 'boolean' },
     },
   });
   const cwd = process.cwd();
@@ -259,7 +262,7 @@ async function main(argv: string[]): Promise<number> {
       throw new AnimusError('usage: animus project add [<name>] | list | remove <name>');
     }
     case 'status':
-      console.log(positionals[0] ? helix.describeJob(await helix.job(positionals[0])) : helix.describeJobs((await helix.jobs()).jobs));
+      console.log(positionals[0] ? helix.describeJob(await helix.job(positionals[0])) : helix.describeJobs((await helix.jobs(Boolean(values.all))).jobs));
       return 0;
     case 'result': {
       if (!positionals[0]) throw new AnimusError('usage: animus result <id>');
