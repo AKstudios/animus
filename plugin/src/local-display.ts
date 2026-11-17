@@ -24,6 +24,9 @@ const alive = (pid: number): boolean => {
 /** Job folders are named by Animus; only a plain name is taken as one. */
 const PLAIN = /^[A-Za-z0-9][\w.-]*$/;
 
+/** The project of a job that has no state and no run row: it never got far enough to name one. */
+const NO_PROJECT = 'unknown project';
+
 function jobOf(id: string, runs: readonly Run[]): DisplayJob | undefined {
   const state = loadState(id);
   const progress = loadProgress(id);
@@ -35,13 +38,15 @@ function jobOf(id: string, runs: readonly Run[]): DisplayJob | undefined {
   const running = !state?.outcome && progress?.host === hostname() && progress.pid !== undefined && alive(progress.pid);
   const submitted = mine[0]?.started ?? progress?.at ?? statSync(jobDir(id)).mtime.toISOString();
   return {
-    id, person: last?.submitter ?? '', repo: state ? basename(state.repo) : last ? basename(last.repo) : '', title: title ?? id, submitted,
+    id, person: last?.submitter ?? '', repo: state ? basename(state.repo) : last ? basename(last.repo) : NO_PROJECT, title: title ?? id, submitted,
     state: state?.outcome ? 'ended' : running ? 'running' : 'stopped',
     ...(last?.started ? { started: last.started } : {}), ...(last?.ended ? { ended: last.ended } : {}),
     ...(state?.outcome ? { outcome: state.outcome } : {}), ...(last?.pr ? { pr: last.pr } : {}),
     ...(last?.reason ? { reason: last.reason } : {}), ...(state?.question ? { question: state.question } : {}),
     ...(last ? { cost_usd: last.cost_usd } : {}),
-    ...(running && progress ? { progress } : {}), ...(!state?.outcome && !running ? { resume: `animus resume ${id}` } : {}),
+    ...(running && progress ? { progress } : {}),
+    // `animus resume` needs state.json, which is saved only after the worktree is made.
+    ...(!state?.outcome && !running ? state ? { resume: `animus resume ${id}` } : { reason: 'It stopped during setup, before it had a worktree, so there is nothing to resume. Run its spec again.' } : {}),
   };
 }
 

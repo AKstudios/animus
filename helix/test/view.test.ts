@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import { test } from 'node:test';
 import type { Display, DisplayJob } from '../../plugin/display/shape.ts';
 import { clock, span, view } from '../../plugin/display/view.ts';
@@ -108,4 +109,13 @@ test('the idle animation shows only with nothing running or queued and no projec
   assert.equal(view(shown([asking], 8), 'app', NOW).idle, false);
   // A picked project Helix no longer has is the same as none picked.
   assert.equal(view(shown([], 8), 'gone', NOW).idle, true);
+});
+
+// Protects: the idle helix's rungs are out of phase under the CSP (style-src 'self' drops style attributes). Fails when app.ts sets a rung's pose inline, or helix.css lacks a pose and phase for one of the 16 rungs.
+test('the idle helix gives every rung its pose and phase in the stylesheet, not in a style attribute', () => {
+  const css = readFileSync(new URL('../../plugin/display/helix.css', import.meta.url), 'utf8');
+  const app = readFileSync(new URL('../../plugin/display/app.ts', import.meta.url), 'utf8');
+  const phases = [...css.matchAll(/\.sync-helix > :nth-child\((\d+)\) > \.sync-rung \{ --s: [-\d.]+; animation-delay: (-?[\d.]+)s; \}/g)].map((m) => m[2]);
+  assert.equal(new Set(phases).size, 16);
+  assert.doesNotMatch(app, /style="/);
 });

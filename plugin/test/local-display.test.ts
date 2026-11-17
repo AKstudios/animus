@@ -66,6 +66,15 @@ test('an ended local job shows its run log row, with no way to resume', () => {
   assert.deepEqual([job.state, job.outcome, job.pr, job.title, job.person, job.resume], ['ended', 'pr', 'https://example.test/pr/9', 'Logged', 'me@example.com', undefined]);
 });
 
+// Protects: `animus resume` is offered only for a job with state.json. Fails when a run that stopped before saveState (progress.json only) gets a resume command or an empty project name.
+test('a local job with progress but no state shows as stopped during setup, with no resume and a named project', () => {
+  saveProgress('setup-only', 'setup', 'script');
+  writeJson(join(jobDir('setup-only'), 'progress.json'), { ...loadProgress('setup-only')!, pid: deadPid() });
+  const job = localJobs().find((j) => j.id === 'setup-only')!;
+  assert.deepEqual([job.state, job.resume, job.repo], ['stopped', undefined, 'unknown project']);
+  assert.match(job.reason!, /during setup/);
+});
+
 // ---- the local display's server and page
 
 /** The local display on a free port, over the jobs seeded so far. */

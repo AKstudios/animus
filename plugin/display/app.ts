@@ -65,13 +65,11 @@ const EMPTY_MARK = `<svg width="96" height="96" viewBox="0 0 96 96" fill="none" 
  * of light, with glitch fragments and a word. Inline SVG and CSS transforms only
  * (helix.css): no canvas, no frame loop. Each rung of the helix is flat when its
  * --s is 1 and edge-on at 0; --s is also its resting pose under reduced motion.
+ * The per-rung --s and phase are rules in helix.css: the CSP allows no style attribute.
  */
 const RUNGS = 16;
-const rungs = Array.from({ length: RUNGS }, (_, i) => {
-  const turn = i / RUNGS * 1.5;
-  return `<g transform="translate(200 ${22 + i * 11})"><g class="sync-rung" style="--s:${Math.cos(turn * 2 * Math.PI).toFixed(2)};animation-delay:-${(turn * 12).toFixed(2)}s">
-    <line class="s-line" x1="-60" x2="60" stroke-width="1"></line><circle class="f-accent" cx="-60" r="4"></circle><circle class="f-ink" cx="60" r="4"></circle></g></g>`;
-}).join('');
+const rungs = Array.from({ length: RUNGS }, (_, i) => `<g transform="translate(200 ${22 + i * 11})"><g class="sync-rung">
+    <line class="s-line" x1="-60" x2="60" stroke-width="1"></line><circle class="f-accent" cx="-60" r="4"></circle><circle class="f-ink" cx="60" r="4"></circle></g></g>`).join('');
 const SYNC = `<div class="sync" data-key="sync" role="img" aria-label="Synchronizing">
   <div class="sync-drift"><svg viewBox="0 0 400 220" fill="none" aria-hidden="true">
     <g class="sync-mark" transform="translate(200 110)"><g class="sync-unwind">
