@@ -31,6 +31,8 @@ export type Config = {
    * Left out, jobs run on the machine as Helix's account, sharing it.
    */
   container?: { memory?: string; cpus?: number };
+  /** The person who may invite and remove people and act on any project or job; set by helix owner (owner.ts). */
+  owner?: string;
   /** The Slack bot, set by helix slack setup; its tokens are in credentials/slack.env. owner is a Slack user id (U…). */
   slack?: { enabled: boolean; owner: string };
 };

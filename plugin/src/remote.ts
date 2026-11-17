@@ -96,6 +96,26 @@ export const leave = () => call<{ name: string; cancelled: number[]; kept?: stri
 /** What an invite is for: asked with its code, before any token exists. */
 export type InviteDetails = { name: string; github?: string; expires: string; repos: { name: string; url: string }[] };
 export const inviteDetails = (url: string, code: string) => request<InviteDetails>('POST', url, '/invite', undefined, { code });
+/** An invite Helix made: its code, or the Slack user its bot sent it to; url is where Helix says people reach it. */
+export type MadeInvite = { name: string; expires: string; code?: string; slack?: string; url?: string };
+/** `animus invite`, from the owner's laptop: the same as helix invite on the machine. */
+export const invite = (p: { name: string; github?: string; slack?: string }) => call<MadeInvite>('POST', '/people', p);
+
+/** What helix invite and animus invite print: the code and the line to join with, or where the Slack bot sent it. */
+export function describeInvite(made: MadeInvite, url: string | undefined): string {
+  const until = made.expires.slice(0, 16).replace('T', ' ');
+  if (made.slack) return `The Slack bot sent ${made.slack} the line that installs Animus and joins as ${made.name}; its code is good until ${until} UTC.`;
+  return [
+    `${made.name}'s code, shown this once, good until ${until} UTC:`,
+    '',
+    `  ${made.code}`,
+    '',
+    'They install the animus plugin in Claude Code, then run:',
+    '',
+    `  animus join ${url ?? '<the address they reach Helix at; url: in config.yaml fills it in here>'} ${made.code}`,
+  ].join('\n');
+}
+
 export const join = (url: string, code: string, tokens: { claude_token: string; github_token: string }) =>
   request<{ name: string; token: string; github?: string; cannot_push?: string[] }>('POST', url, '/join', undefined, { code, ...tokens });
 

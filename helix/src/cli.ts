@@ -18,6 +18,8 @@ import { loadProfile } from '../../plugin/src/profile.ts';
 import { checkInChild, checkProject, failInterruptedChecks, forgetProject, setupHere, setupInContainer } from './projects.ts';
 import { INVITE_HOURS, invite, takeOff } from './join.ts';
 import { ask } from '../../plugin/src/join.ts';
+import { describeInvite } from '../../plugin/src/remote.ts';
+import { setOwner } from './owner.ts';
 import { slackEnvFile, slackSetup, slackWeb } from './slack-api.ts';
 import { startSlack } from './slack-socket.ts';
 import { slackBot, slackInvite, slackNotifier } from './slack.ts';
@@ -77,6 +79,10 @@ const USAGE = `helix: runs Animus jobs for several people on one machine
         in one line that installs Animus and joins; it needs --github, and
         joining links that Slack user to the person.
         Run again for a new code; the earlier one stops working.
+        The owner runs the same from their laptop: animus invite.
+  helix owner <person>
+        Make someone who has joined the owner, in config.yaml: from their
+        own laptop they invite people (animus invite).
   helix add-person <name> [--env-file <file>]
         Let a person submit, and print their token once. The file holds
         KEY=VALUE lines set for their jobs only (CLAUDE_CODE_OAUTH_TOKEN, GH_TOKEN).
@@ -165,7 +171,7 @@ function main(argv: string[]): number | undefined | Promise<number> {
       const slack = startSlack(config, { say });
       const supervisor = supervise({ store, config, home, preflight, say, ...isolation, ...(slack ? { notify: slackNotifier(slack, store, say) } : {}) });
       if (slack) slackBot(slack, { store, config, supervisor });
-      const server = serve({ config, store, supervisor, home, startCheck: checkInChild(store, home, say), ...(config.container ? { reap: removeContainer } : {}) });
+      const server = serve({ config, store, supervisor, home, startCheck: checkInChild(store, home, say), ...(config.container ? { reap: removeContainer } : {}), ...(slack ? { slack } : {}) });
       server.listen(config.port, config.host, () => console.error(`helix ${animusVersion()}: listening on http://${config.host}:${config.port}, ${config.slots} job(s) at once${config.container ? ', each in a container' : ''}, projects: ${Object.keys(readyRepos(store)).join(', ') || 'none yet'}`));
       // Someone changed the slots or the container limits: the same config object, so everything sees it at once.
       watchFile(configFile(), { interval: 2000 }, () => {
@@ -250,15 +256,14 @@ function main(argv: string[]): number | undefined | Promise<number> {
       if (!name) throw new AnimusError('usage: helix invite <name> [--github <login>] [--slack <member-id>]');
       if (values.slack) return inviteOnSlack(name, values.github, values.slack);
       const made = withStore((store) => invite(store, name, values.github ? { github: values.github } : {}));
-      console.log([
-        `${name}'s code, shown this once, good until ${made.expires.slice(0, 16).replace('T', ' ')} UTC:`,
-        '',
-        `  ${made.code}`,
-        '',
-        'They install the animus plugin in Claude Code, then run:',
-        '',
-        `  animus join ${loadConfig().url ?? '<the address they reach Helix at; url: in config.yaml fills it in here>'} ${made.code}`,
-      ].join('\n'));
+      console.log(describeInvite({ name, ...made }, loadConfig().url));
+      return 0;
+    }
+    case 'owner': {
+      const name = positionals[0];
+      if (!name) throw new AnimusError('usage: helix owner <person>');
+      withStore((store) => setOwner(store, name));
+      console.log(`${name} is the owner of this Helix: from their own laptop they may invite and remove people, remove any project, cancel any job and see every job.`);
       return 0;
     }
     case 'verify': {
@@ -340,7 +345,7 @@ async function inviteOnSlack(name: string, github: string | undefined, user: str
   const store = openHelix();
   try {
     const made = await slackInvite(slackWeb(bot), { store, config: loadConfig() }, name, { ...(github ? { github } : {}), slack: user });
-    console.log(`The Slack bot sent ${user} the line that installs Animus and joins as ${name}; its code is good until ${made.expires.slice(0, 16).replace('T', ' ')} UTC.`);
+    console.log(describeInvite({ name, expires: made.expires, slack: user }, undefined));
     return 0;
   } finally { store.close(); }
 }

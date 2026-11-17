@@ -4,16 +4,21 @@
 // cancelled or answered only by whoever submitted it, and a project removed
 // only by whoever added it (projects.ts).
 // Joining (invite, join) carries a one-time code instead, and leave the
-// person's own token (join.ts).
+// person's own token (join.ts). Inviting people (POST /people) is the
+// owner's alone (owner.ts).
 // It also serves the display: its page at /, and what it shows at /display.
 import { createServer, type IncomingMessage, type Server } from 'node:http';
-import { VERSION_HEADER } from '../../plugin/src/remote.ts';
+import { AnimusError } from '../../plugin/src/proc.ts';
+import { VERSION_HEADER, type MadeInvite } from '../../plugin/src/remote.ts';
 import { animusVersion, compatible } from '../../plugin/src/version.ts';
 import { parseSkills, type PersonalSkill } from '../../plugin/src/personal.ts';
 import { hashToken, helixHome, type Config } from './config.ts';
 import { display } from './display.ts';
-import { inviteDetails, joinHelix, takeOff, verifyInChild, type Verify } from './join.ts';
+import { invite, inviteDetails, joinHelix, takeOff, verifyInChild, type Verify } from './join.ts';
+import { requireOwner } from './owner.ts';
 import { addProject, checkInChild, projectView, removeProject, type StartCheck } from './projects.ts';
+import type { Transport } from './slack-api.ts';
+import { slackInvite } from './slack.ts';
 import type { Store } from './store.ts';
 import { Refused, type Submission, type Supervisor } from './supervisor.ts';
 import { asset } from './ui.ts';
@@ -51,12 +56,31 @@ export function serve(opts: {
   startCheck?: StartCheck;
   /** Helix's home: where projects' clones and checks go. */
   home?: string;
+  /** The Slack bot, when it runs: how the owner's animus invite --slack is sent. */
+  slack?: Pick<Transport, 'dm' | 'post'>;
 }): Server {
   const { config, store, supervisor } = opts;
   const verify = opts.verify ?? verifyInChild;
   const home = opts.home ?? helixHome();
   const startCheck = opts.startCheck ?? checkInChild(store, home);
   const version = animusVersion();
+  /** `animus invite`: what helix invite does on the machine, the Slack DM through this Helix's own bot. */
+  const invitePerson = async (b: Record<string, unknown>): Promise<MadeInvite> => {
+    const { name, github, slack } = b;
+    if (typeof name !== 'string') throw new Refused(400, 'name is who the invite is for');
+    if ((github !== undefined && typeof github !== 'string') || (slack !== undefined && typeof slack !== 'string')) throw new Refused(400, 'github and slack are text');
+    const who = { ...(github ? { github } : {}), ...(slack ? { slack } : {}) };
+    try {
+      if (!slack) return { name, ...invite(store, name, who), ...(config.url ? { url: config.url } : {}) };
+      if (!opts.slack) throw new Refused(409, 'the Slack bot is not running on this Helix: helix slack setup on the machine, then restart helix serve');
+      const { expires } = await slackInvite(opts.slack, { store, config }, name, { ...who, slack });
+      return { name, expires, slack };
+    } catch (err) {
+      // A bad name, or no url for the join line: the owner's to fix, not Helix's failure.
+      if (err instanceof AnimusError && !(err instanceof Refused)) throw new Refused(400, err.message);
+      throw err;
+    }
+  };
   return createServer((req, res) => {
     const send = (status: number, value: unknown) => {
       res.writeHead(status, { 'content-type': 'application/json', 'helix-version': version });
@@ -87,6 +111,10 @@ export function serve(opts: {
       const person = whoIs(store, req);
       if (!person) return send(401, { error: 'a valid token is needed: Authorization: Bearer <token>' });
       if (!current) return outdated();
+      if (req.method === 'POST' && url.pathname === '/people') {
+        requireOwner(config, person, 'invite people');
+        return send(201, await invitePerson(await body(req)));
+      }
       if (req.method === 'POST' && url.pathname === '/leave') {
         const { cancelled, kept } = takeOff(person, store, opts.reap);
         return send(200, { name: person, cancelled: cancelled.map((j) => j.id), ...(kept ? { kept } : {}) });
