@@ -157,7 +157,7 @@ test('the overview lists local jobs by project, a stopped one with its resume co
   };
   const v = view(d, null, Date.parse(d.at));
   assert.deepEqual(v.byProject.map((g) => [g.project, g.jobs.map((j) => j.id)]), [['blog', ['c-2']], ['shop', ['a-9', 'b-1']]]);
-  assert.deepEqual(v.byProject[1]!.jobs[0], { id: 'a-9', page: '/jobs/a-9', tag: 'STOPPED', tone: 'fail', title: 'a-9', meta: 'shop', reason: 'It stopped before it ended. To carry on: animus resume a-9' });
+  assert.deepEqual(v.byProject[1]!.jobs[0], { id: 'a-9', page: '/jobs/a-9', tag: 'STOPPED', tone: 'fail', title: 'a-9', repo: 'shop', person: '', meta: '', reason: 'It stopped before it ended. To carry on: animus resume a-9' });
   assert.deepEqual(route('/jobs/a-9'), { page: 'job', id: 'a-9' });
   assert.deepEqual(route('/jobs/12'), { page: 'job', id: 12 });
   assert.equal(jobNotice('a-9', false, undefined, true), undefined);

@@ -36,6 +36,7 @@ thread is where its person answers it and where it can be cancelled.
 
 ## Decisions
 
+- What the bot does for a person is recorded as their activity.
 - Built on the previous spec's bot core and fake transport; tests sit there.
 - Answering and cancelling call what `animus answer` and `animus cancel`
   already reach on Helix; Slack adds no second path.

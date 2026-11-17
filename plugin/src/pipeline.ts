@@ -24,7 +24,7 @@ import { roleSkills } from './skills.ts';
 import { criteriaSoFar, isPlanned, oneSlice, planSlices, type Slicing } from './slices.ts';
 import { loadSpec, type Spec } from './spec.ts';
 import { describeShots, designOf, JOB_PID, takeShots, uiProblem, uiTarget, type UiJob } from './ui.ts';
-import { createWorkspace, ensureSetup, removeWorkspace, reopenWorkspace, type Workspace } from './workspace.ts';
+import { baseCommit, createWorkspace, ensureSetup, removeWorkspace, reopenWorkspace, type Workspace } from './workspace.ts';
 
 export type Deps = {
   factory: Factory;
@@ -183,8 +183,12 @@ export async function runJob(opts: RunOptions, deps: Deps): Promise<Run> {
   let shots: { dir: string; files: string[]; urls?: Record<string, string>; branch?: string } | undefined;
   const found = new Map<string, Finding>();
   let actedOn = 0;
-  /** Gate fix rounds spent inside slices: each slice has its own allowance, and so has the finished branch. */
-  let sliceRounds = 0;
+  /** Gate fix rounds spent outside the current allowance: each slice has its own, and so have the finished branch and its catch-up. */
+  let spentBefore = 0;
+  /** The base commit the branch caught up to before the push, once it has. */
+  let caughtUp: string | undefined;
+  /** The files whose conflicts with the base an implementer resolved in the catch-up. */
+  let resolved: string[] = [];
   let planFallback: string | undefined;
   /** The slice being worked on, for whoever watches the job: "slice 2 of 4". */
   let inSlice = '';
@@ -266,9 +270,11 @@ export async function runJob(opts: RunOptions, deps: Deps): Promise<Run> {
   /**
    * Runs the gates until they pass, sending failures back to the implementer
    * while rounds are left. For a slice, only the criteria of the slices so
-   * far are checked, and the rounds are that slice's own.
+   * far are checked, and the rounds are that slice's own. `why` goes in front
+   * of each failure sent back; `exhausted` is how the job ends when the
+   * rounds run out.
    */
-  const gate = async (slice?: { name: string; only: ReadonlySet<number> }): Promise<void> => {
+  const gate = async (slice?: { name: string; only: ReadonlySet<number> }, why = '', exhausted: Stop['outcome'] = 'failed'): Promise<void> => {
     const of = slice ? ` for ${slice.name}` : '';
     let rounds = 0;
     for (;;) {
@@ -292,12 +298,84 @@ export async function runJob(opts: RunOptions, deps: Deps): Promise<Run> {
       writeFileSync(join(dir, 'gates', `run-${attempt}.txt`), gateReport(lastGates));
       for (const line of describe(lastGates).split('\n').slice(0, lastGates.length)) log(`  ${line}`);
       if (ok) return;
-      const used = slice ? rounds : run.fix_rounds - sliceRounds;
-      if (used >= factory.limits.gate_rounds) throw new Stop('failed', `the gates${of} still fail after ${used} fix round(s):\n${describe(lastGates.filter((r) => !r.ok))}`);
+      const used = slice ? rounds : run.fix_rounds - spentBefore;
+      if (used >= factory.limits.gate_rounds) throw new Stop(exhausted, `the gates${of} still fail after ${used} fix round(s):\n${describe(lastGates.filter((r) => !r.ok))}`);
       run.fix_rounds++;
-      if (slice) { rounds++; sliceRounds++; }
+      if (slice) { rounds++; spentBefore++; }
       // A failed gate round raises the model tier by one for the next.
-      await implementer(`gate-fix-${run.fix_rounds}`, gateFixPrompt(describe(lastGates), factory.limits.gate_rounds - used - 1), raise(plan.implement.tier));
+      await implementer(`gate-fix-${run.fix_rounds}`, `${why}${gateFixPrompt(describe(lastGates), factory.limits.gate_rounds - used - 1)}`, raise(plan.implement.tier));
+    }
+  };
+
+  /**
+   * The catch-up: merges what the base gained since the job started into its
+   * branch, with one merge commit (no rebase: each of a sliced job's commits
+   * would meet the same conflict). Returns the base commit it merged, or
+   * nothing when the base did not move. The merged base becomes the job's
+   * base, so the job's own changes stay what is diffed. A merge that
+   * conflicts is undone and the branch opens as it was, unless `keep` asks
+   * for the conflicting files, with the merge left in progress.
+   */
+  const catchUp = (keep = false): { latest: string; conflicts?: string[] } | undefined => {
+    at('gates', `catch-up · ${ws.baseBranch}`);
+    const latest = baseCommit(repo, ws.baseBranch, log);
+    // Holding it already covers a base that did not move, and one rewound to an earlier commit.
+    if (tryGit(wt, ['merge-base', '--is-ancestor', latest, 'HEAD']) !== undefined) return undefined;
+    if (tryGit(wt, ['merge', '--no-ff', '--no-verify', '-m', `Merge ${ws.baseBranch} at ${latest.slice(0, 12)} into ${ws.branch}`, latest]) === undefined) {
+      const conflicts = git(wt, ['diff', '--name-only', '--diff-filter=U']).split('\n').filter(Boolean);
+      if (keep && conflicts.length) {
+        log(`catch-up: ${ws.baseBranch} at ${latest} conflicts with the job's branch in ${conflicts.join(', ')}`);
+        return { latest, conflicts };
+      }
+      tryGit(wt, ['merge', '--abort']);
+      log(`catch-up: ${ws.baseBranch} at ${latest} conflicts with the job's branch; the pull request opens without it`);
+      return undefined;
+    }
+    log(`catch-up: merged ${ws.baseBranch} at ${latest}`);
+    ws.base = caughtUp = latest;
+    saveState(state);
+    return { latest };
+  };
+
+  /**
+   * A catch-up that conflicts: a fresh implementer session resolves the
+   * merge, and the script decides whether that holds: no conflict markers
+   * left, and every gate green within its fix rounds. What it cannot settle
+   * ends the job as needs input with the branch put back as the review left
+   * it, so the answer starts the catch-up again from a clean merge.
+   */
+  const resolveConflicts = async (latest: string, files: string[], answered?: { question: string; answer: string }): Promise<void> => {
+    const from = git(wt, ['rev-parse', 'HEAD']);
+    const was = ws.base;
+    const kept = { summary, ...(notes ? { notes } : {}), ...(review ? { review } : {}), review_rounds: reviewRounds };
+    try {
+      const locked = files.filter((f) => matchesAny(f, repoProfile.protected));
+      // The person's answer is their say on a protected path; without one, no session touches it.
+      if (locked.length && !answered) throw new Stop('needs-input', `${locked.join(', ')} ${locked.length === 1 ? 'is a protected path' : 'are protected paths'}, so Animus asks you how to resolve it before any session does.`);
+      const commits = git(wt, ['log', '--format=%h %s', `${was}..${latest}`, '--', ...files]);
+      delete state.session;
+      delete state.context;
+      await implementer(answered ? 'catch-up-resume' : 'catch-up', conflictPrompt({ job, spec, ws, repo, latest, files, commits, ...(answered ? { answered } : {}) }), plan.implement.tier, true);
+      // The resolving session's report is about the merge, not the job: the pull request keeps the job's.
+      summary = kept.summary;
+      notes = kept.notes;
+      const left = (tryGit(wt, ['grep', '-l', '-E', '^(<{7}|>{7})( |$)', 'HEAD', '--', ...files]) ?? '').split('\n').filter(Boolean).map((f) => f.replace(/^HEAD:/, ''));
+      if (left.length) throw new Stop('needs-input', `The resolution did not hold: conflict markers are left in ${left.join(', ')}.`);
+      if (tryGit(wt, ['merge-base', '--is-ancestor', latest, 'HEAD']) === undefined) throw new Stop('needs-input', 'The resolution did not hold: the merge was not committed.');
+      ws.base = caughtUp = latest;
+      saveState(state);
+      spentBefore = run.fix_rounds;
+      await gate(undefined, `The base moved while the job ran, and Animus merged ${ws.baseBranch} at ${latest} into this branch. Its conflicts in ${files.join(', ')} were resolved, and the gates failed on the merged branch: make the resolution work with both the job's change and the base's.\n\n`, 'needs-input');
+      resolved = files;
+    } catch (err) {
+      tryGit(wt, ['merge', '--abort']);
+      git(wt, ['reset', '--quiet', '--hard', from]);
+      ws.base = was;
+      caughtUp = undefined;
+      if (!(err instanceof Stop) || err.outcome !== 'needs-input') throw err;
+      state.catch_up = kept;
+      log(`catch-up: the branch is back at ${from}; an answer picks the job up at the catch-up`);
+      throw new Stop('needs-input', `The merge of ${ws.baseBranch} at ${latest} into the job's branch conflicts in ${files.join(', ')}. ${err.message}`);
     }
   };
 
@@ -351,7 +429,15 @@ export async function runJob(opts: RunOptions, deps: Deps): Promise<Run> {
     const resumed = done.length;
 
     // ------------------------------------------------------------ implement
-    if (slices.length === 1) {
+    // A job that stopped at the catch-up was implemented and reviewed: it picks up there.
+    const atCatchUp = prior?.catch_up;
+    if (atCatchUp) {
+      log('the job picks up at the catch-up');
+      brief = whole;
+      ({ summary, notes, review } = atCatchUp);
+      reviewRounds = atCatchUp.review_rounds;
+      for (const f of review?.findings ?? []) found.set(`${f.file ?? ''}:${f.problem}`, f);
+    } else if (slices.length === 1) {
       brief = whole;
       await implementer(prior ? 'resume' : 'implement', prior ? resumePrompt(prior, opts.resume?.answer) : brief, plan.implement.tier, !prior);
     } else {
@@ -387,10 +473,11 @@ export async function runJob(opts: RunOptions, deps: Deps): Promise<Run> {
     }
 
     // ---------------------------------------------------------------- gates
-    await gate();
+    if (!atCatchUp) await gate();
 
     // --------------------------------------------------------------- review
-    if (plan.review) {
+    if (atCatchUp) log('review: done before the catch-up stopped to ask');
+    else if (plan.review) {
       const { role, tier, effort } = plan.review;
       for (let round = 1; ; round++) {
         const seen = ui ? await shoot(ui, 'review') : undefined;
@@ -420,6 +507,17 @@ export async function runJob(opts: RunOptions, deps: Deps): Promise<Run> {
       }
     } else log('review: skipped for this profile');
 
+    // ------------------------------------------------------------- catch-up
+    const merged = catchUp(true);
+    if (merged?.conflicts) {
+      const answer = opts.resume?.answer;
+      await resolveConflicts(merged.latest, merged.conflicts, atCatchUp && prior?.question && answer ? { question: prior.question, answer } : undefined);
+    } else if (merged) {
+      // The merged branch is new code: every gate runs on it, with fix rounds of its own.
+      spentBefore = run.fix_rounds;
+      await gate(undefined, `The base moved while the job ran, and Animus merged ${ws.baseBranch} at ${caughtUp} into this branch. The gates failed on the merged branch: make your change work with what the base changed.\n\n`);
+    } else if (atCatchUp) await gate(); // The base no longer conflicts and holds nothing new: the pull request still needs the gates' evidence.
+
     // ------------------------------------------------------------- evidence
     if (ui) await shoot();
     else {
@@ -444,6 +542,15 @@ export async function runJob(opts: RunOptions, deps: Deps): Promise<Run> {
   }
 
   // ------------------------------------------------------------------- PR
+  // A failure's draft opens after the same catch-up, so it too has no conflict with the base where the merge is clean.
+  if (outcome === 'failed' && git(wt, ['rev-parse', 'HEAD']) !== ws.base) {
+    try {
+      catchUp();
+    } catch (err) {
+      if (!(err instanceof AnimusError)) throw err;
+      log(`catch-up: ${err.message.split('\n')[0]}`);
+    }
+  }
   at('pr', outcome === 'needs-input' ? 'pr · stopping to ask' : outcome === 'failed' ? 'pr · writing the failure report' : 'pr · writing the description');
   const head = git(wt, ['rev-parse', 'HEAD']);
   run.head = head;
@@ -469,7 +576,7 @@ export async function runJob(opts: RunOptions, deps: Deps): Promise<Run> {
     const body = prBody({
       job, spec, plan, summary, ...(sliced ? { slices: sliced } : {}), gates: lastGates, gateAttempts: run.gates.length, fixRounds: run.fix_rounds, reviewRounds, open: failed ? open : [],
       protectedTouched: run.protected_touched, escalations: run.escalations, models, cost_usd: run.cost_usd,
-      ...(notes ? { notes } : {}), ...(review ? { review } : {}), ...(shots ? { shots } : {}), ...(failed && reason ? { failure: reason } : {}),
+      ...(notes ? { notes } : {}), ...(review ? { review } : {}), ...(shots ? { shots } : {}), ...(caughtUp ? { caughtUp: { branch: ws.baseBranch, commit: caughtUp, resolved } } : {}), ...(failed && reason ? { failure: reason } : {}),
     });
     writeFileSync(join(dir, 'pr-body.md'), `${body}\n`);
     if (!opts.dryRun) {
@@ -559,6 +666,17 @@ function handoffPrompt(p: { brief: string; base: string; summary: string; notes?
 
 function gateFixPrompt(failures: string, roundsLeft: number): string {
   return `Animus ran the gates on your last commit and they failed. Fix the cause, not the check, commit, and finish again. ${roundsLeft ? `The gates can send the work back ${roundsLeft} more time(s).` : 'This is the last fix round: if the gates fail again the job stops as failed.'}\n\n${failures}`;
+}
+
+/** What the session resolving the catch-up's conflicts is told: the files, the base's commits that touched them, the answer when the job asked, then the spec. */
+function conflictPrompt(p: { job: string; spec: Spec; ws: Workspace; repo: string; latest: string; files: readonly string[]; commits: string; answered?: { question: string; answer: string } }): string {
+  return [
+    `Job ${p.job}. You are in a worktree of ${basename(p.repo)} on the branch ${p.ws.branch}. The job's work on this branch is done and reviewed, but ${p.ws.baseBranch} moved while the job ran, and Animus is merging ${p.ws.baseBranch} at ${p.latest} into the branch. The merge is in progress and conflicts in these files:\n${p.files.map((f) => `  ${f}`).join('\n')}`,
+    `The commits of ${p.ws.baseBranch} that touched them (\`git show <commit>\` shows one):\n${p.commits || '  (none)'}`,
+    `Resolve each conflict so that both the job's change and the base's hold, leave no conflict markers, and commit the merge with \`git commit --no-edit\`. Change nothing the conflicts do not need. Then run \`${animusCommand()} check\` (foreground, Bash timeout 600000). Animus then checks that no markers are left and runs every gate on the merged branch. If you cannot tell how a conflict should be resolved, do not guess: leave the merge as it is, finish with status needs-input, and in question name the file and what you could not decide.`,
+    p.answered ? `The job stopped here before to ask: ${p.answered.question}\n\nThe person's answer: ${p.answered.answer}` : '',
+    `The job's spec follows.\n\n${p.spec.text.trim()}`,
+  ].filter(Boolean).join('\n\n');
 }
 
 function reviewFixPrompt(findings: readonly Finding[]): string {

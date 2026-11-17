@@ -8,6 +8,32 @@ clients with how to update.
 
 ## Unreleased
 
+- A job catches up with its base before the push: when the base branch
+  gained commits while the job ran and they merge cleanly, the job merges
+  them in with one merge commit, runs every gate again with two fix rounds of
+  its own, and the pull request names the base commit it caught up to. A
+  failed job's draft pull request goes through the same catch-up. A base that
+  did not move is left alone.
+- A catch-up that conflicts goes to a fresh implementer session with the
+  conflicting files, the spec and the base's commits that touched them. The
+  job goes on only with no conflict markers left and every gate green within
+  two fix rounds, and the pull request lists the resolved files. A conflict
+  in a protected path, one the session cannot settle, or gates that still
+  fail end the job as needs input; `animus resume <job> --answer` picks it up
+  at the catch-up, not from the start.
+- Helix keeps an activity, with who and when, each time a person submits,
+  answers (with the answer's text) or cancels a job, joins, leaves, or adds or
+  removes a project, and the day each new person joined. Nothing from before
+  is filled in.
+- `/people` on Helix's display lists each person with their GitHub login, the
+  day they joined (blank before it was kept), jobs submitted, PRs opened,
+  total spent and last activity, from a new authenticated route,
+  `GET /people/page-data`. Every person named on the overview or a job page
+  links to `/people/<name>`.
+- `/people/<name>` shows that person's numbers, their jobs newest first thirty
+  at a time, each linking to its job page (those from before activity was kept
+  too), and their activity newest first, and says when they left, from a new
+  authenticated route, `GET /people/<name>/page-data[?before=<job id>]`.
 - `animus ui` serves the local display on 127.0.0.1 (port 7420 or the next
   free one) and opens it: every job in `~/.animus`, grouped by project, newest
   first, each with its job page, and no people pages or sign-in. Ctrl-C stops

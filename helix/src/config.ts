@@ -111,7 +111,10 @@ export function addPerson(store: Store, name: string, envFile?: string, github?:
   const token = randomBytes(24).toString('base64url');
   const env = envFile ? resolve(envFile) : known?.env_file;
   const login = github ?? known?.github;
-  store.putPerson(name, { token_sha256: hashToken(token), ...(env ? { env_file: env } : {}), ...(login ? { github: login } : {}) });
+  // Joined is kept from the first time only: a new token for someone already here is not joining.
+  const joined = known?.joined ?? (known ? undefined : new Date().toISOString());
+  store.putPerson(name, { token_sha256: hashToken(token), ...(env ? { env_file: env } : {}), ...(login ? { github: login } : {}), ...(joined ? { joined } : {}) });
+  if (!known) store.record(name, 'joined');
   return token;
 }
 

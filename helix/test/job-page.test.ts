@@ -109,7 +109,7 @@ test('a job page shows the job\'s facts, spec, stages and slices, checks with a 
 
   assert.deepEqual([v.id, v.title], [job.id, 'Export to PDF']);
   assert.deepEqual(v.facts, [
-    { k: 'project', v: 'app' }, { k: 'person', v: 'ana' }, { k: 'state', v: 'ended' }, { k: 'outcome', v: 'draft pull request' },
+    { k: 'project', v: 'app' }, { k: 'person', v: 'ana', page: '/people/ana' }, { k: 'state', v: 'ended' }, { k: 'outcome', v: 'draft pull request' },
     { k: 'PR', v: '#4', href: 'https://github.com/o/app/pull/4' }, { k: 'cost', v: '$3.40' },
     { k: 'submitted', v: '2026-11-17 10:00 UTC' }, { k: 'started', v: '2026-11-17 10:05 UTC' }, { k: 'ended', v: '2026-11-17 10:40 UTC' }, { k: 'took', v: '35m' },
   ]);
@@ -150,7 +150,7 @@ test('a queued job\'s page shows its spec and facts, and says it has no stages, 
   const job = h.add({ state: 'queued', person: 'ana', repo: 'app', title: 'Later', draft: false, submitted: '2026-11-17T11:59:00Z' }, '# Later\n', '');
   const v = jobView(await h.page(job.id), NOW);
   h.stop();
-  assert.deepEqual(v.facts, [{ k: 'project', v: 'app' }, { k: 'person', v: 'ana' }, { k: 'state', v: 'queued' }, { k: 'submitted', v: '2026-11-17 11:59 UTC' }]);
+  assert.deepEqual(v.facts, [{ k: 'project', v: 'app' }, { k: 'person', v: 'ana', page: '/people/ana' }, { k: 'state', v: 'queued' }, { k: 'submitted', v: '2026-11-17 11:59 UTC' }]);
   assert.equal(v.spec, '# Later\n');
   assert.deepEqual([v.stages.map((s) => s.took), v.slices, v.checks, v.reviews, v.questions, v.log, v.follow], [['', '', '', '', '', '', ''], [], [], [], [], '', true]);
 });

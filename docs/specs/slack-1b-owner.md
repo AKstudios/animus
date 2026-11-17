@@ -56,6 +56,7 @@ Slack, the owner is whoever is linked to that person.
 
 ## Decisions
 
+- What the bot does for a person is recorded as their activity.
 - One owner, a person's name in `config.yaml` as `owner:`. Only `helix
   owner` on the machine sets it: shell access is the root of trust.
 - The owner is checked by Helix on each request from the person's own Helix

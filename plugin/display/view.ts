@@ -1,7 +1,7 @@
 // What the display says, worked out from what Helix sent: which jobs go in
 // which section, and every label, note and count. No DOM here, so the
 // wording is tested without a browser (helix/test/view.test.ts).
-import { jobPage } from './pages.ts';
+import { jobPage, personPage } from './pages.ts';
 import type { Display, DisplayJob, DisplayPr } from './shape.ts';
 
 export type Tone = 'ink' | 'mute' | 'ask' | 'fail';
@@ -9,19 +9,20 @@ export type Tick = 'running' | 'ask' | 'failed' | 'queued' | 'ended';
 
 export type Project = { id: string; summary: string; on: boolean; busy: boolean; ticks: Tick[] };
 
-/** Every job on the overview links to its own page. */
+/** Every job on the overview links to its own page, and the person who submitted it to theirs (personPage). */
 export type Live = {
-  id: number | string; page: string; repo: string; person: string; title: string; elapsed: string;
+  id: number | string; page: string; repo: string; person: string; /** Helix only: the local display has no people pages. */ personPage?: string; title: string; elapsed: string;
   /** The stage's place in the track; -1 until the job has said where it is. */
   stage: number; stageText: string; stepText: string; stepShort: string; who: string; now: string;
 };
 
-export type Waiting = { id: number | string; page: string; ask: boolean; tag: string; title: string; repo: string; person: string; note: string };
+export type Waiting = { id: number | string; page: string; ask: boolean; tag: string; title: string; repo: string; person: string; personPage?: string; note: string };
 
-export type Recent = { id: number | string; page: string; tag: string; tone: Tone; title: string; meta: string; reason?: string };
+/** meta: how long it took and what it cost; the project and person are drawn from repo and person. */
+export type Recent = { id: number | string; page: string; tag: string; tone: Tone; title: string; repo: string; person: string; personPage?: string; meta: string; reason?: string };
 
 /** An open pull request on the overview; it links to GitHub and to the job that opened it. */
-export type Pr = { id: number; page: string; href: string; tag: string; draft: boolean; title: string; meta: string };
+export type Pr = { id: number; page: string; href: string; tag: string; draft: boolean; title: string; repo: string; person: string; personPage: string };
 
 export type View = {
   name: string;
@@ -85,18 +86,21 @@ const LISTED: Record<string, [string, Tone]> = {
 };
 
 /** A row of a job in any state; a stopped one says how to carry on. */
-function recent(j: DisplayJob): Recent {
+/** A person's page to link to: Helix has them, the local display does not. */
+const people = (person: string, local: boolean) => (local ? {} : { personPage: personPage(person) });
+
+function recent(j: DisplayJob, local = false): Recent {
   const [tag, tone] = LISTED[j.state === 'ended' ? j.outcome ?? 'failed' : j.state] ?? ['ENDED', 'mute'];
   const took = j.started && j.ended ? span(Date.parse(j.ended) - Date.parse(j.started)) : '';
   return {
-    id: j.id, page: jobPage(j.id), tag, tone, title: j.title,
-    meta: [j.repo, j.person, took, j.cost_usd !== undefined ? usd(j.cost_usd) : ''].filter(Boolean).join(' · '),
+    id: j.id, page: jobPage(j.id), tag, tone, title: j.title, repo: j.repo, person: j.person, ...people(j.person, local),
+    meta: [took, j.cost_usd !== undefined ? usd(j.cost_usd) : ''].filter(Boolean).join(' · '),
     ...(j.resume ? { reason: `It stopped before it ended. To carry on: ${j.resume}` } : j.reason ? { reason: firstLine(j.reason) } : {}),
   };
 }
 
 function pr(p: DisplayPr): Pr {
-  return { id: p.job, page: jobPage(p.job), href: p.url, tag: `${p.draft ? 'DRAFT ' : ''}PR #${p.number}`, draft: p.draft, title: p.title, meta: `${p.repo} · ${p.person}` };
+  return { id: p.job, page: jobPage(p.job), href: p.url, tag: `${p.draft ? 'DRAFT ' : ''}PR #${p.number}`, draft: p.draft, title: p.title, repo: p.repo, person: p.person, personPage: personPage(p.person) };
 }
 
 /** The display for one moment: `now` is Helix's clock in ms, `picked` the project chosen in the list. */
@@ -110,7 +114,7 @@ export function view(d: Display, picked: string | null, now: number): View {
   const live = shown.filter((j) => j.state === 'running').map((j): Live => {
     const stage = j.progress ? d.stages.indexOf(j.progress.stage) : -1;
     return {
-      id: j.id, page: jobPage(j.id), repo: j.repo, person: j.person, title: j.title,
+      id: j.id, page: jobPage(j.id), repo: j.repo, person: j.person, ...people(j.person, d.local === true), title: j.title,
       elapsed: j.started ? clock(now - Date.parse(j.started)) : '',
       stage,
       stageText: stage < 0 ? 'STARTING' : d.stages[stage]!.toUpperCase(),
@@ -122,13 +126,13 @@ export function view(d: Display, picked: string | null, now: number): View {
   });
 
   const waiting = [
-    ...shown.filter(isAsk).map((j): Waiting => ({ id: j.id, page: jobPage(j.id), ask: true, tag: 'NEEDS INPUT', title: j.title, repo: j.repo, person: j.person, note: j.question ?? 'It stopped to ask, and did not say what.' })),
+    ...shown.filter(isAsk).map((j): Waiting => ({ id: j.id, page: jobPage(j.id), ask: true, tag: 'NEEDS INPUT', title: j.title, repo: j.repo, person: j.person, ...people(j.person, d.local === true), note: j.question ?? 'It stopped to ask, and did not say what.' })),
     ...shown.filter((j) => j.state === 'queued').map((j): Waiting => {
       const waited = now - Date.parse(j.queued ?? j.submitted);
       const why = j.resumed === 'answer' ? 'Has its answer and carries on from where it stopped. '
         : j.resumed === 'restart' ? 'Helix stopped while it ran, so it carries on from where it stopped. ' : '';
       return {
-        id: j.id, page: jobPage(j.id), ask: false, tag: j.resumed ? 'QUEUED AGAIN' : 'QUEUED', title: j.title, repo: j.repo, person: j.person,
+        id: j.id, page: jobPage(j.id), ask: false, tag: j.resumed ? 'QUEUED AGAIN' : 'QUEUED', title: j.title, repo: j.repo, person: j.person, ...people(j.person, d.local === true),
         note: `${why}Position ${line.indexOf(j) + 1} in the queue, waiting ${waited < 60_000 ? 'less than a minute' : span(waited)}.`,
       };
     }),
@@ -165,8 +169,8 @@ export function view(d: Display, picked: string | null, now: number): View {
     noLive: sel ? 'No agent is working on this project.' : d.local ? 'No agent is working right now.' : `No agent is working right now. ${d.slots === 1 ? 'The one slot is' : `All ${d.slots} slots are`} free.`,
     waiting,
     prs,
-    recent: ended.slice(0, RECENT).map(recent),
+    recent: ended.slice(0, RECENT).map((j) => recent(j, d.local === true)),
     local: d.local === true,
-    byProject: d.local ? [...Map.groupBy(shown, (j) => j.repo)].map(([project, jobs]) => ({ project, jobs: jobs.map(recent) })) : [],
+    byProject: d.local ? [...Map.groupBy(shown, (j) => j.repo)].map(([project, jobs]) => ({ project, jobs: jobs.map((j) => recent(j, d.local === true)) })) : [],
   };
 }

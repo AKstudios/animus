@@ -124,7 +124,7 @@ Helix serves; ADR 0004), `bin/animus`.
 | `cli.ts` | The `helix` command, including `upgrade` |
 | `server.ts` | The HTTP API and the display page |
 | `supervisor.ts` | The queue: starts jobs while slots are free, restarts, cancels, answers |
-| `store.ts` | `helix.db`: jobs, people, projects, invites, upgrades |
+| `store.ts` | `helix.db`: jobs, people, projects, invites, upgrades, activity (what each person did, kept for good) |
 | `upgrade.ts` | Which release `helix upgrade --follow` moves to |
 | `cleanup.ts` | `helix cleanup`: each person's `animus cleanup`, old job folders, old job images |
 | `config.ts` | `config.yaml`, people and projects |
