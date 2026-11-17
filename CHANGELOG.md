@@ -65,6 +65,40 @@ clients with how to update.
   keeps them in `~/.helix/credentials/slack.env` and turns the bot on in
   `config.yaml` (`slack: {enabled, owner}`). A refused token is reported with
   Slack's reason and nothing is written.
+- `helix github setup <client-id>` proves Helix's GitHub App's client ID with
+  a device-code request and writes `github: {client_id}` to `config.yaml`. An
+  ID GitHub refuses is reported with GitHub's reason and nothing is written.
+- On a Helix with a GitHub App, `animus join` asks for no GitHub token: it
+  shows GitHub's code, opens github.com/login/device and waits while Helix
+  polls GitHub, then joins the person as the login that approved, keeping
+  their access and refresh tokens in their credentials file. An invite with
+  `--github` refuses any other login and its code stays usable. At the end
+  the person is told which projects the app cannot reach for them, each with
+  the app's installation link. With no `github:` entry, join is as before.
+- **Breaking:** on a Helix with a GitHub App, `POST /join` takes
+  `device_code` (from the new `POST /join/device`, which takes the invite's
+  `code` and answers GitHub's `user_code` and `verification_uri`) instead of
+  `github_token`, answers `202 {pending: true}` while GitHub has not been
+  approved (the client asks again), and adds `unreachable: [{project, owner,
+  install}]` to its answer. `POST /invite` answers `github_app: true` there.
+- On a Helix with a GitHub App, each job, each project check and `helix
+  check` first trade the person's refresh token for a fresh access token,
+  keeping the new pair in their credentials file (mode 600); the job gets the
+  access token as `GH_TOKEN` and never the refresh token. A job for a project
+  the app cannot reach for the person fails before it starts with the app's
+  installation link. A refresh GitHub refuses (revoked, or unused for six
+  months) fails the job before it starts with "run `animus github login`",
+  DMed to a person linked on Slack.
+- `animus github login` runs GitHub's device flow again and Helix replaces the
+  person's stored tokens; a login other than their own is refused.
+- [helix/deploy/github/manifest.json](helix/deploy/github/manifest.json) is
+  Helix's GitHub App, and [docs/helix-deploy.md](docs/helix-deploy.md) walks
+  through creating it and running `helix github setup`.
+- **Breaking:** new `POST /github/device` (answers GitHub's `device_code`,
+  `user_code` and `verification_uri`) and `POST /github/login` (takes
+  `device_code`, answers `202 {pending: true}` until GitHub is approved, then
+  `{name, github}`; 403 for a login other than the person's, 409 on a Helix
+  with no GitHub App).
 - With `slack.enabled` in `config.yaml`, `helix serve` connects to Slack over
   Socket Mode: every envelope is acknowledged at once, and a socket Slack
   drops is replaced. With it off, Helix opens no connection to Slack.

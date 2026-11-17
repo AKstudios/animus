@@ -2,7 +2,8 @@
 // whoever runs it, and off again. Join checks this machine, has the person
 // make a Claude token and a GitHub token, sends both with the code, and keeps
 // the Helix token it gets back in ANIMUS_HOME/helix.json, so nobody sets
-// HELIX_URL or HELIX_TOKEN by hand.
+// HELIX_URL or HELIX_TOKEN by hand. On a Helix with a GitHub App there is no
+// GitHub token to make: the person approves GitHub's code instead.
 import { spawn, spawnSync } from 'node:child_process';
 import { createInterface } from 'node:readline';
 import { describeFindings, doctor } from './doctor.ts';
@@ -76,6 +77,22 @@ export async function joinHelix(url: string, code: string, cwd: string): Promise
   const claude = await ask('   Paste the token it printed (sk-ant-oat...): ', true);
   if (!claude) throw new AnimusError('no Claude token given: nothing was sent');
 
+  const joined = details.github_app ? await signInWithGitHub(base, code, claude, details.github) : await withPastedToken(base, code, claude, details);
+  const login = { url: base, token: joined.token, name: joined.name };
+  helix.saveHelixLogin(login);
+  say(`\nYou are on Helix as ${joined.name}${joined.github ? ` (GitHub: ${joined.github})` : ''}. Your Helix token is kept in ${helix.helixFile()}.`);
+  if (joined.unreachable?.length) say(describeUnreachable(joined.unreachable));
+  if (joined.cannot_push?.length) {
+    say(details.github_app
+      ? `Your GitHub account may not push to ${joined.cannot_push.join(', ')}, so Helix refuses your jobs there until it may: ask for write access on GitHub.`
+      : `Your GitHub token may not push to ${joined.cannot_push.join(', ')}, so Helix refuses your jobs there until it may: add them to the token's repositories on GitHub.`);
+  }
+  say('From a repository Helix has: animus submit <spec.md>, then animus status. For one it has not: animus project add.');
+  return login;
+}
+
+/** Step 2 on a Helix with no GitHub App: the person makes a fine-grained token and pastes it. */
+async function withPastedToken(base: string, code: string, claude: string, details: helix.InviteDetails): Promise<helix.Joined> {
   const page = tokenPage(details);
   say('\n2. Your GitHub token. Jobs push their branch and open their pull request as you.');
   say('   GitHub\'s page for a fine-grained token is opening with the permissions filled in (contents and pull requests: write).');
@@ -89,13 +106,40 @@ export async function joinHelix(url: string, code: string, cwd: string): Promise
   if (!github) throw new AnimusError('no GitHub token given: nothing was sent');
 
   say('\nSending them to Helix, which tries both for real (a small Claude session and a push that sends nothing). This takes a minute or so.');
-  const joined = await helix.join(base, code, { claude_token: claude, github_token: github });
-  const login = { url: base, token: joined.token, name: joined.name };
-  helix.saveHelixLogin(login);
-  say(`\nYou are on Helix as ${joined.name}${joined.github ? ` (GitHub: ${joined.github})` : ''}. Your Helix token is kept in ${helix.helixFile()}.`);
-  if (joined.cannot_push?.length) say(`Your GitHub token may not push to ${joined.cannot_push.join(', ')}, so Helix refuses your jobs there until it may: add them to the token's repositories on GitHub.`);
-  say('From a repository Helix has: animus submit <spec.md>, then animus status. For one it has not: animus project add.');
-  return login;
+  return helix.join(base, code, { claude_token: claude, github_token: github });
+}
+
+/**
+ * Step 2 on a Helix with a GitHub App: Helix asks GitHub for a code, the
+ * person types it at GitHub's page and approves, and Helix, polling GitHub,
+ * gets their tokens. Nothing to make or paste, and no token reaches this machine.
+ */
+export async function signInWithGitHub(base: string, code: string, claude: string, as?: string, io = { say, open: openPage }): Promise<helix.Joined> {
+  const device = await helix.joinDevice(base, code);
+  io.say('\n2. GitHub. Jobs push their branch and open their pull request as you, through Helix\'s GitHub App: there is no token to make.');
+  io.say(`   Type ${device.user_code} at ${device.verification_uri} (opening now) and approve${as ? ` as ${as}` : ''}.`);
+  io.open(device.verification_uri);
+  io.say('   Waiting for you to approve on GitHub. Then Helix tries your Claude token and your GitHub sign-in for real (a small Claude session and a push that sends nothing): a minute or so.');
+  return helix.join(base, code, { claude_token: claude, device_code: device.device_code });
+}
+
+/** `animus github login`: signs in to Helix's GitHub App again when GitHub no longer takes the old sign-in, as the same account. */
+export async function githubLogin(io = { say, open: openPage }): Promise<string> {
+  const device = await helix.githubDevice();
+  io.say(`Type ${device.user_code} at ${device.verification_uri} (opening now) and approve as the GitHub account you joined with.`);
+  io.open(device.verification_uri);
+  io.say('Waiting for you to approve on GitHub.');
+  const done = await helix.githubLogin(device.device_code);
+  return `Helix has a new GitHub sign-in for ${done.name} (GitHub: ${done.github}): your jobs push as you again.`;
+}
+
+/** The projects Helix's app cannot reach for the person, each with the link its owner installs the app with. */
+export function describeUnreachable(list: readonly helix.Unreachable[]): string {
+  return [
+    'Helix\'s GitHub App cannot reach these projects for you (it is not installed on them, or you have no access), so Helix refuses your jobs there until it can.',
+    'Ask each one\'s owner to install the app on it:',
+    ...list.map((u) => `  ${u.project} (${u.owner}): ${u.install ?? 'ask whoever runs Helix for the app\'s installation link'}`),
+  ].join('\n');
 }
 
 export async function leaveHelix(confirmed: boolean): Promise<string> {

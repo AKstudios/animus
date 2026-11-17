@@ -27,23 +27,27 @@ const docker: Docker = (args) => {
   return r.error ? undefined : { status: r.status, stdout: r.stdout ?? '' };
 };
 
-export type CleanupOptions = { home: string; contained: boolean; days: number; dryRun: boolean; docker?: Docker };
+export type CleanupOptions = { home: string; contained: boolean; days: number; dryRun: boolean; docker?: Docker; fresh?: (person: string) => Promise<unknown> };
 
 /** Each `animus cleanup` to run: one per person's Animus home with containers, else the machine's own once. */
 export type AnimusCleanup = { who: string; env?: Record<string, string>; why?: string };
 
-export function animusCleanups(store: Store, opts: Pick<CleanupOptions, 'home' | 'contained'>): AnimusCleanup[] {
+export async function animusCleanups(store: Store, opts: Pick<CleanupOptions, 'home' | 'contained' | 'fresh'>): Promise<AnimusCleanup[]> {
   if (!opts.contained) return [{ who: 'this machine' }];
-  return Object.entries(store.people()).flatMap(([name, person]): AnimusCleanup[] => {
+  const runs: AnimusCleanup[] = [];
+  for (const [name, person] of Object.entries(store.people())) {
     const dirs = personDirs(opts.home, name);
-    if (!existsSync(join(dirs.animus, 'jobs'))) return [];
+    if (!existsSync(join(dirs.animus, 'jobs'))) continue;
     try {
+      // A sign-in through the GitHub App is refreshed first: animus cleanup reads each PR's state with it.
+      await opts.fresh?.(name);
       const theirs = personEnv(person);
-      return [{ who: name, env: { ...theirs, ...credentialEnv(theirs), ANIMUS_HOME: dirs.animus, CLAUDE_CONFIG_DIR: dirs.claude } }];
+      runs.push({ who: name, env: { ...theirs, ...credentialEnv(theirs), ANIMUS_HOME: dirs.animus, CLAUDE_CONFIG_DIR: dirs.claude } });
     } catch (err) {
-      return [{ who: name, why: (err as Error).message }];
+      runs.push({ who: name, why: (err as Error).message });
     }
-  });
+  }
+  return runs;
 }
 
 /** The job images of other releases, from the tags `docker image ls` gives. */
@@ -52,10 +56,10 @@ export function staleImages(tags: readonly string[], version: string): string[] 
 }
 
 /** Runs every part of the cleanup; says what it did, a line at a time. */
-export function helixCleanup(store: Store, opts: CleanupOptions & { version: string }, say: (line: string) => void): boolean {
+export async function helixCleanup(store: Store, opts: CleanupOptions & { version: string }, say: (line: string) => void): Promise<boolean> {
   let ok = true;
   const would = opts.dryRun ? 'would remove' : 'removed';
-  for (const run of animusCleanups(store, opts)) {
+  for (const run of await animusCleanups(store, opts)) {
     if (run.why) { say(`${run.who}: animus cleanup did not run: ${run.why}`); ok = false; continue; }
     const r = spawnSync(process.execPath, ['--disable-warning=ExperimentalWarning', CLI, 'cleanup', '--days', String(opts.days), ...(opts.dryRun ? ['--dry-run'] : [])], {
       encoding: 'utf8', env: { ...process.env, ...run.env }, timeout: 30 * 60 * 1000,

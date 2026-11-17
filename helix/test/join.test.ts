@@ -74,6 +74,16 @@ test('an invited person joins with a code, gets a token that works at once, and 
   h.stop();
 });
 
+// Protects: criterion 6. Fails when: a Helix with no github: entry sends animus join to GitHub's sign-in, or stops taking a pasted token.
+test('a Helix with no GitHub App offers no GitHub sign-in and joins with a pasted token', async () => {
+  const h = await helix(works);
+  const { code } = invite(h.store, 'cleo');
+  assert.equal((await client.inviteDetails(h.url, code)).github_app, undefined);
+  await assert.rejects(client.joinDevice(h.url, code), /no GitHub App: animus join asks for a GitHub token/);
+  assert.equal((await client.join(h.url, code, TOKENS)).github, 'cleo-gh');
+  h.stop();
+});
+
 test('tokens that do not work are refused with why, and the code still works for another try', async () => {
   let good = false;
   const h = await helix(async () => (good ? works({}) : { findings: [{ what: 'Claude token', ok: false, detail: 'no answer: Invalid bearer token' }], login: 'cleo-gh' }));

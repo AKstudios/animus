@@ -20,6 +20,7 @@ import { INVITE_HOURS, invite, takeOff } from './join.ts';
 import { ask } from '../../plugin/src/join.ts';
 import { describeInvite, describeRemoval } from '../../plugin/src/remote.ts';
 import { moveSlackOwner, setOwner } from './owner.ts';
+import { beforeJob, checkSignIn, freshToken, githubSetup } from './github-app.ts';
 import { slackEnvFile, slackOwner, slackSetup, slackWeb } from './slack-api.ts';
 import { startSlack } from './slack-socket.ts';
 import { slackBot, slackInvite, slackNotifier } from './slack.ts';
@@ -72,9 +73,11 @@ const USAGE = `helix: runs Animus jobs for several people on one machine
   helix invite <name> [--github <login>] [--slack <member-id>]
         Let a person join from their own machine: prints a one-time code that
         ends in ${INVITE_HOURS} hours. They run animus join <this Helix's address> <code>,
-        which sends their Claude and GitHub tokens; Helix tries both, keeps
-        them under ${helixHome()}/credentials and gives them their Helix token.
-        --github: only a GitHub token that signs in as this login is taken.
+        which sends their Claude and GitHub tokens (with helix github setup
+        done, they approve GitHub's sign-in instead of making a GitHub token);
+        Helix tries both, keeps them under ${helixHome()}/credentials and gives
+        them their Helix token.
+        --github: only this GitHub login is taken, as a token or a sign-in.
         --slack: the Slack bot DMs the code to this member ID (U…) instead,
         in one line that installs Animus and joins; it needs --github, and
         joining links that Slack user to the person.
@@ -122,10 +125,17 @@ const USAGE = `helix: runs Animus jobs for several people on one machine
         it links to the owner (helix owner first). Both tokens are tried
         against Slack, then kept in ${helixHome()}/credentials/slack.env;
         config.yaml gets slack: {enabled: true}.
+  helix github setup <client-id>
+        Use Helix's GitHub App: its client ID (on GitHub, the app's
+        settings, under About) is tried with a device-code request, then
+        kept in config.yaml as github: {client_id}. An ID GitHub refuses is
+        reported with GitHub's reason, and nothing is written.
   helix check [<name>]
         Try each person's credentials against GitHub and Claude: who the
         GitHub token is, when it ends, whether it may push to each repository,
-        and whether the Claude token answers. Exits 1 if any does not.
+        and whether the Claude token answers. Exits 1 if any does not. With
+        Helix's GitHub App, the person's sign-in is refreshed first; one
+        GitHub no longer takes is fixed by their animus github login.
 
 Its files are under ${helixHome()} (HELIX_HOME). People, projects and the
 queue are in helix.db; config.yaml holds the rest, and its slots are read
@@ -176,9 +186,10 @@ function main(argv: string[]): number | undefined | Promise<number> {
       }
       // Only with slack.enabled in config.yaml; turning it on or off takes a restart.
       const slack = startSlack(config, { say });
-      const supervisor = supervise({ store, config, home, preflight, say, ...isolation, ...(slack ? { notify: slackNotifier(slack, store, say) } : {}) });
+      // On a Helix with a GitHub App, each job and project check first trades the person's refresh token for a fresh access token.
+      const supervisor = supervise({ store, config, home, preflight, prepare: beforeJob(store, config), say, ...isolation, ...(slack ? { notify: slackNotifier(slack, store, say) } : {}) });
       if (slack) slackBot(slack, { store, config, supervisor });
-      const server = serve({ config, store, supervisor, home, startCheck: checkInChild(store, home, say), ...(config.container ? { reap: removeContainer } : {}), ...(slack ? { slack } : {}) });
+      const server = serve({ config, store, supervisor, home, startCheck: checkInChild(store, home, say, (person) => freshToken(store, config, person)),...(config.container ? { reap: removeContainer } : {}), ...(slack ? { slack } : {}) });
       server.listen(config.port, config.host, () => console.error(`helix ${animusVersion()}: listening on http://${config.host}:${config.port}, ${config.slots} job(s) at once${config.container ? ', each in a container' : ''}, projects: ${Object.keys(readyRepos(store)).join(', ') || 'none yet'}`));
       // Someone changed the slots or the container limits: the same config object, so everything sees it at once.
       watchFile(configFile(), { interval: 2000 }, () => {
@@ -214,25 +225,32 @@ function main(argv: string[]): number | undefined | Promise<number> {
       return undefined;
     }
     case 'check': {
-      return withStore((store) => {
-        const names = positionals[0] ? [positionals[0]] : Object.keys(store.people());
-        if (positionals[0] && !store.person(positionals[0])) throw new AnimusError(`Helix has no person named ${positionals[0]}`);
-        const agent = claudeAgent(loadFactory());
-        let ok = true;
-        for (const name of names) {
-          const findings = checkPerson(store, name, { agent });
-          console.log(describeFindings(name, findings));
-          ok &&= !failing(findings).length;
-        }
-        return ok ? 0 : 1;
-      });
+      const config = loadConfig();
+      const store = openHelix();
+      return (async () => {
+        try {
+          const names = positionals[0] ? [positionals[0]] : Object.keys(store.people());
+          if (positionals[0] && !store.person(positionals[0])) throw new AnimusError(`Helix has no person named ${positionals[0]}`);
+          const agent = claudeAgent(loadFactory());
+          let ok = true;
+          for (const name of names) {
+            // A sign-in through the GitHub App is refreshed first, so the token checked is the one jobs get.
+            const findings = [...await checkSignIn(store, config, name), ...checkPerson(store, name, { agent })];
+            console.log(describeFindings(name, findings));
+            ok &&= !failing(findings).length;
+          }
+          return ok ? 0 : 1;
+        } finally { store.close(); }
+      })();
     }
     case 'cleanup': {
       const days = values.days === undefined ? KEEP_DAYS : Number(values.days);
       if (!Number.isFinite(days) || days < 0) throw new AnimusError(`--days takes a number of days, not ${values.days}`);
-      const contained = Boolean(loadConfig().container);
-      const ok = withStore((store) => helixCleanup(store, { home: helixHome(), contained, days, dryRun: Boolean(values['dry-run']), version: animusVersion() }, (line) => console.log(line)));
-      return ok ? 0 : 1;
+      const config = loadConfig();
+      const store = openHelix();
+      return helixCleanup(store, { home: helixHome(), contained: Boolean(config.container), days, dryRun: Boolean(values['dry-run']), version: animusVersion(), fresh: (person) => freshToken(store, config, person) }, (line) => console.log(line))
+        .then((ok) => (ok ? 0 : 1))
+        .finally(() => store.close());
     }
     case 'add-repo':
       if (!positionals[0] || !positionals[1]) throw new AnimusError('usage: helix add-repo <name> <dir>');
@@ -305,6 +323,12 @@ function main(argv: string[]): number | undefined | Promise<number> {
     case 'slack':
       if (positionals[0] !== 'setup') throw new AnimusError('usage: helix slack setup');
       return setupSlack();
+    case 'github':
+      if (positionals[0] !== 'setup' || !positionals[1]) throw new AnimusError('usage: helix github setup <client-id>');
+      return githubSetup(positionals[1]).then(() => {
+        console.log(`GitHub took the client ID: config.yaml has github: {client_id: ${positionals[1]!.trim()}}. Restart helix serve for people to join with GitHub's sign-in.`);
+        return 0;
+      });
     case 'image':
       return buildImage() ? 0 : 1;
     case 'upgrade':

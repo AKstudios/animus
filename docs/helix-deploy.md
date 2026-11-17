@@ -48,6 +48,51 @@ path. Keep the same account name and the same folders, and a copy of
    `animus project add` from a checkout of each project.
 9. Optionally, the Slack bot ([below](#the-slack-bot)), so invites go out
    from Slack and people follow their jobs there.
+10. Optionally, Helix's GitHub App ([below](#the-github-app)), so people
+    join by approving GitHub's sign-in instead of pasting a token. Set it up
+    before inviting anyone.
+
+## The GitHub App
+
+With the app, `animus join` shows a GitHub code to approve instead of asking
+for a fine-grained token, and Helix refreshes each person's short-lived token
+before every job. You need to be an owner of the AKstudios organisation (or
+one of its GitHub App managers).
+
+1. Go to <https://github.com/organizations/AKstudios/settings/apps/new>
+   (the organisation's **Settings**, **Developer settings**, **GitHub Apps**,
+   **New GitHub App**) and fill it in from
+   [helix/deploy/github/manifest.json](../helix/deploy/github/manifest.json):
+   - **GitHub App name** and **Homepage URL**: its `name` and `url`.
+   - **Callback URL**: leave empty. Leave **Expire user authorization
+     tokens** ticked: Helix refreshes them.
+   - **Enable Device Flow**: tick it. Helix signs people in with nothing
+     but it.
+   - **Webhook**: untick **Active**. Helix takes no events from GitHub.
+   - **Repository permissions**: Contents read and write, Pull requests read
+     and write; Metadata read-only comes with them. Nothing else.
+   - **Where can this GitHub App be installed?**: **Any account**, so
+     projects outside AKstudios can install it too.
+2. **Create GitHub App**. On its page, under **About**, copy the **Client
+   ID** (`Iv23…`). Helix needs no client secret and no private key.
+3. **Install App**, and install it on AKstudios with the repositories Helix
+   takes jobs for (or all of them). The owner of any other project installs
+   it on theirs from the app's public page,
+   `https://github.com/apps/<app-name>/installations/new`; `animus join`
+   and a refused job both print that link.
+4. On the Helix machine, as Helix's account, run
+   `helix/bin/helix github setup <client-id>`. It tries the ID with a
+   device-code request, then writes `github: {client_id}` to `config.yaml`.
+   An ID GitHub refuses (most often, device flow is not ticked) is reported
+   with GitHub's reason, and nothing is written.
+5. `sudo systemctl restart helix.service`. From then on, invites join with
+   GitHub's sign-in.
+
+Each person's access and refresh tokens are in
+`~/.helix/credentials/<name>.env` (mode 600), never in the folder their jobs
+mount. A job fails with "run `animus github login`" when GitHub stops taking
+someone's sign-in (they revoked it, or it went unused for six months); that
+command signs them in again, as the same GitHub account.
 
 ## The Slack bot
 

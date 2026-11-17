@@ -1,0 +1,14 @@
+{
+  "name": "Animus Helix",
+  "url": "https://github.com/AKstudios/animus",
+  "description": "Lets Helix push animus/* branches and open pull requests as the person who signed in. Turn on Enable Device Flow in the app's settings; leave user access tokens expiring.",
+  "public": true,
+  "hook_attributes": { "url": "https://example.invalid/", "active": false },
+  "default_permissions": {
+    "contents": "write",
+    "pull_requests": "write",
+    "metadata": "read"
+  },
+  "default_events": [],
+  "request_oauth_on_install": false
+}

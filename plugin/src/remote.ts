@@ -95,7 +95,7 @@ export function describeProjects(list: readonly RemoteProject[]): string {
 export const leave = () => call<{ name: string; cancelled: number[]; kept?: string }>('POST', '/leave');
 
 /** What an invite is for: asked with its code, before any token exists. */
-export type InviteDetails = { name: string; github?: string; expires: string; repos: { name: string; url: string }[] };
+export type InviteDetails = { name: string; github?: string; expires: string; repos: { name: string; url: string }[]; github_app?: boolean };
 export const inviteDetails = (url: string, code: string) => request<InviteDetails>('POST', url, '/invite', undefined, { code });
 /** An invite Helix made: its code, or the Slack user its bot sent it to; url is where Helix says people reach it. */
 export type MadeInvite = { name: string; expires: string; code?: string; slack?: string; url?: string };
@@ -137,8 +137,34 @@ export function describeRemoval(gone: RemovedPerson): string {
   ].join('\n');
 }
 
-export const join = (url: string, code: string, tokens: { claude_token: string; github_token: string }) =>
-  request<{ name: string; token: string; github?: string; cannot_push?: string[] }>('POST', url, '/join', undefined, { code, ...tokens });
+/** GitHub's device flow, started by Helix for an invite's code: user_code is what the person types at verification_uri. */
+export type DeviceStart = { device_code: string; user_code: string; verification_uri: string; expires_in: number };
+export const joinDevice = (url: string, code: string) => request<DeviceStart>('POST', url, '/join/device', undefined, { code });
+
+/** A project Helix's GitHub App cannot reach for the person, and the link its owner installs the app with. */
+export type Unreachable = { project: string; owner: string; install?: string };
+export type Joined = { name: string; token: string; github?: string; cannot_push?: string[]; unreachable?: Unreachable[] };
+
+/**
+ * Joins with the Claude token and either a pasted GitHub token or, on a
+ * Helix with a GitHub App, the device code: Helix then waits on GitHub a
+ * while at a time, answering pending until the person approves.
+ */
+export async function join(url: string, code: string, tokens: { claude_token: string } & ({ github_token: string } | { device_code: string })): Promise<Joined> {
+  for (;;) {
+    const answer = await request<Joined | { pending: true }>('POST', url, '/join', undefined, { code, ...tokens });
+    if (!('pending' in answer)) return answer;
+  }
+}
+
+/** `animus github login`: GitHub's device flow again, for someone already on Helix whose sign-in GitHub no longer takes. */
+export const githubDevice = () => call<DeviceStart>('POST', '/github/device');
+export async function githubLogin(device_code: string): Promise<{ name: string; github: string }> {
+  for (;;) {
+    const answer = await call<{ name: string; github: string } | { pending: true }>('POST', '/github/login', { device_code });
+    if (!('pending' in answer)) return answer;
+  }
+}
 
 const how = (j: RemoteJob) => (j.state === 'ended' ? j.outcome ?? 'ended' : j.state);
 

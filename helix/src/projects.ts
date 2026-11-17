@@ -184,15 +184,11 @@ export function checkProject(opts: { store: Store; home: string; name: string; s
  * Starts each check as a `helix check-project` process of its own, so Helix
  * goes on answering while a clone and an install take minutes. Its output is
  * the check's log. A check that dies without a word fails its project.
+ * fresh, on a Helix with a GitHub App, refreshes the adder's token first
+ * (github-app.ts freshToken); its refusal fails the project.
  */
-export function checkInChild(store: Store, home: string, say: (line: string) => void = () => {}): StartCheck {
+export function checkInChild(store: Store, home: string, say: (line: string) => void = () => {}, fresh?: (person: string) => Promise<unknown>): StartCheck {
   return (name) => {
-    const log = checkLog(home, name);
-    mkdirSync(dirname(log), { recursive: true });
-    const child = spawn(process.execPath, ['--disable-warning=ExperimentalWarning', CLI, 'check-project', name], { stdio: ['ignore', 'pipe', 'pipe'] });
-    const write = (chunk: Buffer) => appendFileSync(log, chunk);
-    child.stdout.on('data', write);
-    child.stderr.on('data', write);
     const ended = (why: string) => {
       try {
         const now = store.project(name);
@@ -200,8 +196,19 @@ export function checkInChild(store: Store, home: string, say: (line: string) => 
         say(`project ${name}: ${store.project(name)?.state ?? 'gone'}`);
       } catch { /* Helix is stopping and its table is closed: the next start fails a check left checking */ }
     };
-    child.on('error', (err) => ended(`its check could not start: ${err.message}`));
-    child.on('close', (code, signal) => ended(`its check ended with ${signal ?? `exit ${code}`} before it said how it went`));
+    const check = () => {
+      const log = checkLog(home, name);
+      mkdirSync(dirname(log), { recursive: true });
+      const child = spawn(process.execPath, ['--disable-warning=ExperimentalWarning', CLI, 'check-project', name], { stdio: ['ignore', 'pipe', 'pipe'] });
+      const write = (chunk: Buffer) => appendFileSync(log, chunk);
+      child.stdout.on('data', write);
+      child.stderr.on('data', write);
+      child.on('error', (err) => ended(`its check could not start: ${err.message}`));
+      child.on('close', (code, signal) => ended(`its check ended with ${signal ?? `exit ${code}`} before it said how it went`));
+    };
+    const adder = store.project(name)?.added_by;
+    if (fresh && adder) void fresh(adder).then(check, (err: unknown) => ended((err as Error).message));
+    else check();
     say(`project ${name}: checking`);
   };
 }

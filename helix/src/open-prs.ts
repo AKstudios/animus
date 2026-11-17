@@ -32,7 +32,7 @@ export const listOpenPrs: ListPrs = async (repoUrl, token) => {
  * minute. A PR whose person has left Helix, or has no GitHub token, is not asked
  * about and is not listed.
  */
-export function openPrs(opts: { store: Store; list?: ListPrs; now?: () => number }): () => Promise<DisplayPr[]> {
+export function openPrs(opts: { store: Store; list?: ListPrs; now?: () => number; fresh?: (person: string) => Promise<unknown> }): () => Promise<DisplayPr[]> {
   const { store } = opts;
   const list = opts.list ?? listOpenPrs;
   const now = opts.now ?? Date.now;
@@ -42,17 +42,19 @@ export function openPrs(opts: { store: Store; list?: ListPrs; now?: () => number
     // Newest job first, so the person asked is whoever opened the latest PR.
     const opened = store.inState('ended').filter((j) => j.repo === name && j.pr && (j.outcome === 'pr' || j.outcome === 'draft-pr')).reverse();
     const tokens = new Map<string, string | undefined>();
-    const tokenOf = (person: string) => {
+    const tokenOf = async (person: string) => {
       if (!tokens.has(person)) {
         let env: Record<string, string> = {};
-        try { env = personEnv(store.person(person)); } catch { /* a credentials file that is gone is no token */ }
+        // A sign-in through the GitHub App is refreshed first: its access token lasts eight hours.
+        try { await opts.fresh?.(person); env = personEnv(store.person(person)); } catch { /* a credentials file that is gone, or a sign-in GitHub refuses, is no token */ }
         tokens.set(person, store.person(person) ? env.GH_TOKEN ?? env.GITHUB_TOKEN : undefined);
       }
       return tokens.get(person);
     };
-    const mine = opened.filter((j) => tokenOf(j.person));
+    const mine: typeof opened = [];
+    for (const j of opened) if (await tokenOf(j.person)) mine.push(j);
     if (!mine.length) return [];
-    const open = await list(url, tokenOf(mine[0]!.person)!);
+    const open = await list(url, (await tokenOf(mine[0]!.person))!);
     return open.flatMap((pr): DisplayPr[] => {
       const job = mine.find((j) => j.pr === pr.html_url);
       return job ? [{ job: job.id, repo: name, person: job.person, number: pr.number, title: pr.title, url: pr.html_url, draft: pr.draft === true, created: pr.created_at }] : [];

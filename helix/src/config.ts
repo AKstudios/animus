@@ -35,6 +35,8 @@ export type Config = {
   owner?: string;
   /** The Slack bot, set by helix slack setup; its tokens are in credentials/slack.env. Its owner is the Slack user linked to owner. */
   slack?: { enabled: boolean };
+  /** Helix's GitHub App, set by helix github setup (github-app.ts): people join with its device flow instead of a pasted token. */
+  github?: { client_id: string };
 };
 
 const DEFAULTS: Config = { host: '127.0.0.1', port: 7420, slots: 2 };
@@ -174,11 +176,12 @@ export function identityEnv(who: { name: string; email: string }): Record<string
   return { GIT_AUTHOR_NAME: who.name, GIT_AUTHOR_EMAIL: who.email, GIT_COMMITTER_NAME: who.name, GIT_COMMITTER_EMAIL: who.email };
 }
 
-/** The variables a person's jobs run with, from their env_file. */
+/** The variables a person's jobs run with, from their env_file: all but the refresh token, which only Helix uses. */
 export function personEnv(person: Person | undefined): Record<string, string> {
   if (!person?.env_file) return {};
   if (!existsSync(person.env_file)) throw new AnimusError(`the credentials file ${person.env_file} is gone`);
-  return envFileVars(person.env_file);
+  const { GH_REFRESH_TOKEN: _refresh, ...env } = envFileVars(person.env_file);
+  return env;
 }
 
 /** The KEY=value lines of an env file. */
