@@ -14,6 +14,13 @@ clients with how to update.
   its own, and the pull request names the base commit it caught up to. A
   failed job's draft pull request goes through the same catch-up. A base that
   did not move is left alone.
+- A catch-up that conflicts goes to a fresh implementer session with the
+  conflicting files, the spec and the base's commits that touched them. The
+  job goes on only with no conflict markers left and every gate green within
+  two fix rounds, and the pull request lists the resolved files. A conflict
+  in a protected path, one the session cannot settle, or gates that still
+  fail end the job as needs input; `animus resume <job> --answer` picks it up
+  at the catch-up, not from the start.
 - The installers take `join <url> <code>`: after setup they run `animus join`
   with them, so one line installs Animus and joins a Helix
   (`curl -fsSL …/install.sh | bash -s -- join <url> <code>`).
