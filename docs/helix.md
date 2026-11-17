@@ -83,9 +83,8 @@ A job that was running when Helix stopped is queued again when it comes back
 and resumes from its own files; one found running three times is ended
 instead. `helix upgrade` stops starting jobs, waits for running ones, checks
 out the tag and runs the tests, goes back if they fail, then stops `helix
-serve` for its service manager to start again. A timer runs `helix upgrade
---follow` every 15 minutes, so Helix moves to each release `stable` points
-at on its own ([releases.md](releases.md)).
+serve` for its service manager to start again. `npm run deploy -- <ssh-host>`
+moves it to the release `stable` points at ([releases.md](releases.md)).
 
 ## The display
 

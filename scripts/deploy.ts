@@ -1,9 +1,9 @@
-// Moves a Helix machine to the release stable points at, now rather than at
-// its timer's next run: node scripts/deploy.ts <ssh-host> [--dir <checkout>]
+// Moves a Helix machine to the release stable points at:
+// node scripts/deploy.ts <ssh-host> [--dir <checkout>]
 //
-// It runs `helix upgrade --follow` there over ssh, so it does what the timer
-// would (docs/releases.md): nothing when the machine is already on it, and
-// refused while an upgrade is under way. --dir: the checkout of Animus there,
+// It runs `helix upgrade --follow` there over ssh (docs/releases.md):
+// nothing when the machine is already on it, and refused while an upgrade is
+// under way. --dir: the checkout of Animus there,
 // relative to the account's home; animus unless given.
 import { spawnSync } from 'node:child_process';
 import { parseArgs } from 'node:util';

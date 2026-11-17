@@ -1,6 +1,6 @@
-// Which release `helix upgrade --follow` moves this machine to. The stable
-// branch is what teammates' Claude Code follows (docs/releases.md), so Helix
-// follows it too, and the two move together.
+// Which release `helix upgrade --follow` (and npm run deploy) moves this
+// machine to. The stable branch is what teammates' Claude Code follows
+// (docs/releases.md), so Helix moves to it too.
 import { atLeast, parseVersion } from '../../plugin/src/version.ts';
 import type { Upgrade } from './store.ts';
 

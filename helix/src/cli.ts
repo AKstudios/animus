@@ -87,7 +87,7 @@ const USAGE = `helix: runs Animus jobs for several people on one machine
         fail, the checkout goes back to where it was.
         --follow: to the release origin's stable branch is at, when that is
         not the one here; a release that failed here is not tried again.
-        The helix-upgrade timer runs this every 15 minutes.
+        npm run deploy -- <ssh-host> runs this from another machine.
   helix image
         Build the image jobs run in (animus-job:<version>). Jobs run in
         containers when config.yaml has a container: entry.

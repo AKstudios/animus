@@ -4,11 +4,10 @@
 // passing, it sets the version everywhere it is written, turns CHANGELOG.md's
 // Unreleased section into this release's, commits, tags v<version> and moves
 // the stable branch to it. Without --deploy it pushes nothing: it prints the
-// push. With it, it pushes and moves that Helix machine to the release now
-// (scripts/deploy.ts) instead of at its timer's next run.
+// push. With it, it pushes and moves that Helix machine to the release
+// (scripts/deploy.ts).
 //
-// Teammates' Claude Code follows stable (docs/releases.md), and so does
-// Helix's upgrade timer. A version that Helix and older clients cannot share
+// Teammates' Claude Code follows stable (docs/releases.md). A version that Helix and older clients cannot share
 // (version.ts, compatible) needs --breaking, to say it was meant.
 import { spawnSync } from 'node:child_process';
 import { readFileSync, writeFileSync } from 'node:fs';
@@ -76,7 +75,7 @@ if (!flags.deploy) {
 
   git push origin main v${version} stable
 
-Helix's upgrade timer moves it within 15 minutes; npm run deploy -- <ssh-host> does it now.`);
+then move Helix to it: npm run deploy -- <ssh-host>`);
 } else {
   run('git', ['push', 'origin', 'main', `v${version}`, '+stable']);
   process.exit(deploy(flags.deploy));

@@ -190,7 +190,7 @@ Run on the Helix machine as `helix/bin/helix`, with its files under
 | `helix remove-repo <name>` | Removes any project, whoever added it. Refused while any of its jobs is queued or running. A clone added with `add-repo` stays on disk. |
 | `helix image` | Builds the image jobs run in (`animus-job:<version>`). Used when `config.yaml` has a `container:` entry. |
 | `helix upgrade <tag>` | Moves the machine to a release: stops starting jobs, waits for the running ones, checks out the tag, installs, runs the tests and typecheck, builds the job image when jobs run in containers, and exits for the service manager to restart it. If any step fails, the checkout goes back. Refused while another upgrade is under way. |
-| `helix upgrade --follow` | The same, to the release origin's `stable` branch is at. Does nothing when the machine is already on it, or when that release failed here before (`helix upgrade <tag>` tries it again). The `helix-upgrade` timer runs this every 15 minutes. |
+| `helix upgrade --follow` | The same, to the release origin's `stable` branch is at. Does nothing when the machine is already on it, or when that release failed here before (`helix upgrade <tag>` tries it again). `npm run deploy -- <ssh-host>` runs this from your own machine. |
 
 Helix also runs three commands on itself, which you do not type: `helix
 verify` (tries a joining person's tokens), `helix check-project <name>` (a

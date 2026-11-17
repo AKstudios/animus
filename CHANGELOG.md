@@ -8,6 +8,10 @@ clients with how to update.
 
 ## Unreleased
 
+- `setup.sh` no longer installs `helix-upgrade.timer`: Helix moves to a
+  release only with `npm run deploy` or `helix upgrade`. 0.3.4's setup.sh
+  installed it, but no machine ran that.
+
 ## 0.3.4 (2026-11-17)
 
 - Helix follows the `stable` branch by itself. `helix upgrade --follow`

@@ -10,8 +10,7 @@
 #   3. installs Node 24 from nodejs.org, checked against its published sums
 #   4. masks sleep, suspend and hibernate
 #   5. lets that account manage Tailscale's serve setting, and nothing else of it
-#   6. installs helix.service, which starts at boot once ~/.helix/config.yaml exists,
-#      and helix-upgrade.timer, which moves it to each release stable points at
+#   6. installs helix.service, which starts at boot once ~/.helix/config.yaml exists
 #   7. lets the browser that takes screenshots use its own sandbox
 #   8. lets that account run Docker, for jobs in containers (when Docker is installed)
 #
@@ -105,47 +104,14 @@ TimeoutStopSec=30
 [Install]
 WantedBy=multi-user.target
 UNIT
-# Every 15 minutes, helix upgrade --follow: when origin's stable branch is at a
-# release this machine is not on, it drains, installs, tests and restarts Helix,
-# going back if anything fails. A release that failed is not tried again on its
-# own. Off: sudo systemctl disable --now helix-upgrade.timer
-cat > /etc/systemd/system/helix-upgrade.service <<UNIT
-[Unit]
-Description=Helix: move to the release origin's stable branch is at
-After=network-online.target
-Wants=network-online.target
-ConditionPathExists=$NEW_HOME/.helix/config.yaml
-
-[Service]
-Type=oneshot
-User=$NEW_USER
-WorkingDirectory=$NEW_HOME/animus
-Environment=PATH=$NEW_HOME/.local/bin:/usr/local/bin:/usr/bin:/bin
-Environment=DISABLE_AUTOUPDATER=1
-# It waits for running jobs to end, however long they take.
-TimeoutStartSec=infinity
-ExecStart=/usr/local/bin/node --disable-warning=ExperimentalWarning $NEW_HOME/animus/helix/src/cli.ts upgrade --follow
-UNIT
-cat > /etc/systemd/system/helix-upgrade.timer <<UNIT
-[Unit]
-Description=Helix: look for a new release every 15 minutes
-
-[Timer]
-OnBootSec=15min
-OnUnitActiveSec=15min
-
-[Install]
-WantedBy=timers.target
-UNIT
-# The account may start, stop and read its own services without the password; nothing else.
+# The account may start, stop and read its own service without the password; nothing else.
 cat > /etc/sudoers.d/helix <<SUDO
-$NEW_USER ALL=(root) NOPASSWD: /usr/bin/systemctl start helix.service, /usr/bin/systemctl stop helix.service, /usr/bin/systemctl restart helix.service, /usr/bin/systemctl status helix.service, /usr/bin/systemctl start helix-upgrade.service, /usr/bin/systemctl status helix-upgrade.service
+$NEW_USER ALL=(root) NOPASSWD: /usr/bin/systemctl start helix.service, /usr/bin/systemctl stop helix.service, /usr/bin/systemctl restart helix.service, /usr/bin/systemctl status helix.service
 SUDO
 chmod 440 /etc/sudoers.d/helix
 visudo -cf /etc/sudoers.d/helix >/dev/null || { rm -f /etc/sudoers.d/helix; die "the sudoers rule did not parse and was removed"; }
 systemctl daemon-reload
 systemctl enable helix.service >/dev/null 2>&1
-systemctl enable --now helix-upgrade.timer >/dev/null 2>&1
 
 say "7. the screenshot browser may use its sandbox"
 # Ubuntu stops a program from making user namespaces unless AppArmor has a
@@ -181,8 +147,7 @@ printf '  %-22s %s\n' \
   "$NEW_USER keys" "$(grep -cE '^(ssh-|ecdsa-|sk-)' "$NEW_HOME/.ssh/authorized_keys")" \
   node "$(node -v)" \
   sleep "$(systemctl is-enabled sleep.target 2>&1)" \
-  "helix at boot" "$(systemctl is-enabled helix.service 2>&1)" \
-  "helix upgrades" "$(systemctl is-enabled helix-upgrade.timer 2>&1), next $(systemctl show helix-upgrade.timer -p NextElapseUSecRealtime --value 2>/dev/null)"
+  "helix at boot" "$(systemctl is-enabled helix.service 2>&1)"
 
 cat <<NEXT
 
