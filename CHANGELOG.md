@@ -21,6 +21,19 @@ clients with how to update.
   in a protected path, one the session cannot settle, or gates that still
   fail end the job as needs input; `animus resume <job> --answer` picks it up
   at the catch-up, not from the start.
+- Helix keeps an activity, with who and when, each time a person submits,
+  answers (with the answer's text) or cancels a job, joins, leaves, or adds or
+  removes a project, and the day each new person joined. Nothing from before
+  is filled in.
+- `/people` on Helix's display lists each person with their GitHub login, the
+  day they joined (blank before it was kept), jobs submitted, PRs opened,
+  total spent and last activity, from a new authenticated route,
+  `GET /people/page-data`. Every person named on the overview or a job page
+  links to `/people/<name>`.
+- `/people/<name>` shows that person's numbers, their jobs newest first thirty
+  at a time, each linking to its job page (those from before activity was kept
+  too), and their activity newest first, and says when they left, from a new
+  authenticated route, `GET /people/<name>/page-data[?before=<job id>]`.
 - The installers take `join <url> <code>`: after setup they run `animus join`
   with them, so one line installs Animus and joins a Helix
   (`curl -fsSL …/install.sh | bash -s -- join <url> <code>`).

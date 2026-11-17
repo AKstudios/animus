@@ -5,13 +5,13 @@
 import { readdirSync, readFileSync, realpathSync, statSync } from 'node:fs';
 import { hostname } from 'node:os';
 import { extname, join, sep } from 'node:path';
-import type { Display, DisplayJob, DisplayRepo, JobCheck, JobPage } from '../../plugin/display/shape.ts';
+import { PERSON_JOBS, type Display, type DisplayJob, type DisplayRepo, type JobCheck, type JobPage, type PeoplePage, type PersonPage, type PersonRow } from '../../plugin/display/shape.ts';
 import { readRuns, STAGES, type JobState } from '../../plugin/src/log.ts';
 import type { Review } from '../../plugin/src/review.ts';
 import { loadProfile, PROFILE_PATH } from '../../plugin/src/profile.ts';
 import { readShots } from '../../plugin/src/ui.ts';
 import { readyRepos, type Config } from './config.ts';
-import type { HelixJob, Store } from './store.ts';
+import type { HelixJob, Person, Store } from './store.ts';
 import type { Supervisor } from './supervisor.ts';
 
 export type { Display, DisplayJob, DisplayRepo };
@@ -81,6 +81,47 @@ function parseGates(text: string): JobCheck[] {
     if (s.c.status === 'fail') s.c.output = text.slice(s.body, sections[i + 1] ? sections[i + 1]!.at - 1 : undefined);
   });
   return checks;
+}
+
+/** The people list: each person on this Helix with their numbers, from the tables, read fresh. */
+export function peoplePage(opts: { store: Store }): PeoplePage {
+  const jobs = opts.store.list(-1);
+  return { at: new Date().toISOString(), people: Object.entries(opts.store.people()).map(([name, p]) => rowOf(opts.store, jobs, name, p)) };
+}
+
+/** One person's numbers; `p` is missing for someone who has left. */
+function rowOf(store: Store, jobs: HelixJob[], name: string, p?: Person): PersonRow {
+  const mine = jobs.filter((j) => j.person === name);
+  const last = store.activity(name, 1)[0];
+  return {
+    name, ...(p?.github ? { github: p.github } : {}), ...(p?.joined ? { joined: p.joined } : {}),
+    jobs: mine.length, prs: mine.filter((j) => j.pr).length, spent: mine.reduce((sum, j) => sum + (j.cost_usd ?? 0), 0),
+    ...(last ? { last: { at: last.at, kind: last.kind } } : {}),
+  };
+}
+
+/**
+ * One person's page, or nothing when Helix has never heard of them: their
+ * numbers, their jobs from the table (so those from before activity was kept
+ * show) newest first, the PERSON_JOBS before job `before`, and their activity.
+ * Someone who left is still known by their jobs and activity.
+ */
+export function personPage(opts: { store: Store }, name: string, before = Infinity): PersonPage | undefined {
+  const { store } = opts;
+  const p = store.people()[name];
+  const jobs = store.list(-1).reverse();
+  const mine = jobs.filter((j) => j.person === name);
+  const activity = store.activity(name);
+  if (!p && !mine.length && !activity.length) return undefined;
+  const older = mine.filter((j) => j.id < before);
+  const gone = activity.find((a) => a.kind === 'left');
+  const left = !p ? { ...(gone ? { at: gone.at } : {}) } : undefined;
+  return {
+    at: new Date().toISOString(), ...rowOf(store, jobs, name, p), ...(left ? { left } : {}),
+    jobList: older.slice(0, PERSON_JOBS).map(({ id, title, repo, state, submitted, outcome, pr, cost_usd }) => ({ id, title, repo, state, submitted, ...(outcome ? { outcome } : {}), ...(pr ? { pr } : {}), ...(cost_usd !== undefined ? { cost_usd } : {}) })),
+    more: older.length > PERSON_JOBS,
+    activity: activity.map(({ at, kind, detail }) => ({ at, kind, ...(detail ? { detail } : {}) })),
+  };
 }
 
 /**

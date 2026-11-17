@@ -73,3 +73,42 @@ export type Display = {
   repos: DisplayRepo[];
   jobs: DisplayJob[];
 };
+
+/** One person on the people list: from Helix, GET /people/page-data, with a person's token. */
+export type PersonRow = {
+  name: string;
+  /** The login their GitHub token signed in as when they joined. */
+  github?: string;
+  /** The day they joined (ISO); left out for a person who joined before it was kept. */
+  joined?: string;
+  jobs: number;
+  /** Jobs that opened a pull request. */
+  prs: number;
+  spent: number;
+  /** The newest thing they did, when anything is kept. */
+  last?: { at: string; kind: string };
+};
+
+export type PeoplePage = { at: string; people: PersonRow[] };
+
+/** A job on a person's page: enough to list it and link to its page. */
+export type PersonJob = Pick<DisplayJob, 'id' | 'title' | 'repo' | 'state' | 'submitted'> & Partial<Pick<DisplayJob, 'outcome' | 'pr' | 'cost_usd'>>;
+
+/** The most jobs a person's page is sent at a time. */
+export const PERSON_JOBS = 30;
+
+/**
+ * One person's page: from Helix, GET /people/<name>/page-data, with a
+ * person's token. `jobs` are newest first, at most PERSON_JOBS, those before
+ * the job in `?before=`; `more` says older ones remain. `left` is there for
+ * someone no longer on Helix, with when they left if that was kept.
+ */
+export type PersonPage = PersonRow & {
+  /** The source's clock, as in Display. */
+  at: string;
+  left?: { at?: string };
+  jobList: PersonJob[];
+  more: boolean;
+  /** Everything they did that Helix kept, newest first. */
+  activity: { at: string; kind: string; detail?: Record<string, string | number> }[];
+};

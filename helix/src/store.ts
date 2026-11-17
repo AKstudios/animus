@@ -45,9 +45,18 @@ export type HelixJob = {
  * token itself is shown once, when they join or are added, and never kept.
  * env_file: KEY=VALUE lines set for that person's jobs only: their Claude
  * token and GitHub credential. github: the login their GitHub token signed in
- * as when they joined.
+ * as when they joined. joined: the day they joined (ISO), kept for those who
+ * joined after it was kept.
  */
-export type Person = { token_sha256: string; env_file?: string; github?: string };
+export type Person = { token_sha256: string; env_file?: string; github?: string; joined?: string };
+
+/**
+ * Something a person did on Helix, kept for good (a person who leaves keeps
+ * theirs). detail: what the kind adds: the job and repo, an answer's text, a
+ * project's name.
+ */
+export type ActivityKind = 'submitted' | 'answered' | 'cancelled' | 'joined' | 'left' | 'project-added' | 'project-removed';
+export type Activity = { id: number; who: string; at: string; kind: ActivityKind; detail?: Record<string, string | number> };
 
 /**
  * A repository jobs may be submitted for, under the name submissions use.
@@ -117,6 +126,10 @@ export type Store = {
   upgrade(tag: string): Upgrade | undefined;
   /** Keeps a try at a release, replacing any earlier one at the same tag. */
   putUpgrade(upgrade: Upgrade): void;
+  /** Keeps what a person did, as of now. */
+  record(who: string, kind: ActivityKind, detail?: Activity['detail']): void;
+  /** Everyone's activity, or one person's, newest first. */
+  activity(who?: string, limit?: number): Activity[];
   close(): void;
 };
 
@@ -136,6 +149,9 @@ export function openStore(file: string): Store {
   db.exec('create table if not exists slack_quiet (name text primary key)');
   // At most one thread per job: every notification for it goes there.
   db.exec('create table if not exists slack_threads (job integer primary key, channel text not null, ts text not null)');
+  // Append-only: no one's activity is changed or removed, not even when they leave.
+  db.exec('create table if not exists activity (id integer primary key autoincrement, who text not null, at text not null, kind text not null, detail text)');
+  db.exec('create index if not exists activity_who on activity (who, id)');
   const data = <T>(r: unknown): T => JSON.parse((r as { data: string }).data) as T;
   const asInvite = (r: unknown): Invite => JSON.parse((r as { data: string }).data) as Invite;
   const live = (i: Invite, at: Date) => Date.parse(i.expires) > at.getTime();
@@ -190,6 +206,9 @@ export function openStore(file: string): Store {
     dropProject: (name) => Number(db.prepare('delete from projects where name = ?').run(name).changes) > 0,
     upgrade: (tag) => { const r = db.prepare('select data from upgrades where tag = ?').get(tag); return r ? data<Upgrade>(r) : undefined; },
     putUpgrade(u) { db.prepare('insert into upgrades (tag, data) values (?, ?) on conflict (tag) do update set data = excluded.data').run(u.tag, JSON.stringify(u)); },
+    record(who, kind, detail) { db.prepare('insert into activity (who, at, kind, detail) values (?, ?, ?, ?)').run(who, new Date().toISOString(), kind, detail ? JSON.stringify(detail) : null); },
+    activity: (who, limit = -1) => db.prepare(`select * from activity ${who === undefined ? '' : 'where who = ?'} order by id desc limit ?`).all(...(who === undefined ? [limit] : [who, limit]))
+      .map((r) => { const { id, who: w, at, kind, detail } = r as { id: number; who: string; at: string; kind: ActivityKind; detail: string | null }; return { id, who: w, at, kind, ...(detail ? { detail: JSON.parse(detail) as Activity['detail'] } : {}) }; }),
     close: () => db.close(),
   };
 }

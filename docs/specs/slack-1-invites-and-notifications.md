@@ -61,6 +61,7 @@ thread.
 
 ## Decisions
 
+- What the bot does for a person is recorded as their activity.
 - Socket Mode inside `helix serve`, written on Node's own WebSocket and
   `fetch`; no Slack SDK (docs/adr/0002). `yaml` stays the only runtime
   dependency.
