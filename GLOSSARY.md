@@ -11,8 +11,10 @@ Someone who has joined a Helix, with their own Claude and GitHub tokens on it.
 _Avoid_: User, member, account
 
 **Owner**:
-The person who runs the Helix machine; the only one who may invite.
-_Avoid_: Admin
+The one person on a Helix who may invite and remove people and act on any
+project or job, named from the machine itself. Running the machine and being
+its owner are separate: the owner works from their own laptop or Slack.
+_Avoid_: Admin, superuser, privileged user
 
 **Invite**:
 A one-time code that lets one named person join a Helix, optionally tied to
