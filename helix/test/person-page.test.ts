@@ -6,7 +6,7 @@ import { join } from 'node:path';
 import { test } from 'node:test';
 import { jobView } from '../../plugin/display/job-view.ts';
 import { peopleNotice, personNotice, personPage } from '../../plugin/display/pages.ts';
-import { peopleView, personView } from '../../plugin/display/people-view.ts';
+import { keepOlder, peopleView, personView } from '../../plugin/display/people-view.ts';
 import type { Display, DisplayJob, JobPage, PeoplePage, PersonPage } from '../../plugin/display/shape.ts';
 import { view } from '../../plugin/display/view.ts';
 import { hashToken, type Config } from '../src/config.ts';
@@ -122,6 +122,22 @@ test('a person\'s jobs come thirty at a time, newest first, each batch starting 
   assert.deepEqual([first.jobList.length, first.jobList[0]!.title, first.more], [30, 'Cy 31', true]);
   assert.deepEqual([second.jobList.map((j) => j.title), second.more], [['Cy 1', 'Cy 0'], false]);
   assert.equal(personView(first, { jobs: second.jobList, more: second.more }).jobs.length, 32);
+});
+
+// Protects: SHOW MORE survives a refresh. Fails when: a job submitted after SHOW MORE pushes the 30th job out of the newest thirty and out of the page.
+test('a refresh after SHOW MORE, with a new job, still lists every job once', async () => {
+  const h = await helix();
+  for (let i = 0; i < 31; i++) h.store.add({ state: 'ended', repo: 'app', spec: 'x', draft: false, submitted: '2026-11-17T10:00:00Z', person: 'cy', title: `Cy ${i}` });
+  const read = async (q = '') => (await (await h.get(`/people/cy/page-data${q}`, 'cy-token')).json()) as PersonPage;
+  const first = await read();
+  const second = await read(`?before=${first.jobList.at(-1)!.id}`);
+  h.store.add({ state: 'ended', repo: 'app', spec: 'x', draft: false, submitted: '2026-11-17T10:00:00Z', person: 'cy', title: 'Cy 31' });
+  const next = await read();
+  h.stop();
+
+  const older = keepOlder(first, second.jobList, next);
+  const titles = personView(next, { jobs: older, more: second.more }).jobs.map((j) => j.title);
+  assert.deepEqual([titles.length, titles[0], titles.at(-1), new Set(titles).size], [32, 'Cy 31', 'Cy 0', 32]);
 });
 
 // Protects: a person who left keeps their page. Fails when: it is a 404, the jobs and activity are dropped, or it does not say they left.

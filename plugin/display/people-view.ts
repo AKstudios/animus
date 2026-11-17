@@ -60,3 +60,13 @@ export function personView(p: PersonPage, older: { jobs: PersonPage['jobList']; 
     activity: p.activity.map(said),
   };
 }
+
+/**
+ * The older jobs to keep when the newest thirty are read again after SHOW MORE:
+ * a job a newer one has pushed out of the newest thirty joins them, so no job
+ * falls between the two lists.
+ */
+export function keepOlder(before: PersonPage, older: PersonPage['jobList'], next: PersonPage): PersonPage['jobList'] {
+  const oldest = next.jobList.at(-1)?.id ?? Infinity;
+  return [...before.jobList.filter((j) => j.id < oldest), ...older];
+}

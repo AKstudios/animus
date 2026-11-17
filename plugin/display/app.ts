@@ -5,7 +5,7 @@
 // It only reads. Sent to the browser with its types stripped (helix/src/ui.ts).
 import { forgetToken, jobNotice, keepToken, peopleNotice, personNotice, readToken, route, takeToken } from './pages.ts';
 import { atEnd, jobView, type JobPageView } from './job-view.ts';
-import { peopleView, personView } from './people-view.ts';
+import { keepOlder, peopleView, personView } from './people-view.ts';
 import type { Display, JobPage, PeoplePage, PersonPage } from './shape.ts';
 import { view, type Live, type Project, type Recent, type View, type Waiting } from './view.ts';
 
@@ -331,7 +331,11 @@ async function readPerson(name: string, before?: number): Promise<void> {
   if (res.status === 401) forgetToken(storage);
   if (!res.ok) return;
   const data = (await res.json()) as PersonPage;
-  if (before === undefined) state.person = data;
+  if (before === undefined) {
+    // Once older jobs were read, a refresh must not leave a job between the two lists.
+    if (state.person && state.older.jobs.length) state.older.jobs = keepOlder(state.person, state.older.jobs, data);
+    state.person = data;
+  }
   else state.older = { jobs: [...state.older.jobs, ...data.jobList], more: data.more };
 }
 
