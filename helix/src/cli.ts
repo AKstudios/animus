@@ -73,9 +73,11 @@ const USAGE = `helix: runs Animus jobs for several people on one machine
   helix invite <name> [--github <login>] [--slack <member-id>]
         Let a person join from their own machine: prints a one-time code that
         ends in ${INVITE_HOURS} hours. They run animus join <this Helix's address> <code>,
-        which sends their Claude and GitHub tokens; Helix tries both, keeps
-        them under ${helixHome()}/credentials and gives them their Helix token.
-        --github: only a GitHub token that signs in as this login is taken.
+        which sends their Claude and GitHub tokens (with helix github setup
+        done, they approve GitHub's sign-in instead of making a GitHub token);
+        Helix tries both, keeps them under ${helixHome()}/credentials and gives
+        them their Helix token.
+        --github: only this GitHub login is taken, as a token or a sign-in.
         --slack: the Slack bot DMs the code to this member ID (U…) instead,
         in one line that installs Animus and joins; it needs --github, and
         joining links that Slack user to the person.

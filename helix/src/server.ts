@@ -4,7 +4,7 @@
 // lists a person's own jobs, a job can be answered only by whoever submitted
 // it and cancelled by them or the owner, and a project removed only by whoever
 // added it or the owner (projects.ts).
-// Joining (invite, join) carries a one-time code instead, and leave the
+// Joining (invite, join/device, join) carries a one-time code instead, and leave the
 // person's own token (join.ts). Inviting and removing people (POST /people,
 // DELETE /people/<name>) and every person's queue (GET /jobs?all) are the
 // owner's alone (owner.ts).
@@ -19,7 +19,7 @@ import { animusVersion, compatible } from '../../plugin/src/version.ts';
 import { parseSkills, type PersonalSkill } from '../../plugin/src/personal.ts';
 import { hashToken, helixHome, type Config } from './config.ts';
 import { display, jobPage, jobShot, peoplePage, personPage } from './display.ts';
-import { invite, inviteDetails, joinHelix, takeOff, verifyInChild, type Verify } from './join.ts';
+import { invite, inviteDetails, joinHelix, startDevice, StillWaiting, takeOff, verifyInChild, type JoinGitHub, type Verify } from './join.ts';
 import { openPrs, type ListPrs } from './open-prs.ts';
 import { isOwner, requireOwner } from './owner.ts';
 import { addProject, checkInChild, projectView, removeProject, type StartCheck } from './projects.ts';
@@ -64,8 +64,12 @@ export function serve(opts: {
   slack?: Pick<Transport, 'dm' | 'post'>;
   /** How a project's open PRs are listed on GitHub, with a person's token; by default GitHub's API. */
   listPrs?: ListPrs;
+  /** Where joining with config.yaml's GitHub App reaches GitHub, and its pace; by default GitHub itself. */
+  github?: Omit<JoinGitHub, 'clientId'>;
 }): Server {
   const { config, store, supervisor } = opts;
+  // Read at each join: config.yaml read again after helix github setup counts at once.
+  const app = (): JoinGitHub | undefined => (config.github ? { clientId: config.github.client_id, ...opts.github } : undefined);
   const verify = opts.verify ?? verifyInChild;
   const home = opts.home ?? helixHome();
   const startCheck = opts.startCheck ?? checkInChild(store, home);
@@ -111,10 +115,14 @@ export function serve(opts: {
       const outdated = () => send(426, { error: `this Helix runs Animus ${version} and your animus is ${typeof theirs === 'string' ? theirs : 'from before versioned releases'}. Update the animus plugin in Claude Code (/plugin), or pull your clone of it, then try again` });
       const current = typeof theirs === 'string' && compatible(theirs, version);
       // Someone joining has a code and no token yet.
-      if (req.method === 'POST' && (url.pathname === '/invite' || url.pathname === '/join')) {
+      if (req.method === 'POST' && (url.pathname === '/invite' || url.pathname === '/join' || url.pathname === '/join/device')) {
         if (!current) return outdated();
         const b = await body(req);
-        return url.pathname === '/invite' ? send(200, inviteDetails(store, b.code)) : send(201, await joinHelix({ store, verify }, b));
+        const github = app();
+        // github_app: the client signs the person in with GitHub instead of asking for a token.
+        if (url.pathname === '/invite') return send(200, { ...inviteDetails(store, b.code), ...(github ? { github_app: true } : {}) });
+        if (url.pathname === '/join/device') return send(200, await startDevice(store, github, b.code));
+        return send(201, await joinHelix({ store, verify, ...(github ? { github } : {}) }, b));
       }
       const person = whoIs(store, req);
       if (!person) return send(401, { error: 'a valid token is needed: Authorization: Bearer <token>' });
@@ -202,6 +210,7 @@ export function serve(opts: {
       return send(404, { error: `nothing at ${req.method} ${url.pathname}` });
     })().catch((err: unknown) => {
       if (err instanceof Refused) return send(err.status, { error: err.message });
+      if (err instanceof StillWaiting) return send(202, { pending: true });
       console.error(err);
       return send(500, { error: 'Helix failed on this request; see its own output' });
     });

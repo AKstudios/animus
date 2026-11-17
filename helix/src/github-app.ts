@@ -29,7 +29,10 @@ export class GitHubRefused extends AnimusError {
   }
 }
 
-const sleep = (seconds: number) => new Promise<void>((r) => { setTimeout(r, seconds * 1000); });
+export const sleep = (seconds: number) => new Promise<void>((r) => { setTimeout(r, seconds * 1000); });
+
+/** Where an account's owner installs the app, choosing the account and its repositories on GitHub. */
+export const installLink = (slug: string, urls = GITHUB) => `${urls.web}/apps/${slug}/installations/new`;
 
 async function call(url: string, init: RequestInit): Promise<{ status: number; answer: Record<string, unknown> }> {
   let res: Response;

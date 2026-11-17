@@ -68,6 +68,19 @@ clients with how to update.
 - `helix github setup <client-id>` proves Helix's GitHub App's client ID with
   a device-code request and writes `github: {client_id}` to `config.yaml`. An
   ID GitHub refuses is reported with GitHub's reason and nothing is written.
+- On a Helix with a GitHub App, `animus join` asks for no GitHub token: it
+  shows GitHub's code, opens github.com/login/device and waits while Helix
+  polls GitHub, then joins the person as the login that approved, keeping
+  their access and refresh tokens in their credentials file. An invite with
+  `--github` refuses any other login and its code stays usable. At the end
+  the person is told which projects the app cannot reach for them, each with
+  the app's installation link. With no `github:` entry, join is as before.
+- **Breaking:** on a Helix with a GitHub App, `POST /join` takes
+  `device_code` (from the new `POST /join/device`, which takes the invite's
+  `code` and answers GitHub's `user_code` and `verification_uri`) instead of
+  `github_token`, answers `202 {pending: true}` while GitHub has not been
+  approved (the client asks again), and adds `unreachable: [{project, owner,
+  install}]` to its answer. `POST /invite` answers `github_app: true` there.
 - With `slack.enabled` in `config.yaml`, `helix serve` connects to Slack over
   Socket Mode: every envelope is acknowledged at once, and a socket Slack
   drops is replaced. With it off, Helix opens no connection to Slack.

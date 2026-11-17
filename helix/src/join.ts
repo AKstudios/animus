@@ -7,14 +7,21 @@
 //
 // Codes, not Tailscale's identity headers: anything on the machine can send
 // those headers to 127.0.0.1, so they prove nothing about who is asking.
+//
+// On a Helix with a GitHub App (config.yaml's github:), there is no GitHub
+// token to paste: Helix starts GitHub's device flow for the code, the laptop
+// shows GitHub's code and waits, and Helix polls GitHub until the person
+// approves, so their tokens go from GitHub to Helix and never to the laptop.
 import { spawn } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
 import { chmodSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { failing, type Finding } from './check.ts';
+import { AnimusError } from '../../plugin/src/proc.ts';
 import { addPerson, checkName, hashToken, helixHome, removePerson, type Config } from './config.ts';
 import { personDirs } from './container.ts';
+import { deviceCode, GitHubRefused, githubUser, installLink, pollDevice, reachableRepos, sleep, type GitHubUrls, type Tokens } from './github-app.ts';
 import { keepOwner } from './owner.ts';
 import { SLACK_USER } from './slack-api.ts';
 import type { Invite, Store } from './store.ts';
@@ -34,6 +41,75 @@ export type Verify = (env: Record<string, string>) => Promise<{ findings: Findin
 
 /** What the person is told about an invite before they make their tokens. */
 export type InviteDetails = { name: string; github?: string; expires: string; repos: { name: string; url: string }[] };
+
+/**
+ * Helix's GitHub App, for joining with GitHub's sign-in: its client ID from
+ * config.yaml. urls and wait point GitHub elsewhere and pace the polls, for
+ * tests; holdSeconds is how long one POST /join waits on GitHub before it
+ * answers "still waiting", kept under the five minutes a client waits for an
+ * answer.
+ */
+export type JoinGitHub = { clientId: string; urls?: GitHubUrls; wait?: (seconds: number) => Promise<void>; holdSeconds?: number };
+
+/** What the person types at GitHub, and where; device_code comes back with POST /join. */
+export type DeviceStart = { device_code: string; user_code: string; verification_uri: string; expires_in: number };
+
+/** A project Helix's app cannot reach for the person, and where its owner installs the app (unknown while the app reaches nothing of theirs). */
+export type Unreachable = { project: string; owner: string; install?: string };
+
+export type Joined = { name: string; token: string; github?: string; cannot_push: string[]; unreachable?: Unreachable[] };
+
+/** GitHub has not been approved yet: POST /join answers 202 and the client asks again. */
+export class StillWaiting extends Error {}
+
+const HOLD_SECONDS = 120;
+
+/** GitHub's refusal, or GitHub out of reach, as Helix's answer: the code was not taken, so it still works. */
+function refusedBy(err: unknown): never {
+  if (err instanceof GitHubRefused) throw new Refused(403, `GitHub refused the sign-in: ${err.message}. The code still works: run animus join again`);
+  if (err instanceof AnimusError && !(err instanceof Refused)) throw new Refused(502, `${err.message}. The code still works: run animus join again`);
+  throw err;
+}
+
+/** POST /join/device: starts GitHub's device flow for a live invite's code. */
+export async function startDevice(store: Store, github: JoinGitHub | undefined, code: unknown, at?: Date): Promise<DeviceStart> {
+  if (!github) throw new Refused(409, 'this Helix has no GitHub App: animus join asks for a GitHub token instead');
+  liveInvite(store, code, at);
+  try {
+    const d = await deviceCode(github.clientId, github.urls);
+    return { device_code: d.device_code, user_code: d.user_code, verification_uri: d.verification_uri, expires_in: d.expires_in };
+  } catch (err) { return refusedBy(err); }
+}
+
+/** Polls GitHub for the device code until the person approves, or holdSeconds pass (StillWaiting). */
+async function approved(github: JoinGitHub, device: unknown): Promise<{ tokens: Tokens; login: string }> {
+  if (typeof device !== 'string' || !device) throw new Refused(400, 'device_code is the one POST /join/device gave: this Helix signs you in with GitHub, not with a token');
+  const wait = github.wait ?? sleep;
+  const until = Date.now() + (github.holdSeconds ?? HOLD_SECONDS) * 1000;
+  try {
+    // GitHub's own pace is five seconds; a slow_down within this request is kept by pollDevice.
+    const tokens = await pollDevice(github.clientId, { device_code: device, user_code: '', verification_uri: '', expires_in: 0, interval: 5 }, github.urls, async (s) => {
+      await wait(s);
+      if (Date.now() >= until) throw new StillWaiting();
+    });
+    return { tokens, login: (await githubUser(tokens.access_token, github.urls)).login };
+  } catch (err) {
+    if (err instanceof StillWaiting) throw err;
+    return refusedBy(err);
+  }
+}
+
+/** Helix's projects on GitHub that the app does not reach for the person's token. */
+async function unreachable(store: Store, github: JoinGitHub, token: string): Promise<Unreachable[]> {
+  let reach: Awaited<ReturnType<typeof reachableRepos>>;
+  try { reach = await reachableRepos(token, github.urls); } catch (err) { return refusedBy(err); }
+  const repos = new Set(reach.repos.map((r) => r.toLowerCase()));
+  return store.projects().filter((p) => p.state === 'ready').flatMap((p) => {
+    const full = /github\.com[:/]([^/]+\/[^/]+?)(?:\.git)?\/?$/.exec(p.url)?.[1];
+    if (!full || repos.has(full.toLowerCase())) return [];
+    return [{ project: p.name, owner: full.split('/')[0]!, ...(reach.slug ? { install: installLink(reach.slug, github.urls) } : {}) }];
+  });
+}
 
 /**
  * Makes an invite and returns its code: the only time it exists in the clear.
@@ -80,30 +156,49 @@ const TOKEN = /^[\x21-\x7e]{8,1024}$/;
  * code is taken only then, so a mistyped token can be tried again with it.
  * A project the GitHub token may not push to does not stop them: it is
  * named in cannot_push, and its jobs are theirs to submit once it may.
+ *
+ * With github (a Helix with an app), body has device_code instead of
+ * github_token: they join as the GitHub login that approved it, their access
+ * and refresh tokens are kept, and unreachable names the projects the app
+ * cannot reach for them. StillWaiting: GitHub has not been approved yet.
  */
-export async function joinHelix(opts: { store: Store; verify: Verify; at?: Date }, body: Record<string, unknown>): Promise<{ name: string; token: string; github?: string; cannot_push: string[] }> {
-  const { store } = opts;
+export async function joinHelix(opts: { store: Store; verify: Verify; at?: Date; github?: JoinGitHub }, body: Record<string, unknown>): Promise<Joined> {
+  const { store, github } = opts;
   const { invite: i, hash } = liveInvite(store, body.code, opts.at);
   if (store.person(i.name)) throw new Refused(409, `${i.name} is already on Helix`);
   const claude = body.claude_token;
-  const github = body.github_token;
   if (typeof claude !== 'string' || !TOKEN.test(claude)) throw new Refused(400, 'claude_token is the token claude setup-token printed');
-  if (typeof github !== 'string' || !TOKEN.test(github)) throw new Refused(400, 'github_token is the fine-grained token made on GitHub');
-  const env = { CLAUDE_CODE_OAUTH_TOKEN: claude, GH_TOKEN: github };
-  const { findings, login } = await opts.verify(env);
+  let env: Record<string, string>;
+  let signedIn: { tokens: Tokens; login: string } | undefined;
+  if (github) {
+    signedIn = await approved(github, body.device_code);
+    if (i.github && signedIn.login.toLowerCase() !== i.github.toLowerCase()) throw new Refused(403, `this invite is for the GitHub account ${i.github}, and ${signedIn.login} approved the sign-in on GitHub. The code still works: run animus join again and approve as ${i.github}`);
+    env = { CLAUDE_CODE_OAUTH_TOKEN: claude, GH_TOKEN: signedIn.tokens.access_token };
+  } else {
+    const pasted = body.github_token;
+    if (typeof pasted !== 'string' || !TOKEN.test(pasted)) throw new Refused(400, 'github_token is the fine-grained token made on GitHub');
+    env = { CLAUDE_CODE_OAUTH_TOKEN: claude, GH_TOKEN: pasted };
+  }
+  const verified = await opts.verify(env);
+  const { findings } = verified;
+  const login = signedIn?.login ?? verified.login;
   const bad = failing(findings);
   if (bad.length) throw new Refused(422, `Helix tried your tokens and ${bad.length === 1 ? 'one did' : 'some did'} not work:\n${bad.map((f) => `  ${f.what}: ${f.detail}`).join('\n')}\nThe code still works: fix the token and run animus join again`);
   if (i.github && login?.toLowerCase() !== i.github.toLowerCase()) throw new Refused(403, `this invite is for the GitHub account ${i.github}, and the token signs in as ${login ?? 'nobody'}`);
+  const cut = github && signedIn ? await unreachable(store, github, signedIn.tokens.access_token) : undefined;
   // Two joins with one code: the first to take it gets in.
   if (!store.takeInvite(hash, opts.at)) throw new Refused(403, 'that code was used a moment ago');
   const file = credentialsFile(i.name);
   mkdirSync(dirname(file), { recursive: true, mode: 0o700 });
-  writeFileSync(file, Object.entries(env).map(([k, v]) => `${k}=${v}\n`).join(''), { mode: 0o600 });
+  // The refresh token gets each job a fresh access token; it is kept here, never in their folder.
+  const kept = signedIn ? { ...env, GH_REFRESH_TOKEN: signedIn.tokens.refresh_token } : env;
+  writeFileSync(file, Object.entries(kept).map(([k, v]) => `${k}=${v}\n`).join(''), { mode: 0o600 });
   chmodSync(file, 0o600);
   const token = addPerson(store, i.name, file, login);
   if (i.slack) store.linkSlack(i.name, i.slack);
-  const cannot = findings.filter((f) => !f.ok && f.optional).map((f) => f.what.replace(/^push to /, ''));
-  return { name: i.name, token, ...(login ? { github: login } : {}), cannot_push: cannot };
+  // A project the app cannot reach is named once, with its install link, not again as a push refused.
+  const cannot = findings.filter((f) => !f.ok && f.optional).map((f) => f.what.replace(/^push to /, '')).filter((p) => !cut?.some((u) => u.project === p));
+  return { name: i.name, token, ...(login ? { github: login } : {}), cannot_push: cannot, ...(cut ? { unreachable: cut } : {}) };
 }
 
 /**

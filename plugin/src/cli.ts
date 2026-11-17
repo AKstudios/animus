@@ -85,8 +85,9 @@ const USAGE = `animus: a spec goes in, a pull request with proof comes out
 With Helix, the machine that runs jobs for everyone:
   animus join <url> <code>
         Join a Helix with the one-time code from helix invite: checks this
-        machine, has you make a Claude token and a GitHub token, and sends
-        both. Helix tries them, and the Helix token it gives back is kept in
+        machine, has you make a Claude token and a GitHub token (or, on a
+        Helix with a GitHub App, approve GitHub's sign-in), and sends them.
+        Helix tries them, and the Helix token it gives back is kept in
         ANIMUS_HOME/helix.json. (HELIX_URL and HELIX_TOKEN, when set, win.)
   animus leave [--yes]
         Take yourself off it: your jobs there are cancelled, and it deletes
