@@ -45,3 +45,34 @@ _Avoid_: Proposal, pending spec
 A GitHub issue or pull request, Slack message or file, or public page that a
 draft was written from, saved with it.
 _Avoid_: Attachment, context, source
+
+## Seeing the work
+
+**Display**:
+The pages that show what a Helix, or one machine's Animus, is doing: the
+overview, a job page and a person page.
+_Avoid_: Dashboard, web UI, Helix UI
+
+**Job page**:
+Everything about one job on one page: its spec, stages, checks, review,
+questions and answers, log and screenshots.
+_Avoid_: Job detail, job view
+
+**Person page**:
+One person's jobs and activity on a Helix.
+_Avoid_: Profile, user page
+
+**Activity**:
+One thing a person did on a Helix, kept with when they did it: submitting,
+answering or cancelling a job, joining or leaving, adding or removing a
+project, and talking to the Slack bot.
+_Avoid_: Interaction, event, audit log
+
+**Open PR**:
+A pull request a job opened that GitHub still shows as open.
+_Avoid_: Active PR, pending PR
+
+**Local display**:
+The display of the jobs one machine's Animus has run itself, outside any
+Helix.
+_Avoid_: Local Helix, local mode
