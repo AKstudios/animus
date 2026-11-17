@@ -8,6 +8,11 @@ clients with how to update.
 
 ## Unreleased
 
+- `animus run` records its process in the job's `progress.json` (`pid` and
+  `host`, added to `stage`, `who` and `at`). A job counts as running only on
+  that host with that process alive; one whose process is gone and that has no
+  outcome is stopped, and the local display's reader of `~/.animus` shows it
+  with `animus resume <job>` as the way on.
 - With no job running or queued and no project picked, the display's overview
   shows an original synchronizing-helix animation (inline SVG and CSS only: the
   Helix mark unwinds into a slowly turning double helix, with glitch fragments

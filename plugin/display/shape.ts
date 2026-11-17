@@ -6,8 +6,9 @@ import type { Review } from '../src/review.ts';
 
 /** A job as the display sees it: Helix's row without what is only Helix's business (the spec's path, the pid, the answer's text). */
 export type DisplayJob = {
-  id: number;
-  state: 'queued' | 'running' | 'ended' | 'cancelled';
+  /** Helix's number, or a local job's own id. */
+  id: number | string;
+  state: 'queued' | 'running' | 'ended' | 'cancelled' | 'stopped';
   person: string;
   /** The repository's name in Helix's config. */
   repo: string;
@@ -25,6 +26,8 @@ export type DisplayJob = {
   reason?: string;
   question?: string;
   cost_usd?: number;
+  /** A stopped job (its process is gone, with no outcome): the command that picks it up again. */
+  resume?: string;
   /** Why a queued job is in the queue a second time. */
   resumed?: 'answer' | 'restart';
   /** Running jobs: the stage and who is working, as the job last said. */

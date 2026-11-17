@@ -11,14 +11,14 @@ export type Project = { id: string; summary: string; on: boolean; busy: boolean;
 
 /** Every job on the overview links to its own page. */
 export type Live = {
-  id: number; page: string; repo: string; person: string; title: string; elapsed: string;
+  id: number | string; page: string; repo: string; person: string; title: string; elapsed: string;
   /** The stage's place in the track; -1 until the job has said where it is. */
   stage: number; stageText: string; stepText: string; stepShort: string; who: string; now: string;
 };
 
-export type Waiting = { id: number; page: string; ask: boolean; tag: string; title: string; repo: string; person: string; note: string };
+export type Waiting = { id: number | string; page: string; ask: boolean; tag: string; title: string; repo: string; person: string; note: string };
 
-export type Recent = { id: number; page: string; tag: string; tone: Tone; title: string; meta: string; reason?: string };
+export type Recent = { id: number | string; page: string; tag: string; tone: Tone; title: string; meta: string; reason?: string };
 
 /** An open pull request on the overview; it links to GitHub and to the job that opened it. */
 export type Pr = { id: number; page: string; href: string; tag: string; draft: boolean; title: string; meta: string };

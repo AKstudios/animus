@@ -9,7 +9,7 @@
 export type Route = { page: 'overview' } | { page: 'job'; id: number } | { page: 'people'; name?: string };
 
 /** A job's own page. */
-export const jobPage = (id: number) => `/jobs/${id}`;
+export const jobPage = (id: number | string) => `/jobs/${id}`;
 
 export function route(pathname: string): Route {
   const job = /^\/jobs\/(\d+)$/.exec(pathname);

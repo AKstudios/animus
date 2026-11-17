@@ -3,7 +3,7 @@
 // under Animus's home, outside every repository, so a job leaves nothing in
 // the project but its branch.
 import { appendFileSync, existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
-import { homedir } from 'node:os';
+import { homedir, hostname } from 'node:os';
 import { join } from 'node:path';
 import type { Tokens } from './agent.ts';
 import type { Plan } from './profiles.ts';
@@ -103,7 +103,11 @@ export const STAGES = ['setup', 'plan', 'implement', 'gates', 'review', 'evidenc
 export type Stage = (typeof STAGES)[number];
 
 /** Where a running job is, for whoever watches it: the stage, and who or what is doing it. */
-export type Progress = { stage: Stage; who: string; at: string };
+export type Progress = {
+  stage: Stage; who: string; at: string;
+  /** The `animus run` process and machine writing it: a job is running only where that process is alive. */
+  pid?: number; host?: string;
+};
 
 export function writeJson(file: string, value: unknown): void {
   mkdirSync(join(file, '..'), { recursive: true });
@@ -121,7 +125,7 @@ export function loadState(job: string): JobState | undefined {
 }
 
 export function saveProgress(job: string, stage: Stage, who: string): void {
-  writeJson(join(jobDir(job), 'progress.json'), { stage, who, at: new Date().toISOString() } satisfies Progress);
+  writeJson(join(jobDir(job), 'progress.json'), { stage, who, at: new Date().toISOString(), pid: process.pid, host: hostname() } satisfies Progress);
 }
 
 /** A job's progress; home is the Animus home it ran under, when not this process's (a Helix job in a container). */

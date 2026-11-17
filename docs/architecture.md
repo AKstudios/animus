@@ -78,7 +78,7 @@ A job leaves nothing in the target repository but its branch.
 | Where | What |
 | --- | --- |
 | `~/.animus/runs.jsonl` | One line per run: job, labels, outcome, cost, duration, PR |
-| `~/.animus/jobs/<job>/` | Its state, spec, gate output, reviews, PR body, screenshots, transcripts, `progress.json` |
+| `~/.animus/jobs/<job>/` | Its state, spec, gate output, reviews, PR body, screenshots, transcripts, `progress.json` (stage, who, and the `pid` and `host` of the `animus run` writing it: a job with no outcome is running only on that host with that process alive, and stopped otherwise) |
 | `../.worktrees/<repo>/` | The job's worktree, removed when the job ends unless `--keep` |
 | `<repo>/.git/animus/installs/` | The install cache: the two saves used last per install path, and any used in the last hour |
 | `~/.claude/projects/<worktree>/` | Claude Code's transcripts of the job's sessions, kept |

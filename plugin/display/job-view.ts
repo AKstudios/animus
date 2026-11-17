@@ -6,7 +6,7 @@ import type { JobPage } from './shape.ts';
 import { clock, span, type Tone } from './view.ts';
 
 export type JobPageView = {
-  id: number;
+  id: number | string;
   title: string;
   /** The header's facts, in order: only the ones the job has. */
   facts: { k: string; v: string; href?: string }[];
