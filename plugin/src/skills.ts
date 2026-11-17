@@ -4,7 +4,8 @@
 // grants each skill to the roles that need it, so the reviewer never sees the
 // implementer's, and no session can load a skill by itself. The repository's
 // own skills (.claude/skills/) are listed for every role, since they are that
-// project's knowledge and arrive with the clone.
+// project's knowledge and arrive with the clone. The submitter's own skills
+// (personal.ts) come last, from the copy the job took when it started.
 import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { parse } from 'yaml';

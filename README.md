@@ -15,22 +15,21 @@ claude plugin install animus@animus
 
 Then ask Claude Code to run `animus doctor`, which lists anything missing. Inside Claude Code `animus` is on the PATH; for your own terminal, clone the `stable` branch, run `npm ci --prefix plugin` in it, and put its `plugin/bin` on your PATH.
 
-### On your machine
+### Start a job
 
 1. In the target repository, run `animus init` once. It drafts `.animus/animus.yaml`, the setup and gate commands. Check it and commit it.
-2. Run `/animus:grill-with-docs` and describe what you want. It asks questions until the design is clear, then writes the spec and starts the job (`/animus:to-spec` does that step alone). Keep the session open until the job ends.
+2. Run `/animus:grill-with-docs` and describe what you want. It asks questions until the design is clear, then writes the spec and starts the job. If you already know what you want, skip the questions: `/animus:to-spec` writes the spec from the conversation and starts the job.
 3. Review and merge the PR.
 
 Asking Claude Code to build something without mentioning Animus does the work in your session as usual; no job runs.
 
-### On Helix
+The job runs on your machine or on Helix. Say which in the conversation ("run it on Helix", "run it locally"), or set it once in your config (below). Otherwise it goes to Helix when you have joined one that has the repository, and runs on your machine when not. On your machine, keep the session open until the job ends. On Helix, the session can close. Either way the PR opens as you.
 
-Jobs run on the shared machine, so your laptop can close. The PR still opens as you.
+### Joining Helix
 
 1. Ask whoever runs Helix for an invite, and run the `animus join <url> <code>` it gives you. It has you make a Claude token and a GitHub token and sends both to Helix.
 2. Ask Claude to add your repository to Helix if it is not there yet (`animus project add` from a checkout of it). Helix checks it first, which takes a few minutes.
-3. Write a spec and ask Claude to submit it (`animus submit spec.md`). `/animus:to-spec` starts the job on your own machine, so ask it to write the spec without running it.
-4. Ask Claude how the job is going, or watch Helix's page at its address. If the job asks a question, Claude passes your answer on.
+3. Ask Claude how a job is going, or watch Helix's page at its address. If the job asks a question, Claude passes your answer on.
 
 Anyone on Helix whose GitHub token may push to a project may submit for it. Only whoever added a project can remove it. `animus leave` takes you off Helix and deletes your tokens there.
 
@@ -38,7 +37,8 @@ Anyone on Helix whose GitHub token may push to a project may submit for it. Only
 
 | Command | What it does |
 | --- | --- |
-| `animus run <spec.md> [--dry-run] [--draft] [--keep]` | One job, spec to PR, from inside the repo. |
+| `animus start <spec.md> [--local \| --helix] [--draft]` | One job, here or on Helix: the flag, then your config, then Helix when it has the repo. |
+| `animus run <spec.md> [--dry-run] [--draft] [--keep]` | One job on this machine, spec to PR, from inside the repo. |
 | `animus plan <spec.md> [--slices]` | Checks a spec and prints what would run; `--slices` also shows how the planner would cut it. |
 | `animus init [--force]` | Drafts `.animus/animus.yaml` from `package.json`, `pyproject.toml`, `go.mod` or `Cargo.toml`. |
 | `animus resume <job> [--answer <text>]` | Picks up a job that asked a question or was interrupted. |
@@ -103,6 +103,24 @@ ui:
 [plugin/config/profiles.yaml](plugin/config/profiles.yaml) decides what a job runs: size picks the stages, difficulty the model tier and effort, and type adds a gate, a reviewer or evidence. A `bug` job must show a test that fails on the base commit.
 
 Agents get only the skills their role is granted there, copied into their instructions from `plugin/vendor/` at a commit in `plugin/vendor/sources.yaml`: ponytail and useful-tests for every implementer, to-tickets for the planner, impeccable for UI work. Job sessions have no Skill tool, and nothing is fetched while a job runs. To take a newer commit of a skill, read the upstream diff, change `sources.yaml`, run `scripts/vendor-skill.sh <name>`, and replay a few past specs.
+
+### Your own settings
+
+`~/.animus/config.yaml` is yours alone and never goes in a repository. It is optional:
+
+```yaml
+run: helix                              # local | helix, for every repository
+skills:
+  my-habits: ~/skills/my-habits/SKILL.md          # given to the implementer and planner
+
+repos:
+  AKstudios/meal-planner:               # owner/repo, its GitHub address, or a folder
+    run: local
+    skills:
+      sql-style: { file: ~/skills/sql/SKILL.md, roles: [implementer, reviewer], types: [backend] }
+```
+
+What you say in the conversation wins over `run:`, and a repository's entry wins over the top. Your skills reach only the roles you name: the implementer and planner by default, the reviewer only when named, since it judges the work. Their text is copied into the job when it starts, and sent with the spec to Helix, so only the SKILL.md travels, not files beside it. The run log names each one with a hash of its text. Gates and setup stay in the shared `.animus/animus.yaml`, so a PR's proof never depends on one person's file. `animus doctor` checks the file, and `animus plan` lists your skills by role.
 
 ## Releases
 

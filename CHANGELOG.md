@@ -8,6 +8,24 @@ clients with how to update.
 
 ## Unreleased
 
+- A person's own settings in `~/.animus/config.yaml` (`ANIMUS_HOME`), never in
+  a repository: `run: local | helix` and `skills:` at the top for every
+  repository, and under `repos:` for one (named `owner/repo`, by any form of
+  its GitHub address, or by its folder). A personal skill is a SKILL.md and
+  the roles it is for (implementer and planner unless named; the reviewer
+  only when named) and optionally task types. Its text is copied into the
+  job's folder (`skills.json`) when the job starts, put in each granted
+  role's instructions, and logged as `personal:<name>@<hash>`.
+- `animus start <spec.md> [--local | --helix]`: runs the job here or submits
+  it to Helix. The flag decides, then the config, then Helix when this
+  machine has joined one that has the repository. `/animus:to-spec` starts
+  jobs with it and passes `--helix` or `--local` when the person asked for
+  one in the conversation.
+- `animus submit` sends the person's skills with the spec (`skills` on
+  `POST /jobs`, answered with the names taken); Helix keeps them beside the
+  spec and starts `animus run --skills <file>`. A job Helix starts reads no
+  config on the machine. `animus doctor` checks the config and says what it
+  sets for the repository; `animus plan` lists your skills by role.
 - Projects people add themselves: `animus project add [<name>]` from a
   checkout puts its repository on Helix (`POST /projects`). Helix clones it
   with that person's GitHub token, checks the token may push, reads its

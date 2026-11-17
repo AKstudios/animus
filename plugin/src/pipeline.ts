@@ -19,6 +19,7 @@ import { loadProfile } from './profile.ts';
 import { describePlan, escalate, modelFor, PLUGIN_ROOT, raise, readPrompt, resolvePlan, type Factory, type Tier } from './profiles.ts';
 import { animusCommand, git, AnimusError, tryGit } from './proc.ts';
 import { asReport, asReview, blockers, criteriaList, listFindings, REPORT_SCHEMA, REVIEW_SCHEMA, type Finding, type Report, type Review } from './review.ts';
+import { loadJobSkills, saveJobSkills, type PersonalSkill } from './personal.ts';
 import { roleSkills } from './skills.ts';
 import { criteriaSoFar, isPlanned, oneSlice, planSlices, type Slicing } from './slices.ts';
 import { loadSpec, type Spec } from './spec.ts';
@@ -50,6 +51,8 @@ export type RunOptions = {
   /** Leave the worktree in place when the job ends. */
   keep?: boolean;
   trigger?: string;
+  /** The submitter's own skills (personal.ts), copied into the job's folder when it starts; a resumed job reads that copy. */
+  personal?: PersonalSkill[];
   /** Pick a job up again, with the person's answer if it asked a question. */
   resume?: { state: JobState; answer?: string };
 };
@@ -112,6 +115,8 @@ export async function runJob(opts: RunOptions, deps: Deps): Promise<Run> {
   mkdirSync(dir, { recursive: true });
   const specCopy = join(dir, 'spec.md');
   if (!prior) copyFileSync(opts.specFile!, specCopy);
+  if (!prior) saveJobSkills(dir, opts.personal ?? []);
+  const personal = loadJobSkills(dir);
 
   const run: Run = {
     job, repo, submitter: process.env.ANIMUS_USER ?? tryGit(repo, ['config', 'user.email']) ?? userInfo().username,
@@ -136,6 +141,7 @@ export async function runJob(opts: RunOptions, deps: Deps): Promise<Run> {
 
   log(`job ${job}: ${spec.title}`);
   log(describePlan(factory, plan));
+  if (personal.length) log(`the submitter's skills: ${personal.map((p) => `${p.name} (${p.roles.join(', ')}${p.types ? `; ${p.types.join(', ')} jobs` : ''})`).join(', ')}`);
   // A spec that builds on another waits for it, then starts from a base that holds it.
   if (!prior && spec.after.length) {
     at('setup', 'setup · waits for an earlier pull request to merge');
@@ -198,7 +204,7 @@ export async function runJob(opts: RunOptions, deps: Deps): Promise<Run> {
 
   /** A role's standing instructions with the skills it is granted, and the folders those skills' files are in. */
   const instructions = (role: string) => {
-    const s = roleSkills(factory, role, plan.type, wt);
+    const s = roleSkills(factory, role, plan.type, wt, personal);
     for (const name of s.names) if (!run.skills.includes(name)) run.skills.push(name);
     return { system: [readPrompt(role), s.system].filter(Boolean).join('\n\n'), ...(s.dirs.length ? { addDirs: s.dirs } : {}) };
   };
@@ -318,9 +324,9 @@ export async function runJob(opts: RunOptions, deps: Deps): Promise<Run> {
       state.slicing = prior ? oneSlice(spec) : await timed('plan', () => {
         try {
           if (isPlanned(factory, spec.size)) at('plan', `planner · ${factory.planner!.tier} tier`);
-          const planned = planSlices({ factory, agent: deps.agent, spec, cwd: wt, log, record: (stage, r) => record(stage, 'planner', factory.planner!.tier, factory.planner!.effort, r) });
+          const planned = planSlices({ factory, agent: deps.agent, spec, cwd: wt, personal, log, record: (stage, r) => record(stage, 'planner', factory.planner!.tier, factory.planner!.effort, r) });
           state.sliced_by = planned.by;
-          if (planned.by === 'planner') for (const name of roleSkills(factory, 'planner', plan.type, wt).names) if (!run.skills.includes(name)) run.skills.push(name);
+          if (planned.by === 'planner') for (const name of roleSkills(factory, 'planner', plan.type, wt, personal).names) if (!run.skills.includes(name)) run.skills.push(name);
           return planned.slicing;
         } catch (err) {
           if (!(err instanceof AnimusError)) throw err;

@@ -34,8 +34,12 @@ removed on 2026-11-13). Helix is where jobs outlive a session.
 - Every agent step goes through `Agent` in plugin/src/agent.ts. Nothing else
   may name a model or a CLI. Profiles name a tier.
 - A skill reaches an agent only through a grant in profiles.yaml and a copy
-  in plugin/vendor/ at a commit in sources.yaml. Never give a job session
-  the Skill tool, and never fetch a skill while a job runs.
+  in plugin/vendor/ at a commit in sources.yaml, or as a personal skill from
+  the submitter's `~/.animus/config.yaml`, copied into the job's folder when
+  it starts (plugin/src/personal.ts). Never give a job session the Skill
+  tool, and never fetch or read a skill's source while a job runs.
+- A person's config.yaml holds only `run` and `skills`. What a job is checked
+  against stays in the project's shared `.animus/animus.yaml`.
 - A job leaves nothing in the target repo but its branch. Its state, the run
   log and its evidence live under `~/.animus` (`ANIMUS_HOME`).
 - Errors meant for the user throw `AnimusError` (printed without a stack).

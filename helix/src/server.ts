@@ -9,6 +9,7 @@
 import { createServer, type IncomingMessage, type Server } from 'node:http';
 import { VERSION_HEADER } from '../../plugin/src/remote.ts';
 import { animusVersion, compatible } from '../../plugin/src/version.ts';
+import { parseSkills, type PersonalSkill } from '../../plugin/src/personal.ts';
 import { hashToken, helixHome, type Config } from './config.ts';
 import { display } from './display.ts';
 import { inviteDetails, joinHelix, takeOff, verifyInChild, type Verify } from './join.ts';
@@ -105,8 +106,11 @@ export function serve(opts: {
         if (req.method === 'POST') {
           const b = await body(req);
           if (typeof b.repo !== 'string' || typeof b.spec !== 'string') throw new Refused(400, 'a submission needs repo (its name here) and spec (the file\'s text)');
-          const s: Submission = { repo: b.repo, spec: b.spec, ...(typeof b.name === 'string' ? { name: b.name } : {}), ...(b.draft === true ? { draft: true } : {}) };
-          return send(201, supervisor.submit(person, s));
+          let skills: PersonalSkill[];
+          try { skills = parseSkills(b.skills, 'the submission'); } catch (err) { throw new Refused(400, (err as Error).message); }
+          const s: Submission = { repo: b.repo, spec: b.spec, ...(typeof b.name === 'string' ? { name: b.name } : {}), ...(b.draft === true ? { draft: true } : {}), ...(skills.length ? { skills } : {}) };
+          // The skills it took, so a client can tell them from a Helix that predates them.
+          return send(201, { ...supervisor.submit(person, s), skills: skills.map((k) => k.name) });
         }
       } else if (/^\d+$/.test(id)) {
         const n = Number(id);

@@ -15,6 +15,8 @@ export const VERSION_HEADER = 'animus-version';
 export type RemoteJob = {
   id: number; state: string; person: string; repo: string; title: string; submitted: string; started?: string; ended?: string;
   animus_job?: string; outcome?: string; pr?: string; reason?: string; question?: string; cost_usd?: number; log?: string;
+  /** On a submission's answer: the submitter's skills Helix took with it. A Helix that predates them leaves this out. */
+  skills?: string[];
 };
 
 /** Where `animus join` keeps the address and token it was given: the owner's eyes only. */
@@ -68,7 +70,8 @@ export async function helixVersion(url: string): Promise<string> {
   return value.version;
 }
 
-export const submit = (s: { repo: string; spec: string; name: string; draft?: boolean }) => call<RemoteJob>('POST', '/jobs', s);
+export type SentSkill = { name: string; roles: string[]; types?: string[]; text: string };
+export const submit = (s: { repo: string; spec: string; name: string; draft?: boolean; skills?: SentSkill[] }) => call<RemoteJob>('POST', '/jobs', s);
 export const jobs = () => call<{ slots: number; jobs: RemoteJob[] }>('GET', '/jobs');
 export const job = (id: string) => call<RemoteJob>('GET', `/jobs/${encodeURIComponent(id)}`);
 export const cancel = (id: string) => call<RemoteJob>('POST', `/jobs/${encodeURIComponent(id)}/cancel`);

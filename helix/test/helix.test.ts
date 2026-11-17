@@ -12,7 +12,7 @@ import { addPerson, hashToken, removePerson, type Config } from '../src/config.t
 import type { Display } from '../src/display.ts';
 import { serve } from '../src/server.ts';
 import { openStore } from '../src/store.ts';
-import { cancelJobsOf, pauseFile, supervise, type Launch } from '../src/supervisor.ts';
+import { animusArgs, cancelJobsOf, pauseFile, skillsFile, supervise, type Launch } from '../src/supervisor.ts';
 
 const SPEC = (title: string) => `---\nsize: small\n---\n# ${title}\n\n## Acceptance criteria\n\n1. It works.\n`;
 
@@ -280,4 +280,19 @@ test('remove-person deletes the credentials file Helix keeps for them, and leave
   } finally {
     if (before === undefined) delete process.env.HELIX_HOME; else process.env.HELIX_HOME = before;
   }
+});
+
+test('skills sent with a spec are kept beside it and passed to animus run; bad ones are refused', async () => {
+  const h = await helix();
+  const skills = [{ name: 'sql-style', roles: ['implementer'], text: 'Name tables in the singular.\n' }];
+  const j = await client.submit({ repo: 'app', spec: SPEC('with skills'), name: 'spec.md', skills });
+  assert.deepEqual(j.skills, ['sql-style']);
+  const job = h.store.get(j.id)!;
+  assert.equal(JSON.parse(readFileSync(skillsFile(job), 'utf8'))[0].text, 'Name tables in the singular.\n');
+  assert.deepEqual(animusArgs(job, '/repo').slice(-2), ['--skills', skillsFile(job)]);
+  // None sent: no file, and no flag.
+  const plain = h.store.get((await h.submit('plain')).id)!;
+  assert.ok(!animusArgs(plain, '/repo').includes('--skills'));
+  await assert.rejects(client.submit({ repo: 'app', spec: SPEC('x'), name: 'spec.md', skills: [{ name: 'x', roles: ['boss'], text: '' }] }), /roles must list roles from/);
+  h.stop();
 });

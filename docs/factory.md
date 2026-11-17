@@ -258,6 +258,7 @@ Keep the set small and name must-use skills in the spec or the workflow prompt. 
 | Each repo (`.claude/skills/`, plus `CLAUDE.md`) | How to run and verify the app, code conventions, your design system components | Knowledge no model upgrade can supply; arrives with every clone |
 | The factory | `to-tickets`, for the planner that cuts a spec into slices; a reviewer skill; `tdd`, named only in bug-fix specs; one UI design skill, only for UI repos | They work with nobody answering |
 | Your laptop | `grill-me` and `to-prd` for shaping specs | They need a conversation with you |
+| Your `~/.animus/config.yaml` | Skills of your own, for all your jobs or one repo's, granted to roles you name (implementer and planner by default; the reviewer only when named) | Habits that are yours, not the team's. Copied into the job when it starts and sent with the spec to Helix, so nothing is read while the job runs; the run log names each with a hash of its text |
 
 Re-test each public skill when a new model ships: run the same few specs with and without it, and delete it if the PRs are no better.
 

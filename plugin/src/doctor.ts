@@ -6,6 +6,7 @@ import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { animusHome } from './log.ts';
 import { onPath } from './pipeline.ts';
+import { personalConfig, personalFor, snapshotSkills } from './personal.ts';
 import { PROFILE_PATH, loadProfile } from './profile.ts';
 import { helixLogin, helixVersion } from './remote.ts';
 import { animusVersion, atLeast, compatible, MIN_CLAUDE } from './version.ts';
@@ -89,8 +90,18 @@ export async function doctor(cwd: string, env = process.env, opts: { helixUrl?: 
     }
     const settings = join(top.text, '.claude', 'settings.json');
     if (existsSync(settings) && /"hooks"\s*:/.test(readFileSync(settings, 'utf8'))) add('info', 'project hooks', `${settings} has hooks; jobs run them, as the project's own rules`);
+    if (existsSync(personalConfig())) {
+      try {
+        const mine = personalFor(top.text);
+        snapshotSkills(mine.skills);
+        add('ok', 'your config', [
+          mine.run ? `jobs here run ${mine.run.where === 'helix' ? 'on Helix' : 'on this machine'} (${mine.run.from.split(' in ')[0]})` : 'no run: set, so animus start picks',
+          mine.skills.length ? `your skills: ${mine.skills.map((k) => `${k.name} (${k.roles.join(', ')})`).join(', ')}` : 'no skills of yours',
+        ].join('; '));
+      } catch (err) { add('fail', 'your config', (err as Error).message); }
+    }
   }
-  add('info', 'isolation', 'jobs load only the project\'s Claude settings and rules, start no MCP server, and get no skills or slash commands of yours');
+  add('info', 'isolation', 'jobs load only the project\'s Claude settings and rules, start no MCP server, and get no skills or slash commands of yours beyond those named in your config.yaml');
 
   const login = helixLogin(env);
   const url = opts.helixUrl ?? login?.url ?? env.HELIX_URL;

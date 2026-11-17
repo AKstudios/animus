@@ -10,6 +10,7 @@ import { basename, dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { AnimusError } from '../../plugin/src/proc.ts';
 import { loadProgress, type Progress } from '../../plugin/src/log.ts';
+import type { PersonalSkill } from '../../plugin/src/personal.ts';
 import { parseSpec } from '../../plugin/src/spec.ts';
 import { credentialEnv, personEnv, readyRepos, type Config } from './config.ts';
 import type { HelixJob, Store } from './store.ts';
@@ -26,7 +27,10 @@ export type Launch = (job: HelixJob, repoDir: string, env: Record<string, string
 /** What `animus` is asked to do for a job: run it, or resume one that ran before. */
 export const animusArgs = (job: HelixJob, repoDir: string): string[] => (job.animus_job
   ? ['resume', job.animus_job, ...(job.answer ? ['--answer', job.answer] : [])]
-  : ['run', job.spec, '--repo', repoDir, ...(job.draft ? ['--draft'] : [])]);
+  : ['run', job.spec, '--repo', repoDir, ...(job.draft ? ['--draft'] : []), ...(existsSync(skillsFile(job)) ? ['--skills', skillsFile(job)] : [])]);
+
+/** Where Helix keeps the skills a person sent with a spec: beside it, so a job's container sees them where the spec is. */
+export const skillsFile = (job: Pick<HelixJob, 'spec'>) => join(dirname(job.spec), 'skills.json');
 
 /** The same command a person runs on a laptop, on this machine as Helix's account. */
 const animus: Launch = (job, repoDir) => ({
@@ -40,7 +44,7 @@ export const MAX_INTERRUPTIONS = 3;
 /** Looks at a person's credentials before their job starts: why the job cannot run, or variables to add to it (the person's git identity). */
 export type Preflight = (person: string, env: Record<string, string>, repoDir: string, repo: string) => { why?: string; env?: Record<string, string> };
 
-export type Submission = { repo: string; spec: string; name?: string; draft?: boolean };
+export type Submission = { repo: string; spec: string; name?: string; draft?: boolean; skills?: PersonalSkill[] };
 
 /** While this file is in Helix's home, no job starts; submissions still queue. `helix upgrade` sets it to drain the machine. */
 export const pauseFile = (home: string) => join(home, 'paused');
@@ -213,6 +217,7 @@ export function supervise(opts: {
       job.spec = join(home, 'jobs', String(job.id), basename(s.name ?? 'spec.md'));
       mkdirSync(dirname(job.spec), { recursive: true });
       writeFileSync(job.spec, s.spec);
+      if (s.skills?.length) writeFileSync(skillsFile(job), `${JSON.stringify(s.skills, null, 2)}\n`);
       store.save(job);
       tick();
       return store.get(job.id)!;
