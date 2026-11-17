@@ -181,7 +181,13 @@ shared and opened cold. A job page needs a sign-in: paste your Helix token
 that browser keeps and takes out of the address bar; `animus ui --helix`
 opens Helix that way, signed in as you. Sign out from the
 header. Do not sign in on a shared wall screen: the token can also submit and
-cancel jobs as you. `/people` and `/people/<name>` are still to come.
+cancel jobs as you. `/people/<name>` is still to come.
+
+Every person named on the overview or a job page links to their page,
+`/people/<name>`. `/people` (the header's PEOPLE) lists each person on the
+Helix, for anyone signed in: their GitHub login, the day they joined (blank
+for a person who joined before Helix kept it), jobs submitted, PRs opened,
+total spent and their last activity. Someone who has left is not listed.
 
 A job page shows the job's project, person, state, outcome, pull request,
 cost and times; its spec as submitted; how long it spent in each stage,
@@ -206,6 +212,7 @@ the display's own request for a job page's data sends none.
 | `GET /` | The display page |
 | `GET /jobs/<id>`, `/people`, `/people/<name>` | The display page, to a browser asking for HTML |
 | `GET /jobs/<id>/page-data` | What a job page shows, for any person |
+| `GET /people/page-data` | What the people list shows, for any person |
 | `GET /jobs/<id>/shots/<name>` | One of a job's screenshots, by its name in `shots/manifest.json`; nothing outside its shots folder |
 | `GET /display` | What the display shows, as JSON |
 | `GET /version` | Helix's version |

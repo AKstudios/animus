@@ -12,6 +12,11 @@ clients with how to update.
   answers (with the answer's text) or cancels a job, joins, leaves, or adds or
   removes a project, and the day each new person joined. Nothing from before
   is filled in.
+- `/people` on Helix's display lists each person with their GitHub login, the
+  day they joined (blank before it was kept), jobs submitted, PRs opened,
+  total spent and last activity, from a new authenticated route,
+  `GET /people/page-data`. Every person named on the overview or a job page
+  links to `/people/<name>`.
 - The installers take `join <url> <code>`: after setup they run `animus join`
   with them, so one line installs Animus and joins a Helix
   (`curl -fsSL …/install.sh | bash -s -- join <url> <code>`).

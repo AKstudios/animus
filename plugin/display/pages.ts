@@ -57,3 +57,12 @@ export function jobNotice(id: number, signedIn: boolean, status?: number): { sig
   if (status === 404) return { signIn: false, text: `Helix has no job #${id}.` };
   return undefined;
 }
+
+/** A person's own page. */
+export const personPage = (name: string) => `/people/${encodeURIComponent(name)}`;
+
+/** What the people list says in place of the list, or nothing when it has it. `status` is how Helix answered for its data. */
+export function peopleNotice(signedIn: boolean, status?: number): string | undefined {
+  if (signedIn) return undefined;
+  return status === 401 ? 'Helix did not take that token, so this browser forgot it. Sign in again to see who is on this Helix.' : 'Sign in to see who is on this Helix. Paste your Helix token: animus join kept it in ~/.animus/helix.json.';
+}

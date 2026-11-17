@@ -1,0 +1,93 @@
+import assert from 'node:assert/strict';
+import { mkdtempSync } from 'node:fs';
+import type { AddressInfo } from 'node:net';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { test } from 'node:test';
+import { jobView } from '../../plugin/display/job-view.ts';
+import { peopleNotice, personPage } from '../../plugin/display/pages.ts';
+import { peopleView } from '../../plugin/display/people-view.ts';
+import type { Display, DisplayJob, JobPage, PeoplePage } from '../../plugin/display/shape.ts';
+import { view } from '../../plugin/display/view.ts';
+import { hashToken, type Config } from '../src/config.ts';
+import { serve } from '../src/server.ts';
+import { openStore } from '../src/store.ts';
+import { supervise } from '../src/supervisor.ts';
+
+const NOW = Date.parse('2026-11-17T12:00:00Z');
+
+/** A Helix on a free port: ana (signed in with GitHub, joined on a day), ben (joined before the day was kept) and cy, who has done nothing. */
+async function helix() {
+  const home = mkdtempSync(join(tmpdir(), 'helix-'));
+  const config: Config = { host: '127.0.0.1', port: 0, slots: 1 };
+  const store = openStore(join(home, 'helix.db'));
+  store.putPerson('ana', { token_sha256: hashToken('ana-token'), github: 'ana-gh', joined: '2026-11-10' });
+  store.putPerson('ben', { token_sha256: hashToken('ben-token') });
+  store.putPerson('cy', { token_sha256: hashToken('cy-token') });
+  const base = { state: 'ended', repo: 'app', spec: join(home, 'spec.md'), draft: false, submitted: '2026-11-17T10:00:00Z' } as const;
+  store.add({ ...base, person: 'ana', title: 'One', outcome: 'pr', pr: 'https://github.com/o/app/pull/4', cost_usd: 1.5 });
+  store.add({ ...base, person: 'ana', title: 'Two', outcome: 'failed', cost_usd: 2 });
+  store.add({ ...base, person: 'ben', title: 'Three', outcome: 'draft-pr', pr: 'https://github.com/o/app/pull/5' });
+  store.record('ana', 'submitted', { job: 2, repo: 'app' });
+  store.record('ben', 'cancelled', { job: 3 });
+  const supervisor = supervise({ store, config, home });
+  const server = serve({ config, store, supervisor, home });
+  await new Promise<void>((r) => { server.listen(0, '127.0.0.1', r); });
+  const url = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+  const get = (path: string, token?: string) => fetch(new URL(path, url), token ? { headers: { authorization: `Bearer ${token}` } } : {});
+  return { get, stop: () => { supervisor.stop(); server.close(); store.close(); } };
+}
+
+// Protects: criterion 2, the people list. Fails when: a person is left off, a number is wrong, a person from before joined was kept shows a date, or Helix answers without a token.
+test('/people lists each person with their GitHub login, joined, jobs, PRs, spent and last activity, to a valid token only', async () => {
+  const h = await helix();
+  const [none, wrong, ok] = await Promise.all([h.get('/people/page-data'), h.get('/people/page-data', 'not-a-token'), h.get('/people/page-data', 'cy-token')]);
+  const v = peopleView((await ok.json()) as PeoplePage);
+  h.stop();
+
+  assert.deepEqual([none.status, wrong.status, ok.status], [401, 401, 200]);
+  assert.deepEqual(v.rows.map((r) => [r.name, r.github, r.joined, r.jobs, r.prs, r.spent]), [
+    ['ana', 'ana-gh', '2026-11-10', '2', '1', '$3.50'],
+    ['ben', '', '', '1', '1', '$0.00'],
+    ['cy', '', '', '0', '0', '$0.00'],
+  ]);
+  // Newest activity of each; none for someone who has done nothing. The time is when it was kept, so only its wording is checked.
+  assert.deepEqual(v.rows.map((r) => r.last.replace(/^\d{4}-\d\d-\d\d \d\d:\d\d UTC/, 'T')), ['T · submitted a job', 'T · cancelled a job', '']);
+});
+
+const job = (id: number, over: Partial<DisplayJob>): DisplayJob => ({ id, state: 'queued', person: 'ana lee', repo: 'app', title: `Job ${id}`, submitted: '2026-11-17T11:00:00Z', ...over });
+
+// Protects: criterion 4, the overview. Fails when: a person named on a running, waiting or ended job has no link to their page, or a name with a space is not encoded.
+test('every person named on the overview links to their person page', () => {
+  const d: Display = { name: 'office', at: new Date(NOW).toISOString(), slots: 1, stages: ['setup'], repos: [{ name: 'app' }], jobs: [
+    job(1, { state: 'running', started: '2026-11-17T11:30:00Z' }),
+    job(2, { person: 'ben' }),
+    job(3, { state: 'ended', outcome: 'needs-input', question: 'Which?', person: 'cy' }),
+    job(4, { state: 'ended', outcome: 'pr', pr: 'https://github.com/o/app/pull/9', person: 'dee' }),
+  ] };
+  const v = view(d, null, NOW);
+  assert.deepEqual([...v.live, ...v.waiting, ...v.recent].map((j) => [j.person, j.personPage]), [
+    ['ana lee', '/people/ana%20lee'], ['cy', '/people/cy'], ['ben', '/people/ben'], ['dee', '/people/dee'],
+  ]);
+  assert.equal(personPage('ana lee'), '/people/ana%20lee');
+});
+
+// Protects: criterion 4, a job page. Fails when: the person fact is plain text.
+test('a job page\'s person fact links to their person page', () => {
+  const page: JobPage = { at: new Date(NOW).toISOString(), stages: [], log: '', job: job(9, {}) };
+  const person = jobView(page, NOW).facts.find((f) => f.k === 'person');
+  assert.deepEqual(person, { k: 'person', v: 'ana lee', page: '/people/ana%20lee' });
+});
+
+// Protects: criterion 4, the people list names each person. Fails when: a row does not link to its page.
+test('each row of the people list links to that person\'s page', () => {
+  const v = peopleView({ at: '', people: [{ name: 'ana lee', jobs: 0, prs: 0, spent: 0 }] });
+  assert.equal(v.rows[0]!.page, '/people/ana%20lee');
+});
+
+// Protects: the people list is for signed-in people. Fails when: a signed-out or refused person is not told to sign in.
+test('the people list without a token, or with one Helix refused, says to sign in', () => {
+  assert.match(peopleNotice(false)!, /^Sign in to see who is on this Helix/);
+  assert.match(peopleNotice(false, 401)!, /^Helix did not take that token/);
+  assert.equal(peopleNotice(true), undefined);
+});

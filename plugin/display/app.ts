@@ -3,9 +3,10 @@
 // (pages.ts). The overview needs no sign-in; a job page needs the person's
 // token, sent with each request for its data.
 // It only reads. Sent to the browser with its types stripped (helix/src/ui.ts).
-import { forgetToken, jobNotice, keepToken, readToken, route, takeToken } from './pages.ts';
+import { forgetToken, jobNotice, keepToken, peopleNotice, readToken, route, takeToken } from './pages.ts';
 import { atEnd, jobView, type JobPageView } from './job-view.ts';
-import type { Display, JobPage } from './shape.ts';
+import { peopleView } from './people-view.ts';
+import type { Display, JobPage, PeoplePage } from './shape.ts';
 import { view, type Live, type Project, type Recent, type View, type Waiting } from './view.ts';
 
 const POLL_MS = 2000;
@@ -27,6 +28,9 @@ const state: {
   /** On a job page: its data, and how Helix last answered for it. */
   job?: JobPage;
   jobStatus?: number;
+  /** On the people list: its data, and how Helix last answered for it. */
+  people?: PeoplePage;
+  peopleStatus?: number;
   /** Helix's clock minus this browser's, in ms. */
   skew: number;
   offline: boolean;
@@ -67,6 +71,7 @@ function header(v: View | undefined): string {
       <div class="stat-slots"><span class="k">SLOTS</span>${squares}<span class="b">${slots}</span></div>
       <div><span class="k">QUEUED</span> <span class="b">${v?.queued ?? 0}</span></div>
       <div><span class="k">NEEDS INPUT</span> <span class="asks">${v?.asks ?? 0}</span></div>
+      <a class="k" href="/people">PEOPLE</a>
       <div class="time">${wall(new Date())}</div>
       ${readToken(storage) ? '<button type="button" class="sign-out" data-sign-out>SIGN OUT</button>' : ''}
     </div>
@@ -98,9 +103,12 @@ const nav = (v: View) => `<nav class="nav" aria-label="Projects">
 
 const track = (v: View, j: Live) => `<span class="track" aria-hidden="true">${Array.from({ length: v.stages }, (_, i) => `<span class="seg${i < j.stage ? ' done' : i === j.stage ? ' on' : ''}"></span>`).join('')}</span>`;
 
+/** A person named on a job, linking to their page. */
+const who = (j: { person: string; personPage: string }) => `<a href="${esc(j.personPage)}">${esc(j.person)}</a>`;
+
 const card = (v: View, j: Live) => `<article class="card" data-key="j-${j.id}">
   <span class="corner-a" aria-hidden="true"></span><span class="corner-b" aria-hidden="true"></span>
-  <div class="card-top"><span><span class="b">#${j.id}</span> <span class="mute">${esc(j.repo)} · ${esc(j.person)}</span></span><span class="elapsed">${j.elapsed}</span></div>
+  <div class="card-top"><span><span class="b">#${j.id}</span> <span class="mute">${esc(j.repo)} · ${who(j)}</span></span><span class="elapsed">${j.elapsed}</span></div>
   <a class="card-title" href="${esc(j.page)}">${esc(j.title)}</a>
   <div class="card-stage">${track(v, j)}<div class="card-step"><span class="stage-name">${esc(j.stageText)}</span><span class="mute">${esc(j.stepText)}</span></div></div>
   <div class="card-feed"><div class="mute">${esc(j.who)}</div><div class="now">&gt; ${esc(j.now)}<span class="cursor">_</span></div></div>
@@ -113,13 +121,13 @@ const row = (v: View, j: Live) => `<div class="row" data-key="j-${j.id}">
 
 const waiting = (j: Waiting) => `<div class="wait${j.ask ? ' ask' : ''}" data-key="j-${j.id}">
   <span class="id">#${j.id}</span><span class="tag">${j.tag}</span><a class="title" href="${esc(j.page)}">${esc(j.title)}</a>
-  <span class="by">${esc(j.repo)} · ${esc(j.person)}</span><span class="note">${esc(j.note)}</span>
+  <span class="by">${esc(j.repo)} · ${who(j)}</span><span class="note">${esc(j.note)}</span>
 </div>`;
 
 const recent = (j: Recent) => `<div class="done-row" data-key="j-${j.id}">
   <span class="id">#${j.id}</span>
   ${j.href ? `<a class="tag tone-${j.tone}" href="${esc(j.href)}" target="_blank" rel="noopener noreferrer">${esc(j.tag)}</a>` : `<span class="tag tone-${j.tone}">${esc(j.tag)}</span>`}
-  <a class="title" href="${esc(j.page)}">${esc(j.title)}</a><span class="by">${esc(j.meta)}</span>
+  <a class="title" href="${esc(j.page)}">${esc(j.title)}</a><span class="by">${esc(j.repo)} · ${who(j)}${j.meta ? ` · ${esc(j.meta)}` : ''}</span>
   ${j.reason ? `<span class="reason tone-${j.tone}">${esc(j.reason)}</span>` : ''}
 </div>`;
 
@@ -191,15 +199,25 @@ function jobSections(v: JobPageView): string {
 function jobMain(id: number, now: number): string {
   const notice = jobNotice(id, readToken(storage) !== null, state.jobStatus);
   const v = state.job?.job.id === id ? jobView(state.job, now) : undefined;
-  const facts = v ? `<div class="facts">${v.facts.map((f) => `<div><span class="mute">${esc(f.k)}</span> ${f.href ? `<a href="${esc(f.href)}" target="_blank" rel="noopener noreferrer">${esc(f.v)}</a>` : esc(f.v)}</div>`).join('')}</div>` : '';
+  const facts = v ? `<div class="facts">${v.facts.map((f) => `<div><span class="mute">${esc(f.k)}</span> ${f.href ? `<a href="${esc(f.href)}" target="_blank" rel="noopener noreferrer">${esc(f.v)}</a>` : f.page ? `<a href="${esc(f.page)}">${esc(f.v)}</a>` : esc(f.v)}</div>`).join('')}</div>` : '';
   const scope = `<div class="scope"><div><div class="label">JOB #${id}</div><h1>${esc(v?.title ?? `Job #${id}`)}</h1></div>${notice ? '' : facts}</div>`;
   const body = notice ? `<div class="none boxed">${esc(notice.text)}</div>${notice.signIn ? signIn : ''}` : v ? jobSections(v) : '';
   return `<main class="main">${back}${scope}${body}</main>`;
 }
 
+function peopleList(): string {
+  const notice = peopleNotice(readToken(storage) !== null, state.peopleStatus);
+  if (notice) return `<div class="none boxed">${esc(notice)}</div>${signIn}`;
+  if (!state.people) return '';
+  const rows = peopleView(state.people).rows.map((p) => `<tr data-key="u-${esc(p.name)}">
+    <td><a href="${esc(p.page)}">${esc(p.name)}</a></td><td>${esc(p.github)}</td><td>${esc(p.joined)}</td>
+    <td class="num">${p.jobs}</td><td class="num">${p.prs}</td><td class="num">${esc(p.spent)}</td><td>${esc(p.last)}</td></tr>`).join('');
+  return rows ? `<table class="people"><thead><tr><th>PERSON</th><th>GITHUB</th><th>JOINED</th><th class="num">JOBS</th><th class="num">PRS OPENED</th><th class="num">SPENT</th><th>LAST ACTIVITY</th></tr></thead><tbody>${rows}</tbody></table>` : none('Nobody has joined this Helix yet.');
+}
+
 const peopleMain = (name?: string) => `<main class="main">${back}
   <div class="scope"><div><div class="label">${name ? 'PERSON' : 'PEOPLE'}</div><h1>${esc(name ?? 'People')}</h1></div></div>
-  <div class="none boxed">This page is coming: who is on this Helix and what each person has run.</div>
+  ${name ? '<div class="none boxed">This page is coming: what this person has run.</div>' : peopleList()}
 </main>`;
 
 function page(): string {
@@ -273,6 +291,16 @@ async function readJob(id: number): Promise<void> {
   await readShots(state.job, token);
 }
 
+/** The people list's data, with the token as it is kept now; a token Helix refuses is forgotten. */
+async function readPeople(): Promise<void> {
+  const token = readToken(storage);
+  if (!token) return;
+  const res = await fetch('/people/page-data', { cache: 'no-store', headers: { authorization: `Bearer ${token}` } });
+  state.peopleStatus = res.status;
+  if (res.status === 401) forgetToken(storage);
+  if (res.ok) state.people = (await res.json()) as PeoplePage;
+}
+
 /** Fetches with the token each screenshot this browser does not hold yet, and lets go of the ones the job no longer has. */
 async function readShots(page: JobPage, token: string): Promise<void> {
   const srcs = jobView(page, 0).shots.map((s) => s.src);
@@ -293,7 +321,7 @@ function forgetShots(): void {
 async function poll(): Promise<void> {
   window.clearTimeout(timer);
   try {
-    const [res] = await Promise.all([fetch('/display', { cache: 'no-store' }), at.page === 'job' ? readJob(at.id) : undefined]);
+    const [res] = await Promise.all([fetch('/display', { cache: 'no-store' }), at.page === 'job' ? readJob(at.id) : at.page === 'people' && !at.name ? readPeople() : undefined]);
     if (!res.ok) throw new Error(`Helix answered ${res.status}`);
     const display = (await res.json()) as Display;
     Object.assign(state, { display, skew: Date.parse(display.at) - Date.now(), offline: false, heard: new Date() });
@@ -309,7 +337,7 @@ root.addEventListener('submit', (event) => {
   if (!form) return;
   event.preventDefault();
   keepToken(storage, (form.querySelector('input') as HTMLInputElement).value);
-  state.jobStatus = undefined;
+  Object.assign(state, { jobStatus: undefined, peopleStatus: undefined });
   void poll();
 });
 
@@ -317,7 +345,7 @@ root.addEventListener('click', (event) => {
   if ((event.target as Element).closest('[data-sign-out]')) {
     forgetToken(storage);
     forgetShots();
-    Object.assign(state, { job: undefined, jobStatus: undefined });
+    Object.assign(state, { job: undefined, jobStatus: undefined, people: undefined, peopleStatus: undefined });
     draw();
     return;
   }

@@ -2,6 +2,7 @@
 // facts, stages, slices, checks, review and questions, each as it is shown.
 // No DOM here, so the wording is tested without a browser
 // (helix/test/job-page.test.ts), as view.ts is.
+import { personPage } from './pages.ts';
 import type { JobPage } from './shape.ts';
 import { clock, span, type Tone } from './view.ts';
 
@@ -9,7 +10,7 @@ export type JobPageView = {
   id: number;
   title: string;
   /** The header's facts, in order: only the ones the job has. */
-  facts: { k: string; v: string; href?: string }[];
+  facts: { k: string; v: string; href?: string; /** Another page of the display. */ page?: string }[];
   /** Why it failed or stopped, when it said. */
   reason?: string;
   spec: string;
@@ -31,14 +32,14 @@ const CHECK: Record<string, [string, Tone]> = { ok: ['ok', 'ink'], fail: ['FAIL'
 const SEVERITY: Record<string, Tone> = { blocker: 'fail', 'should-fix': 'ask', note: 'mute' };
 
 /** A time as the page shows it: in UTC, so every screen that shows the job says the same. */
-const when = (iso: string) => `${iso.slice(0, 10)} ${iso.slice(11, 16)} UTC`;
+export const when = (iso: string) => `${iso.slice(0, 10)} ${iso.slice(11, 16)} UTC`;
 
 /** The job page for one moment: `now` is Helix's clock in ms. */
 export function jobView(p: JobPage, now: number): JobPageView {
   const j = p.job;
   const pr = j.pr ? /(\d+)\/?$/.exec(j.pr)?.[1] : undefined;
   const facts = [
-    { k: 'project', v: j.repo }, { k: 'person', v: j.person }, { k: 'state', v: j.state },
+    { k: 'project', v: j.repo }, { k: 'person', v: j.person, page: personPage(j.person) }, { k: 'state', v: j.state },
     ...(j.outcome ? [{ k: 'outcome', v: OUTCOMES[j.outcome] ?? j.outcome }] : []),
     ...(j.pr ? [{ k: 'PR', v: pr ? `#${pr}` : j.pr, ...(/^https?:\/\//.test(j.pr) ? { href: j.pr } : {}) }] : []),
     ...(j.cost_usd !== undefined ? [{ k: 'cost', v: `$${j.cost_usd.toFixed(2)}` }] : []),

@@ -73,3 +73,20 @@ export type Display = {
   repos: DisplayRepo[];
   jobs: DisplayJob[];
 };
+
+/** One person on the people list: from Helix, GET /people/page-data, with a person's token. */
+export type PersonRow = {
+  name: string;
+  /** The login their GitHub token signed in as when they joined. */
+  github?: string;
+  /** The day they joined (ISO); left out for a person who joined before it was kept. */
+  joined?: string;
+  jobs: number;
+  /** Jobs that opened a pull request. */
+  prs: number;
+  spent: number;
+  /** The newest thing they did, when anything is kept. */
+  last?: { at: string; kind: string };
+};
+
+export type PeoplePage = { at: string; people: PersonRow[] };

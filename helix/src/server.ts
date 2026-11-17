@@ -7,13 +7,14 @@
 // person's own token (join.ts).
 // It also serves the display: its pages at / and /jobs/<id> (ui.ts), what the
 // overview shows at /display, and a job page's data and screenshots, with a
-// token, at /jobs/<id>/page-data and /jobs/<id>/shots/<name>.
+// token, at /jobs/<id>/page-data and /jobs/<id>/shots/<name>, and the people
+// list's at /people/page-data.
 import { createServer, type IncomingMessage, type Server } from 'node:http';
 import { VERSION_HEADER } from '../../plugin/src/remote.ts';
 import { animusVersion, compatible } from '../../plugin/src/version.ts';
 import { parseSkills, type PersonalSkill } from '../../plugin/src/personal.ts';
 import { hashToken, helixHome, type Config } from './config.ts';
-import { display, jobPage, jobShot } from './display.ts';
+import { display, jobPage, jobShot, peoplePage } from './display.ts';
 import { inviteDetails, joinHelix, takeOff, verifyInChild, type Verify } from './join.ts';
 import { addProject, checkInChild, projectView, removeProject, type StartCheck } from './projects.ts';
 import type { Store } from './store.ts';
@@ -95,6 +96,8 @@ export function serve(opts: {
         const page = jobPage(opts, Number(pageData));
         return page ? send(200, page) : send(404, { error: `no job ${pageData}` });
       }
+      // The people list's data, for any person on this Helix.
+      if (req.method === 'GET' && url.pathname === '/people/page-data') return send(200, peoplePage(opts));
       // One of a job's screenshots, for its page: the name is as its shots folder lists it, and only such a name is served.
       const shot = req.method === 'GET' ? /^\/jobs\/(\d+)\/shots\/(.+)$/.exec(url.pathname) : undefined;
       if (shot) {
