@@ -80,5 +80,6 @@ cancelled, and their credentials file under `~/.helix` is deleted. It then
 prints what is left to do elsewhere: revoke their GitHub token and take them
 off the organisation, take them off your Claude organisation, remove them
 from the tailnet, and deal with their open `animus/*` pull requests. Their
-past jobs stay on the display and in `~/.animus` until `animus cleanup`
-removes them.
+folder under `~/.helix/people/` is deleted; their past jobs stay on the
+display, and `helix cleanup` removes Helix's folders of them once they are
+old.

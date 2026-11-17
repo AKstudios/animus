@@ -86,6 +86,27 @@ out the tag and runs the tests, goes back if they fail, then stops `helix
 serve` for its service manager to start again. `npm run deploy -- <ssh-host>`
 moves it to the release `stable` points at ([releases.md](releases.md)).
 
+## Cleanup
+
+`helix serve` runs `helix cleanup` ten minutes after it starts and then
+once a day, in a process of its own; `helix cleanup [--days <n>]
+[--dry-run]` runs it by hand. It:
+
+- runs `animus cleanup` in each person's Animus home
+  (`~/.helix/people/<person>/animus`) with their credentials, so their
+  merged or closed PRs lose their branches and worktrees, and old job
+  folders go with their Claude transcripts. Without containers it runs
+  once, as the machine's account.
+- removes Helix's own folder of each job (`~/.helix/jobs/<id>/`: the spec
+  and `log.txt`) that ended or was cancelled more than `--days` ago
+  (default 14). A job waiting for an answer is kept. Its row in `helix.db`
+  stays.
+- removes `animus-job` images of other releases. Docker refuses one a
+  container still uses, and the next run tries again.
+
+A job's UI server (`animus ui up`, `animus shots`) is stopped when the job's
+process ends, however it ends, so a cancelled job leaves nothing serving.
+
 ## The display
 
 Helix serves a page at its own address showing the slots, each running job's

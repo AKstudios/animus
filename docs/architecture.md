@@ -80,6 +80,8 @@ A job leaves nothing in the target repository but its branch.
 | `~/.animus/runs.jsonl` | One line per run: job, labels, outcome, cost, duration, PR |
 | `~/.animus/jobs/<job>/` | Its state, spec, gate output, reviews, PR body, screenshots, transcripts, `progress.json` |
 | `../.worktrees/<repo>/` | The job's worktree, removed when the job ends unless `--keep` |
+| `<repo>/.git/animus/installs/` | The install cache: the two saves used last per install path, and any used in the last hour |
+| `~/.claude/projects/<worktree>/` | Claude Code's transcripts of the job's sessions, removed with the job's folder |
 | `~/.helix/` (Helix only) | `config.yaml`, `helix.db`, credentials, each person's folder under `people/` |
 
 ## Source map
@@ -123,6 +125,7 @@ sessions), `bin/animus`.
 | `supervisor.ts` | The queue: starts jobs while slots are free, restarts, cancels, answers |
 | `store.ts` | `helix.db`: jobs, people, projects, invites, upgrades |
 | `upgrade.ts` | Which release `helix upgrade --follow` moves to |
+| `cleanup.ts` | `helix cleanup`: each person's `animus cleanup`, old job folders, old job images |
 | `config.ts` | `config.yaml`, people and projects |
 | `join.ts` | Invites, joining and leaving |
 | `projects.ts` | Adding a project and its check |

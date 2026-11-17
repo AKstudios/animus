@@ -8,6 +8,20 @@ clients with how to update.
 
 ## Unreleased
 
+- `helix cleanup` removes what finished jobs leave on a Helix machine, and
+  `helix serve` runs it once a day: `animus cleanup` in each person's Animus
+  home with their credentials, Helix's own folder of each job that ended over
+  14 days ago (`--days`), and the job images of other releases.
+- `animus cleanup` also removes the transcripts Claude Code kept of a job's
+  sessions when it removes the job's folder, and keeps a job waiting for an
+  answer unless it is named.
+- The install cache is pruned whenever a job's worktree is removed: each
+  install path keeps its two saves used last and any used in the last hour.
+  Before, nothing pruned it.
+- A UI target's serve command stops when the job that started it ends,
+  however it ends: Ctrl-C, a crash, or Helix cancelling the job. Before, it
+  ran on in its own process group.
+
 - `setup.sh` no longer installs `helix-upgrade.timer`: Helix moves to a
   release only with `npm run deploy` or `helix upgrade`. 0.3.4's setup.sh
   installed it, but no machine ran that.

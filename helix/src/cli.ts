@@ -1,5 +1,5 @@
 // The helix command, run on the machine that runs the jobs.
-import { spawnSync } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import { existsSync, readFileSync, rmSync, unwatchFile, watchFile, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -7,6 +7,8 @@ import { parseArgs } from 'node:util';
 import { claudeAgent } from '../../plugin/src/agent.ts';
 import { loadFactory } from '../../plugin/src/profiles.ts';
 import { AnimusError } from '../../plugin/src/proc.ts';
+import { CLEANUP_EVERY_MS, CLEANUP_FIRST_MS, helixCleanup } from './cleanup.ts';
+import { KEEP_DAYS } from '../../plugin/src/cleanup.ts';
 import { checkEnv, checkPerson, describeFindings, failing, githubPush, githubToken } from './check.ts';
 import { animusVersion } from '../../plugin/src/version.ts';
 import { containerLaunch, containerProblem, imageName, personDirs, removeContainer } from './container.ts';
@@ -91,6 +93,13 @@ const USAGE = `helix: runs Animus jobs for several people on one machine
   helix image
         Build the image jobs run in (animus-job:<version>). Jobs run in
         containers when config.yaml has a container: entry.
+  helix cleanup [--days <n>] [--dry-run]
+        Remove what finished jobs leave on this machine: animus cleanup in
+        each person's Animus home, with their credentials (merged or closed
+        pull requests lose their branches, worktrees and, after --days
+        (default ${KEEP_DAYS}), their folders); Helix's own folder of each job
+        that ended over --days ago and waits for no answer; and the job
+        images of other releases. helix serve runs it once a day.
   helix check [<name>]
         Try each person's credentials against GitHub and Claude: who the
         GitHub token is, when it ends, whether it may push to each repository,
@@ -102,7 +111,7 @@ again whenever it changes. Host and port need a restart.`;
 
 function main(argv: string[]): number | undefined {
   const [command, ...rest] = argv;
-  const { values, positionals } = parseArgs({ args: rest, allowPositionals: true, options: { 'env-file': { type: 'string' }, github: { type: 'string' }, follow: { type: 'boolean' } } });
+  const { values, positionals } = parseArgs({ args: rest, allowPositionals: true, options: { 'env-file': { type: 'string' }, github: { type: 'string' }, follow: { type: 'boolean' }, days: { type: 'string' }, 'dry-run': { type: 'boolean' } } });
   switch (command) {
     case 'serve': {
       const store = openHelix();
@@ -154,7 +163,25 @@ function main(argv: string[]): number | undefined {
           supervisor.wake();
         } catch (err) { say(`config.yaml did not load, so the last one stands: ${(err as Error).message}`); }
       });
-      const stop = () => { unwatchFile(configFile()); supervisor.stop(); server.close(); store.close(); rmSync(pidFile(), { force: true }); process.exit(0); };
+      // What finished jobs leave goes once a day, in a process of its own: Helix goes on answering meanwhile.
+      let cleaning = false;
+      const clean = () => {
+        if (cleaning) return;
+        cleaning = true;
+        const child = spawn(process.execPath, ['--disable-warning=ExperimentalWarning', fileURLToPath(import.meta.url), 'cleanup'], { stdio: ['ignore', 'pipe', 'pipe'] });
+        let out = '';
+        child.stdout.on('data', (c: Buffer) => { out += c.toString(); });
+        child.stderr.on('data', (c: Buffer) => { out += c.toString(); });
+        child.on('error', (err) => { cleaning = false; say(`cleanup did not start: ${err.message}`); });
+        child.on('close', (code) => {
+          cleaning = false;
+          for (const line of out.trimEnd().split('\n').filter(Boolean)) say(`cleanup: ${line}`);
+          if (code) say(`cleanup ended with exit ${code}`);
+        });
+      };
+      const first = setTimeout(clean, CLEANUP_FIRST_MS);
+      const daily = setInterval(clean, CLEANUP_EVERY_MS);
+      const stop = () => { clearTimeout(first); clearInterval(daily); unwatchFile(configFile()); supervisor.stop(); server.close(); store.close(); rmSync(pidFile(), { force: true }); process.exit(0); };
       process.on('SIGINT', stop);
       process.on('SIGTERM', stop);
       return undefined;
@@ -172,6 +199,13 @@ function main(argv: string[]): number | undefined {
         }
         return ok ? 0 : 1;
       });
+    }
+    case 'cleanup': {
+      const days = values.days === undefined ? KEEP_DAYS : Number(values.days);
+      if (!Number.isFinite(days) || days < 0) throw new AnimusError(`--days takes a number of days, not ${values.days}`);
+      const contained = Boolean(loadConfig().container);
+      const ok = withStore((store) => helixCleanup(store, { home: helixHome(), contained, days, dryRun: Boolean(values['dry-run']), version: animusVersion() }, (line) => console.log(line)));
+      return ok ? 0 : 1;
     }
     case 'add-repo':
       if (!positionals[0] || !positionals[1]) throw new AnimusError('usage: helix add-repo <name> <dir>');
