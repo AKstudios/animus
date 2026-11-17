@@ -32,7 +32,15 @@ export type DisplayJob = {
   now?: string;
 };
 
-export type DisplayRepo = { name: string; base?: string; gates?: string[] };
+/** What a job page reads: from Helix, GET /jobs/<id>/page-data, with a person's token. */
+export type JobPage = {
+  /** The source's clock, as in Display. */
+  at: string;
+  stages: readonly string[];
+  job: DisplayJob;
+};
+
+export type DisplayRepo ={ name: string; base?: string; gates?: string[] };
 
 export type Display = {
   name: string;

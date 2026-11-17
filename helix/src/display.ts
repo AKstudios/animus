@@ -5,7 +5,7 @@
 import { statSync } from 'node:fs';
 import { hostname } from 'node:os';
 import { join } from 'node:path';
-import type { Display, DisplayJob, DisplayRepo } from '../../plugin/display/shape.ts';
+import type { Display, DisplayJob, DisplayRepo, JobPage } from '../../plugin/display/shape.ts';
 import { STAGES } from '../../plugin/src/log.ts';
 import { loadProfile, PROFILE_PATH } from '../../plugin/src/profile.ts';
 import { readyRepos, type Config } from './config.ts';
@@ -46,6 +46,12 @@ function jobOf(job: HelixJob, supervisor: Supervisor): DisplayJob {
     ...(progress && job.started && progress.at >= job.started ? { progress } : {}),
     ...(now ? { now } : {}),
   };
+}
+
+/** What a job's page shows, or nothing when Helix has no such job. It needs a token: the server sees to that. */
+export function jobPage(opts: { store: Store; supervisor: Supervisor }, id: number): JobPage | undefined {
+  const job = opts.store.get(id);
+  return job ? { at: new Date().toISOString(), stages: STAGES, job: jobOf(job, opts.supervisor) } : undefined;
 }
 
 export function display(opts: { config: Config; store: Store; supervisor: Supervisor }): Display {

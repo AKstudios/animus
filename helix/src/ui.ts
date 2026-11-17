@@ -21,9 +21,17 @@ export type Asset = { type: string; body: Buffer | string; cache: string };
 
 const stripped = new Map<string, { mtime: number; text: string }>();
 
-/** The file a path names, or nothing: only names in plugin/display and its fonts folder, never a path that climbs out. */
-export function asset(pathname: string): Asset | undefined {
-  const name = pathname === '/' ? 'index.html' : /^\/ui\/((?:fonts\/)?[A-Za-z0-9][A-Za-z0-9._-]*)$/.exec(pathname)?.[1];
+/** The display's pages besides `/`: each is the same index.html, and its script draws the one the path names (pages.ts). */
+const PAGES = /^\/(?:jobs\/\d+|people(?:\/[^/]+)?)$/;
+
+/**
+ * The file a path names, or nothing: only names in plugin/display and its
+ * fonts folder, never a path that climbs out. A page other than `/` is sent
+ * only to a browser asking for HTML, since `/jobs/<id>` is also the API's.
+ */
+export function asset(pathname: string, accept = ''): Asset | undefined {
+  const page = pathname === '/' || (PAGES.test(pathname) && accept.includes('text/html'));
+  const name = page ? 'index.html' : /^\/ui\/((?:fonts\/)?[A-Za-z0-9][A-Za-z0-9._-]*)$/.exec(pathname)?.[1];
   if (!name) return undefined;
   const type = TYPES[extname(name)];
   const file = join(UI, name);

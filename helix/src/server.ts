@@ -11,7 +11,7 @@ import { VERSION_HEADER } from '../../plugin/src/remote.ts';
 import { animusVersion, compatible } from '../../plugin/src/version.ts';
 import { parseSkills, type PersonalSkill } from '../../plugin/src/personal.ts';
 import { hashToken, helixHome, type Config } from './config.ts';
-import { display } from './display.ts';
+import { display, jobPage } from './display.ts';
 import { inviteDetails, joinHelix, takeOff, verifyInChild, type Verify } from './join.ts';
 import { addProject, checkInChild, projectView, removeProject, type StartCheck } from './projects.ts';
 import type { Store } from './store.ts';
@@ -65,9 +65,10 @@ export function serve(opts: {
     void (async () => {
       const url = new URL(req.url ?? '/', 'http://helix');
       // The display's page, scripts and fonts need no token.
-      const file = req.method === 'GET' ? asset(url.pathname) : undefined;
+      const file = req.method === 'GET' ? asset(url.pathname, req.headers.accept) : undefined;
       if (file) {
-        res.writeHead(200, { 'content-type': file.type, 'cache-control': file.cache, 'content-security-policy': CSP, 'x-content-type-options': 'nosniff' });
+        // vary: a job's path is its page to a browser and JSON to animus, so neither answer stands in for the other.
+        res.writeHead(200, { 'content-type': file.type, 'cache-control': file.cache, 'content-security-policy': CSP, 'x-content-type-options': 'nosniff', vary: 'accept' });
         return res.end(file.body);
       }
       // What the display shows needs no token either: Helix listens on a private network only, and this only reads.
@@ -86,6 +87,12 @@ export function serve(opts: {
       }
       const person = whoIs(store, req);
       if (!person) return send(401, { error: 'a valid token is needed: Authorization: Bearer <token>' });
+      // A job page's data, for any person on this Helix. The display is served by this Helix, so it sends no client version.
+      const pageData = req.method === 'GET' ? /^\/jobs\/(\d+)\/page-data$/.exec(url.pathname)?.[1] : undefined;
+      if (pageData) {
+        const page = jobPage(opts, Number(pageData));
+        return page ? send(200, page) : send(404, { error: `no job ${pageData}` });
+      }
       if (!current) return outdated();
       if (req.method === 'POST' && url.pathname === '/leave') {
         const { cancelled, kept } = takeOff(person, store, opts.reap);
