@@ -241,6 +241,7 @@ export async function runJob(opts: RunOptions, deps: Deps): Promise<Run> {
       if (!state.session) prompt = handoffPrompt({ brief, base: ws.base, summary, notes, asked, over });
     }
     log(`${stage}: ${modelFor(factory, tier)}, ${effort} effort`);
+    const before = git(wt, ['rev-parse', 'HEAD']);
     at('implement', `implementer · ${tier} tier${inSlice ? ` · ${inSlice}` : ''}${/-fix-/.test(stage) ? ` · ${stage.replace('-fix-', ' fix ')}` : ''}`);
     const r = await timed('implement', () => deps.agent({ role: 'implementer', tier, effort, prompt, cwd: wt, ...instructions('implementer'), schema: REPORT_SCHEMA, ...caps(tier), ...(state.session ? { resume: state.session } : {}) }));
     record(stage, 'implementer', tier, effort, r);
@@ -249,6 +250,7 @@ export async function runJob(opts: RunOptions, deps: Deps): Promise<Run> {
     saveState(state);
     // The implementer commits at each working step; whatever it left is kept too, so a retry starts from it.
     commitAll(wt, `${spec.title}: work left uncommitted at the end of ${stage}`);
+    const changed = git(wt, ['rev-parse', 'HEAD']) !== before;
     if (!r.ok) throw new Stop('failed', `the implementer's session ended with ${r.status}${r.text ? `: ${r.text.slice(0, 300)}` : ''}`);
     const report = asReport(r.output) ?? { status: 'done', summary: r.text.trim().split('\n')[0] ?? '' };
     if (report.escalate?.why) {
@@ -261,7 +263,12 @@ export async function runJob(opts: RunOptions, deps: Deps): Promise<Run> {
       }
     }
     if (report.status === 'needs-input') throw new Stop('needs-input', report.question ?? report.summary);
-    if (report.status === 'failed') throw new Stop('failed', `the implementer gave up: ${report.summary}`);
+    // A `failed` is a claim: with work on the branch the gates check it, and its note goes with the work.
+    if (report.status === 'failed') {
+      if (!changed) throw new Stop('failed', `the implementer gave up: ${report.summary}`);
+      log(`${stage}: the implementer reported failed (${report.summary}) but changed the branch, so the gates decide`);
+      report.notes = [`The implementer reported it failed: ${report.summary}`, report.notes].filter(Boolean).join(' ');
+    }
     if (report.summary) summary = report.summary;
     if (report.notes) notes = report.notes;
     return report;
