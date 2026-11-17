@@ -62,7 +62,7 @@ test('an invited person joins with a code, gets a token that works at once, and 
   assert.equal(readFileSync(file, 'utf8'), 'CLAUDE_CODE_OAUTH_TOKEN=sk-ant-oat01-cleo\nGH_TOKEN=github_pat_cleo\n');
   if (process.platform !== 'win32') assert.equal(statSync(file).mode & 0o777, 0o600);
   assert.ok(!file.startsWith(join(h.home, 'people')));
-  assert.deepEqual(h.store.person('cleo'), { token_sha256: hashToken(joined.token), env_file: file, github: 'cleo-gh' });
+  assert.deepEqual(h.store.person('cleo'), { token_sha256: hashToken(joined.token), env_file: file, github: 'cleo-gh', joined: h.store.person('cleo')!.joined });
 
   process.env.HELIX_URL = h.url;
   process.env.HELIX_TOKEN = joined.token;

@@ -8,6 +8,10 @@ clients with how to update.
 
 ## Unreleased
 
+- Helix keeps an activity, with who and when, each time a person submits,
+  answers (with the answer's text) or cancels a job, joins, leaves, or adds or
+  removes a project, and the day each new person joined. Nothing from before
+  is filled in.
 - The installers take `join <url> <code>`: after setup they run `animus join`
   with them, so one line installs Animus and joins a Helix
   (`curl -fsSL …/install.sh | bash -s -- join <url> <code>`).
