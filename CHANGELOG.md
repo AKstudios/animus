@@ -8,6 +8,8 @@ clients with how to update.
 
 ## Unreleased
 
+## 0.3.4 (2026-11-17)
+
 - Helix follows the `stable` branch by itself. `helix upgrade --follow`
   moves the machine to the release `stable` is at when it is not already on
   it, and a systemd timer from `setup.sh` (`helix-upgrade.timer`) runs it
