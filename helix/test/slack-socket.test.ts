@@ -62,6 +62,29 @@ test('with Slack on, the bot connects with the app token, acks each envelope bef
   ]);
 });
 
+// Protects: criteria 3 and 4 of the control spec, what a thread reply, an @Helix mention and a button press become. Fails when: thread_ts is dropped, a mention is not marked, or a button press is not an action.
+test('a threaded DM, an app mention and a Cancel job press reach the bot as events', async () => {
+  home();
+  const fake = await fakeSlack();
+  const bot = startSlack(ON, { api: fake.api, say: () => {} })!;
+  const events: SlackEvent[] = [];
+  bot.onEvent(async (event) => { events.push(event); });
+  await until('a socket', () => fake.connections() === 1);
+
+  fake.send({ envelope_id: 'e1', type: 'events_api', payload: { event: { type: 'message', channel_type: 'im', user: 'U0ANA', channel: 'D0ANA', text: 'the second', thread_ts: '9.1' } } });
+  fake.send({ envelope_id: 'e2', type: 'events_api', payload: { event: { type: 'app_mention', user: 'U0ANA', channel: 'C0TEAM', text: '<@U0HELIX> the first', thread_ts: '9.2' } } });
+  fake.send({ envelope_id: 'e3', type: 'interactive', payload: { type: 'block_actions', user: { id: 'U0ANA' }, channel: { id: 'D0ANA' }, response_url: URL, actions: [{ action_id: 'cancel_job', value: '7' }] } });
+  await until('three events', () => events.length === 3);
+  bot.close();
+  await fake.close();
+
+  assert.deepEqual(events, [
+    { kind: 'message', user: 'U0ANA', channel: 'D0ANA', text: 'the second', thread: '9.1' },
+    { kind: 'message', user: 'U0ANA', channel: 'C0TEAM', text: '<@U0HELIX> the first', mentioned: true, thread: '9.2' },
+    { kind: 'action', user: 'U0ANA', channel: 'D0ANA', action: 'cancel_job', value: '7', responseUrl: URL },
+  ]);
+});
+
 // Protects: criterion 7, the bot survives Slack ending its socket. Fails when: a dropped or refreshed socket leaves Helix deaf to Slack until a restart.
 for (const [what, end] of [
   ['drops the socket', (fake: Awaited<ReturnType<typeof fakeSlack>>) => fake.drop()],

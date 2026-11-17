@@ -76,6 +76,16 @@ in [helix-deploy.md](helix-deploy.md#the-slack-bot).
   the question, the pull request's link, or failed with the reason.
   `/helix notify off` stops these for the person who sends it and `/helix
   notify on` starts them again; they are on by default.
+- `/helix jobs` answers privately with the sender's queued, running and
+  needs-input jobs, each with its thread or pull request link. `/helix
+  status` answers with Helix's slots in use, the queue's length and its
+  version.
+- A job that needs input is answered by replying in its thread: any reply in
+  the DM, or a reply that mentions @Helix in a channel. It resumes as after
+  `animus answer`, and the thread says so. Replies from anyone but the job's
+  person, and channel replies without the mention, are ignored. The thread's
+  first post has a **Cancel job** button, which cancels the job for its person
+  or the owner; anyone else gets a private refusal.
 
 Anyone without a Slack link, but the owner, who writes to the bot or sends
 any `/helix` command gets a private "You're not on this Helix. Ask <owner>

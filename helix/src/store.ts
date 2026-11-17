@@ -105,6 +105,8 @@ export type Store = {
   /** The DM thread a job posts its progress to, once it has one. */
   slackThread(job: number): SlackThread | undefined;
   putSlackThread(job: number, thread: SlackThread): void;
+  /** The job whose thread this is. */
+  jobOfThread(channel: string, ts: string): number | undefined;
   project(name: string): Project | undefined;
   /** Every project, by name. */
   projects(): Project[];
@@ -181,6 +183,7 @@ export function openStore(file: string): Store {
     setNotify(name, on) { db.prepare(on ? 'delete from slack_quiet where name = ?' : 'insert or ignore into slack_quiet (name) values (?)').run(name); },
     slackThread: (job) => db.prepare('select channel, ts from slack_threads where job = ?').get(job) as SlackThread | undefined,
     putSlackThread(job, t) { db.prepare('insert or replace into slack_threads (job, channel, ts) values (?, ?, ?)').run(job, t.channel, t.ts); },
+    jobOfThread: (channel, ts) => (db.prepare('select job from slack_threads where channel = ? and ts = ?').get(channel, ts) as { job: number } | undefined)?.job,
     project: (name) => { const r = db.prepare('select data from projects where name = ?').get(name); return r ? data<Project>(r) : undefined; },
     projects: () => db.prepare('select data from projects order by name').all().map((r) => data<Project>(r)),
     putProject(p) { db.prepare('insert into projects (name, data) values (?, ?) on conflict (name) do update set data = excluded.data').run(p.name, JSON.stringify(p)); },

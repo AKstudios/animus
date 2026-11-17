@@ -7,31 +7,100 @@ import { AnimusError } from '../../plugin/src/proc.ts';
 import { SOURCE } from '../../plugin/src/setup.ts';
 import type { Config } from './config.ts';
 import { INVITE_HOURS, invite } from './join.ts';
-import { SLACK_USER, type Transport } from './slack-api.ts';
+import { SLACK_USER, type SlackEvent, type Transport } from './slack-api.ts';
 import type { HelixJob, Store } from './store.ts';
+import type { Supervisor } from './supervisor.ts';
+import { animusVersion } from '../../plugin/src/version.ts';
 
-const USAGE = 'Usage: /helix invite @user <github-login>, /helix link @user <person>, or /helix notify off|on';
+const USAGE = 'Usage: /helix jobs, /helix status, /helix invite @user <github-login>, /helix link @user <person>, or /helix notify off|on';
 const INVITE_USAGE = 'An invite sent on Slack names their GitHub login, so only a token that signs in as it is taken: /helix invite @user <github-login>';
 const INSTALL = `https://raw.githubusercontent.com/${SOURCE.repo}/${SOURCE.ref}/install.sh`;
 
 type Core = { store: Store; config: Config };
 
-/** Answers what reaches the bot. The owner is read from config at each event, so a config edit changes it. */
-export function slackBot(transport: Transport, opts: Core): void {
-  const { store, config } = opts;
+/** What answering and cancelling a job go through, the same calls `animus answer` and `animus cancel` reach on Helix. */
+type Jobs = Pick<Supervisor, 'answer' | 'cancel'>;
+
+const CANCEL = 'cancel_job';
+const cancelBlocks = (id: number, text: string) => [
+  { type: 'section', text: { type: 'mrkdwn', text } },
+  { type: 'actions', elements: [{ type: 'button', action_id: CANCEL, value: String(id), text: { type: 'plain_text', text: 'Cancel job' } }] },
+];
+
+/** Where a job's thread is in Slack, for a link. */
+const threadLink = (t: { channel: string; ts: string }) => `https://slack.com/app_redirect?channel=${t.channel}&message_ts=${t.ts}`;
+
+/**
+ * Answers what reaches the bot. The owner is read from config at each event,
+ * so a config edit changes it. Without `supervisor`, jobs can be neither
+ * answered nor cancelled from Slack.
+ */
+export function slackBot(transport: Transport, opts: Core & { supervisor?: Jobs }): void {
+  const { store, config, supervisor } = opts;
   transport.onEvent(async (event) => {
     const owner = config.slack?.owner ?? '';
-    // A command may come from a channel the bot is not in, where Slack refuses postEphemeral; its response_url works anywhere.
-    const reply = (text: string) => event.kind === 'command' ? transport.respond(event.responseUrl, text) : transport.ephemeral(event.channel, event.user, text);
+    // A command or button may come from a channel the bot is not in, where Slack refuses postEphemeral; its response_url works anywhere.
+    const reply = (text: string) => event.kind === 'message' ? transport.ephemeral(event.channel, event.user, text) : transport.respond(event.responseUrl, text);
     const isOwner = event.user === owner;
-    if (!isOwner && !store.personBySlack(event.user)) return reply(`You're not on this Helix. Ask <@${owner}> for an invite.`);
-    if (event.kind !== 'command') return;
+    const person = store.personBySlack(event.user);
+    if (!isOwner && !person) return reply(`You're not on this Helix. Ask <@${owner}> for an invite.`);
+    if (event.kind === 'message') return supervisor && answer(transport, store, supervisor, event, person);
+    if (event.kind === 'action') {
+      if (event.action !== CANCEL || !supervisor) return;
+      const job = store.get(Number(event.value));
+      if (!job) return reply(`There is no job ${event.value}.`);
+      if (!isOwner && job.person !== person) return reply(`Only ${job.person} or <@${owner}> may cancel job ${job.id}.`);
+      try {
+        supervisor.cancel(job.person, job.id);
+      } catch (err) {
+        if (err instanceof AnimusError) return reply(err.message);
+        throw err;
+      }
+      const thread = store.slackThread(job.id);
+      if (thread) await transport.post(thread.channel, `Job ${job.id} was cancelled by <@${event.user}>.`, thread.ts);
+      return;
+    }
     const [sub, ...args] = event.text.trim().split(/\s+/);
+    if (sub === 'jobs') return reply(jobsCommand(store, person));
+    if (sub === 'status') return reply(statusCommand(store, config));
     if (sub === 'invite') return reply(isOwner ? await inviteCommand(transport, opts, args) : `Only <@${owner}> invites people to this Helix.`);
     if (sub === 'link') return reply(isOwner ? link(store, args) : `Only <@${owner}> links Slack users to people on this Helix.`);
     if (sub === 'notify') return reply(notifyCommand(store, event.user, args));
     return reply(USAGE);
   });
+}
+
+/**
+ * A reply in a job's thread answers the job when it is its person's and the
+ * job waits for an answer: any reply in a DM (Slack's DM channel ids start
+ * with D), or in a channel one that mentions the bot. Anything else is not
+ * for the bot and is ignored without a word.
+ */
+async function answer(transport: Transport, store: Store, supervisor: Jobs, event: Extract<SlackEvent, { kind: 'message' }>, person: string | undefined): Promise<void> {
+  if (!event.thread || !person || !(event.mentioned || event.channel.startsWith('D'))) return;
+  const id = store.jobOfThread(event.channel, event.thread);
+  const job = id === undefined ? undefined : store.get(id);
+  const text = event.text.replace(/<@[A-Z0-9]+>/g, '').trim();
+  if (!job || job.person !== person || job.state !== 'ended' || job.outcome !== 'needs-input' || !text) return;
+  supervisor.answer(person, job.id, text);
+  await transport.post(event.channel, `Got your answer: job ${job.id} resumes.`, event.thread);
+}
+
+/** /helix jobs: the person's jobs that are not over or wait for an answer, each with where to follow it. */
+function jobsCommand(store: Store, person: string | undefined): string {
+  if (!person) return 'Your Slack user is linked to no person on this Helix, so you have no jobs: /helix link @you <person> first.';
+  const mine = [...store.inState('running'), ...store.inState('queued'), ...store.inState('ended').filter((j) => j.outcome === 'needs-input')].filter((j) => j.person === person);
+  if (!mine.length) return 'You have no queued, running or waiting jobs.';
+  return mine.map((j) => {
+    const thread = store.slackThread(j.id);
+    const where = thread ? ` ${threadLink(thread)}` : j.pr ? ` ${j.pr}` : '';
+    return `Job ${j.id} ${j.state === 'ended' ? 'needs input' : j.state}: ${j.title} (${j.repo})${where}`;
+  }).join('\n');
+}
+
+/** /helix status: how busy this Helix is, and its Animus version. */
+function statusCommand(store: Store, config: Config): string {
+  return `Helix ${animusVersion()}: ${store.inState('running').length} of ${config.slots} slots in use, ${store.inState('queued').length} queued.`;
 }
 
 /** /helix notify off|on: whether the sender's jobs post their progress to them. */
@@ -48,7 +117,7 @@ function notifyCommand(store: Store, user: string, args: string[]): string {
 function progress(job: HelixJob): string | undefined {
   if (job.state === 'running') return job.animus_job ? `Job ${job.id} resumed` : `Job ${job.id} started: ${job.title} (${job.repo})`;
   if (job.state !== 'ended') return undefined;
-  if (job.outcome === 'needs-input') return `Job ${job.id} needs input: ${job.question}\nAnswer it with animus answer ${job.id} "<your answer>"`;
+  if (job.outcome === 'needs-input') return `Job ${job.id} needs input: ${job.question}\nReply in this thread to answer it, or run animus answer ${job.id} "<your answer>"`;
   if (job.pr) return `Job ${job.id} opened a pull request: ${job.pr}`;
   return `Job ${job.id} failed: ${job.reason ?? job.outcome}`;
 }
@@ -65,7 +134,8 @@ export function slackNotifier(transport: Pick<Transport, 'dm' | 'post'>, store: 
     const thread = store.slackThread(job.id);
     if (thread) { await transport.post(thread.channel, text, thread.ts); return; }
     const channel = await transport.dm(user);
-    store.putSlackThread(job.id, { channel, ts: await transport.post(channel, text) });
+    // The opening post carries the button, so the thread can always cancel its job.
+    store.putSlackThread(job.id, { channel, ts: await transport.post(channel, text, undefined, cancelBlocks(job.id, text)) });
   };
   return (job) => {
     // Who is told, and whether, is settled when it happens, not when the post goes out.
