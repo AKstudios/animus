@@ -81,6 +81,24 @@ clients with how to update.
   `github_token`, answers `202 {pending: true}` while GitHub has not been
   approved (the client asks again), and adds `unreachable: [{project, owner,
   install}]` to its answer. `POST /invite` answers `github_app: true` there.
+- On a Helix with a GitHub App, each job, each project check and `helix
+  check` first trade the person's refresh token for a fresh access token,
+  keeping the new pair in their credentials file (mode 600); the job gets the
+  access token as `GH_TOKEN` and never the refresh token. A job for a project
+  the app cannot reach for the person fails before it starts with the app's
+  installation link. A refresh GitHub refuses (revoked, or unused for six
+  months) fails the job before it starts with "run `animus github login`",
+  DMed to a person linked on Slack.
+- `animus github login` runs GitHub's device flow again and Helix replaces the
+  person's stored tokens; a login other than their own is refused.
+- [helix/deploy/github/manifest.json](helix/deploy/github/manifest.json) is
+  Helix's GitHub App, and [docs/helix-deploy.md](docs/helix-deploy.md) walks
+  through creating it and running `helix github setup`.
+- **Breaking:** new `POST /github/device` (answers GitHub's `device_code`,
+  `user_code` and `verification_uri`) and `POST /github/login` (takes
+  `device_code`, answers `202 {pending: true}` until GitHub is approved, then
+  `{name, github}`; 403 for a login other than the person's, 409 on a Helix
+  with no GitHub App).
 - With `slack.enabled` in `config.yaml`, `helix serve` connects to Slack over
   Socket Mode: every envelope is acknowledged at once, and a socket Slack
   drops is replaced. With it off, Helix opens no connection to Slack.
