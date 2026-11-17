@@ -194,3 +194,13 @@ export const pushEvidence: Evidence = ({ cwd, job, dir, files }) => {
     rmSync(index, { force: true });
   }
 };
+
+/** The newest pull request in the repo titled exactly this, in any state; undefined when there is none or GitHub cannot say. */
+export type PrFind = (title: string, cwd: string) => { url: string; state: PrState } | undefined;
+
+export const findPrByTitle: PrFind = (title, cwd) => {
+  const out = gh(cwd, ['pr', 'list', '--state', 'all', '--search', `"${title.replaceAll('"', ' ')}" in:title`, '--limit', '100', '--json', 'url,state,title,createdAt'], undefined, true);
+  if (!out) return undefined;
+  const all = JSON.parse(out) as { url: string; state: PrState; title: string; createdAt: string }[];
+  return all.filter((p) => p.title === title).sort((a, b) => b.createdAt.localeCompare(a.createdAt))[0];
+};
