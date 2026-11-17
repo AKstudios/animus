@@ -20,7 +20,7 @@ test('a running job shows its stage, who is working, the last line it said and h
     job({ id: 7, state: 'running', title: 'Export to PDF', started: ago(12.5), progress: { stage: 'gates', who: 'gates · attempt 1', at: ago(1) }, now: 'ok   typecheck' }),
     job({ id: 8, state: 'running', started: ago(0.1) }),
   ]), null, NOW);
-  assert.deepEqual(v.live[0], { id: 7, page: '/jobs/7', repo: 'app', person: 'ana', personPage: '/people/ana', title: 'Export to PDF', elapsed: '12:30', stage: 2, stageText: 'GATES', stepText: 'step 3 of 6', stepShort: '3/6', who: 'gates · attempt 1', now: 'ok   typecheck' });
+  assert.deepEqual(v.live[0], { id: 7, page: '/jobs/7', repo: 'app', person: 'ana', personPage: '/people/ana', title: 'Export to PDF', by: [{ text: 'app' }, { text: 'ana', page: '/people/ana' }], elapsed: '12:30', stage: 2, stageText: 'GATES', stepText: 'step 3 of 6', stepShort: '3/6', who: 'gates · attempt 1', now: 'ok   typecheck' });
   // A job that has not said where it is yet has no stage on its track.
   assert.deepEqual([v.live[1]!.stage, v.live[1]!.stageText, v.live[1]!.stepText, v.live[1]!.who, v.live[1]!.elapsed], [-1, 'STARTING', '', 'starting', '00:06']);
   assert.deepEqual([v.running, v.slots, v.queued, v.asks], [2, 2, 0, 0]);
@@ -31,7 +31,8 @@ test('a running job with no person or line yet has neither, and only Helix links
   const j = job({ person: '', state: 'running', started: ago(1) });
   const local = view({ ...shown([j]), local: true }, null, NOW);
   const helix = view(shown([j]), null, NOW);
-  assert.deepEqual([local.live[0]!.person, local.live[0]!.personPage, local.live[0]!.now], ['', undefined, '']);
+  assert.deepEqual([local.live[0]!.by, local.live[0]!.now], [[{ text: 'app' }], '']);
+  assert.deepEqual(view(shown([job({ state: 'running' })]), null, NOW).live[0]!.by, [{ text: 'app' }, { text: 'ana', page: '/people/ana' }]);
   assert.deepEqual([local.people, helix.people], [false, true]);
 });
 

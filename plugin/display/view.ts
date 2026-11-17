@@ -12,6 +12,8 @@ export type Project = { id: string; summary: string; on: boolean; busy: boolean;
 /** Every job on the overview links to its own page, and the person who submitted it to theirs (personPage). */
 export type Live = {
   id: number | string; page: string; repo: string; person: string; /** Helix only: the local display has no people pages. */ personPage?: string; title: string; elapsed: string;
+  /** What the card names the job by, joined with " · " when drawn: the project, and the person when there is one. */
+  by: { text: string; page?: string }[];
   /** The stage's place in the track; -1 until the job has said where it is. */
   stage: number; stageText: string; stepText: string; stepShort: string; who: string; now: string;
 };
@@ -119,6 +121,7 @@ export function view(d: Display, picked: string | null, now: number): View {
     const stage = j.progress ? d.stages.indexOf(j.progress.stage) : -1;
     return {
       id: j.id, page: jobPage(j.id), repo: j.repo, person: j.person, ...people(j.person, d.local === true), title: j.title,
+      by: [{ text: j.repo }, ...(j.person ? [{ text: j.person, ...(d.local ? {} : { page: personPage(j.person) }) }] : [])],
       elapsed: j.started ? clock(now - Date.parse(j.started)) : '',
       stage,
       stageText: stage < 0 ? 'STARTING' : d.stages[stage]!.toUpperCase(),

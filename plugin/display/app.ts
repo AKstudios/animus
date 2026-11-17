@@ -137,7 +137,7 @@ const who = (j: { person: string; personPage?: string }) => (j.personPage ? `<a 
 
 const card = (v: View, j: Live) => `<article class="card" data-key="j-${j.id}">
   <span class="corner-a" aria-hidden="true"></span><span class="corner-b" aria-hidden="true"></span>
-  <div class="card-top"><span><span class="b">${ref(j.id)}</span> <span class="mute">${[esc(j.repo), who(j)].filter(Boolean).join(' · ')}</span></span><span class="elapsed">${j.elapsed}</span></div>
+  <div class="card-top"><span><span class="b">${ref(j.id)}</span> <span class="mute">${j.by.map((b) => (b.page ? `<a href="${esc(b.page)}">${esc(b.text)}</a>` : esc(b.text))).join(' · ')}</span></span><span class="elapsed">${j.elapsed}</span></div>
   <a class="card-title" href="${esc(j.page)}">${esc(j.title)}</a>
   <div class="card-stage">${track(v, j)}<div class="card-step"><span class="stage-name">${esc(j.stageText)}</span><span class="mute">${esc(j.stepText)}</span></div></div>
   <div class="card-feed"><div class="mute">${esc(j.who)}</div>${j.now ? `<div class="now">&gt; ${esc(j.now)}<span class="cursor">_</span></div>` : ''}</div>
