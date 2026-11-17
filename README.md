@@ -55,7 +55,9 @@ laptop doesn't have to stay on.
 3. Start jobs as above. They go to Helix when it has your repository.
 4. Open the Helix address (the `<url>` you joined with) in a browser to
    watch it: running jobs and their stage, the queue, jobs waiting for an
-   answer, and jobs that ended. No sign-in needed.
+   answer, and jobs that ended. No sign-in needed. If whoever runs Helix
+   opened it to the office network, `http://<machine>.local:7420` shows the
+   same page without the VPN.
 5. Ask Claude how a job is going, or to answer its question.
 
 ## Docs

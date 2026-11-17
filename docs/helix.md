@@ -79,6 +79,16 @@ in the admin console: the tailnet reaches Helix at
 Without something like it, traffic is plain HTTP: keep Helix on a private
 network.
 
+To also see the display from the office network with Tailscale off, set
+`host: 0.0.0.0`, restart Helix, and let the LAN through the firewall to the
+port (`sudo ufw allow from <lan>/24 to any port 7420 proto tcp`). Tailscale
+Serve keeps working, since it still forwards to 127.0.0.1. With avahi
+running, as on Ubuntu desktop, the machine answers to `<hostname>.local`, so
+the display is at `http://<hostname>.local:7420` whatever address DHCP gives
+it. Anyone on that network can then read the display, and a token sent
+there travels in plain HTTP, so keep `url:` and `animus` on the Tailscale
+address and use the LAN one in a browser only.
+
 A job that was running when Helix stopped is queued again when it comes back
 and resumes from its own files; one found running three times is ended
 instead. `helix upgrade` stops starting jobs, waits for running ones, checks
