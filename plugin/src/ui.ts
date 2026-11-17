@@ -123,6 +123,7 @@ export async function uiUp(cwd: string, target: UiTarget): Promise<Up> {
     closeSync(fd);
     child.unref();
     pid = child.pid ?? 0;
+    if (pid) watchJob(pid, upFile(cwd));
   }
   const up: Up = { pid, port, log, ...(url ? { url } : {}) };
   writeFileSync(upFile(cwd), JSON.stringify(up));
@@ -142,6 +143,36 @@ export async function uiUp(cwd: string, target: UiTarget): Promise<Up> {
     }
     await sleep(1_000);
   }
+}
+
+/** The process a job runs in: set by the pipeline, so what a job's sessions start knows whose it is. */
+export const JOB_PID = 'ANIMUS_JOB_PID';
+const WATCH_MS = 2_000;
+
+/**
+ * The serve command runs in a process group of its own, so killing the job's
+ * (Helix cancelling it, Ctrl-C, a crash) leaves it running. While a job's
+ * process is named, a small watcher outlives this one and stops the target
+ * once the job's process is gone; it ends by itself when the target does.
+ * Outside a job (a person's own `animus ui up`) nothing watches.
+ */
+function watchJob(serverPid: number, file: string): void {
+  const job = Number(process.env[JOB_PID]);
+  if (!Number.isInteger(job) || job <= 0) return;
+  const script = `
+    const [job, server, file] = [Number(process.argv[1]), Number(process.argv[2]), process.argv[3]];
+    const alive = (pid) => { try { process.kill(pid, 0); return true; } catch (e) { return e.code === 'EPERM'; } };
+    const tick = () => {
+      if (!alive(server)) process.exit(0);
+      if (alive(job)) return;
+      try { process.kill(-server, 'SIGTERM'); } catch { try { process.kill(server, 'SIGTERM'); } catch {} }
+      try { if (JSON.parse(require('node:fs').readFileSync(file, 'utf8')).pid === server) require('node:fs').rmSync(file); } catch {}
+      process.exit(0);
+    };
+    setInterval(tick, ${WATCH_MS});`;
+  try {
+    spawn(process.execPath, ['-e', script, String(job), String(serverPid), file], { detached: true, stdio: 'ignore' }).on('error', () => {}).unref();
+  } catch { /* the job's own ending stops the target as before */ }
 }
 
 /** Stops what `animus ui up` started in this worktree. */

@@ -23,7 +23,7 @@ import { loadJobSkills, saveJobSkills, type PersonalSkill } from './personal.ts'
 import { roleSkills } from './skills.ts';
 import { criteriaSoFar, isPlanned, oneSlice, planSlices, type Slicing } from './slices.ts';
 import { loadSpec, type Spec } from './spec.ts';
-import { describeShots, designOf, takeShots, uiProblem, uiTarget, type UiJob } from './ui.ts';
+import { describeShots, designOf, JOB_PID, takeShots, uiProblem, uiTarget, type UiJob } from './ui.ts';
 import { createWorkspace, ensureSetup, removeWorkspace, reopenWorkspace, type Workspace } from './workspace.ts';
 
 export type Deps = {
@@ -98,6 +98,8 @@ export const uiJobOf = (job: string, spec: Spec): UiJob => ({ id: job, pages: sp
 export async function runJob(opts: RunOptions, deps: Deps): Promise<Run> {
   const { factory, log } = deps;
   const startedAt = Date.now();
+  // What this job's sessions serve stops when this process ends, however it ends (ui.ts).
+  process.env[JOB_PID] = String(process.pid);
   const repo = mainCheckout(opts.repo);
   const prior = opts.resume?.state;
   if (!prior && !opts.specFile) throw new AnimusError('animus run needs a spec file');

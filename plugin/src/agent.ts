@@ -5,7 +5,7 @@
 import { spawnSync } from 'node:child_process';
 import { existsSync, readFileSync, realpathSync } from 'node:fs';
 import { homedir } from 'node:os';
-import { join } from 'node:path';
+import { basename, dirname, join } from 'node:path';
 import { modelFor, type Factory, type Tier } from './profiles.ts';
 import { AnimusError } from './proc.ts';
 
@@ -153,14 +153,23 @@ export function contextAtEnd(transcript: string): number | undefined {
   return undefined;
 }
 
+/**
+ * The folders where Claude Code keeps the transcripts of sessions started in
+ * cwd: one per spelling of the path (as given, and with links resolved).
+ */
+export function claudeProjectDirs(cwd: string): string[] {
+  const root = process.env.CLAUDE_CONFIG_DIR ?? join(homedir(), '.claude');
+  return [...new Set([realPath(cwd), cwd])].map((dir) => join(root, 'projects', dir.replace(/[^A-Za-z0-9]/g, '-')));
+}
+
+/** A path with links resolved, through the nearest folder that still exists when it is gone (a removed worktree). */
+function realPath(path: string): string {
+  try { return realpathSync(path); } catch { /* gone: resolve what is left of it */ }
+  const parent = dirname(path);
+  return parent === path ? path : join(realPath(parent), basename(path));
+}
+
 /** Claude Code's transcript of a session started in cwd, if it is still on disk. */
 function claudeTranscript(cwd: string, session: string): string | undefined {
-  const root = process.env.CLAUDE_CONFIG_DIR ?? join(homedir(), '.claude');
-  let real = cwd;
-  try { real = realpathSync(cwd); } catch { /* removed already */ }
-  for (const dir of new Set([real, cwd])) {
-    const file = join(root, 'projects', dir.replace(/[^A-Za-z0-9]/g, '-'), `${session}.jsonl`);
-    if (existsSync(file)) return file;
-  }
-  return undefined;
+  return claudeProjectDirs(cwd).map((dir) => join(dir, `${session}.jsonl`)).find((file) => existsSync(file));
 }

@@ -24,9 +24,10 @@ import { failureExcerpt, AnimusError, sh, tryGit } from './proc.ts';
  */
 export type Install = { path: string; key: string[]; run: string; version?: string };
 
-/** How many saved installs each path keeps; older ones go at teardown. */
+/** How many saved installs each path keeps; older ones go when a worktree is removed. */
 const KEEP = 2;
-const STALE_TMP_MS = 60 * 60 * 1000;
+/** A partial save this old was abandoned; a save used this recently may be being cloned by another job, so it stays. */
+const RECENT_MS = 60 * 60 * 1000;
 
 export const installsRoot = (cwd: string) => join(commonDir(cwd), 'animus', 'installs');
 
@@ -163,13 +164,6 @@ function save(worktree: string, i: Install, entry: string): string | undefined {
   return undefined;
 }
 
-/**
- * Before a wave: installs the cache lacks for the epic's tip are made once,
- * in a scratch worktree, so the wave's stages starting together all clone
- * them instead of each installing. A failure is only logged: each stage
- * then installs, and reports it, as it would have.
- */
-
 /** After a setup failed on restored installs: they go from the cache and the worktree, and are made afresh. */
 export function remakeInstalls(worktree: string, used: readonly Used[]): void {
   for (const u of used.filter((x) => x.restored)) {
@@ -180,20 +174,23 @@ export function remakeInstalls(worktree: string, used: readonly Used[]): void {
   }
 }
 
-/** Keeps the KEEP most recently used saves of each install, and drops abandoned partial ones. Returns how many went. */
-export function pruneInstalls(repo: string): number {
+/**
+ * Keeps the KEEP most recently used saves of each install, and any used in
+ * the last hour, and drops abandoned partial ones. Returns how many went.
+ */
+export function pruneInstalls(repo: string, now = Date.now()): number {
   const root = installsRoot(repo);
   if (!existsSync(root)) return 0;
   let n = 0;
   for (const name of readdirSync(root)) {
     const dir = join(root, name);
     const entries = readdirSync(dir).map((e) => ({ e, at: statSync(join(dir, e)).mtimeMs }));
-    for (const t of entries.filter((x) => x.e.includes('.tmp-') && Date.now() - x.at > STALE_TMP_MS)) {
+    for (const t of entries.filter((x) => x.e.includes('.tmp-') && now - x.at > RECENT_MS)) {
       rmSync(join(dir, t.e), { recursive: true, force: true });
       n++;
     }
     const saved = entries.filter((x) => !x.e.includes('.tmp-')).sort((a, b) => b.at - a.at);
-    for (const old of saved.slice(KEEP)) {
+    for (const old of saved.slice(KEEP).filter((x) => now - x.at > RECENT_MS)) {
       rmSync(join(dir, old.e), { recursive: true, force: true });
       n++;
     }

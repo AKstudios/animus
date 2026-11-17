@@ -4,7 +4,7 @@
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { basename, dirname, isAbsolute, join, resolve } from 'node:path';
 import { jobBranch, revParse } from './git.ts';
-import { remakeInstalls, restoreInstalls, type Install } from './installs.ts';
+import { pruneInstalls, remakeInstalls, restoreInstalls, type Install } from './installs.ts';
 import type { Profile } from './profile.ts';
 import { failureExcerpt, git, AnimusError, sh, tryGit } from './proc.ts';
 import { uiDown } from './ui.ts';
@@ -55,11 +55,13 @@ export function reopenWorkspace(repo: string, ws: Workspace): Workspace {
   return ws;
 }
 
+/** Removes a job's worktree, stopping what it served, and drops install saves no job has used lately. */
 export function removeWorkspace(repo: string, worktree: string): void {
   if (!existsSync(worktree)) return;
   try { uiDown(worktree); } catch { /* nothing was up */ }
   tryGit(repo, ['worktree', 'remove', '--force', worktree]);
   tryGit(repo, ['worktree', 'prune']);
+  try { pruneInstalls(repo); } catch { /* the cache is only a cache: the next removal tries again */ }
 }
 
 /**

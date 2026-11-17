@@ -1,11 +1,13 @@
 // Cleanup: what a job leaves behind goes once nobody needs it. A job whose
 // pull request merged or closed loses its branch, its evidence branch (here
 // and on origin) and any worktree still standing. Its folder under Animus's
-// home goes once it is old, and so does everything of a job that never had a
-// pull request. A job with an open pull request is never touched. The run log
-// keeps every job's line.
+// home goes once it is old, with the transcripts Claude Code kept of its
+// sessions, and so does everything of a job that never had a pull request. A
+// job with an open pull request, or one waiting for an answer, is never
+// touched unless named. The run log keeps every job's line.
 import { existsSync, readdirSync, rmSync, statSync } from 'node:fs';
 import { join } from 'node:path';
+import { claudeProjectDirs } from './agent.ts';
 import { revParse } from './git.ts';
 import { animusHome, jobDir, loadState, readRuns } from './log.ts';
 import { evidenceBranch, type PrLookup } from './pr.ts';
@@ -46,7 +48,10 @@ function cleanJob(job: string, pr: string | undefined, named: boolean, opts: Cle
   const hasRepo = existsSync(join(repo, '.git'));
   const days = opts.days ?? KEEP_DAYS;
   const old = named || (opts.now ?? Date.now()) - statSync(join(dir, 'state.json')).mtimeMs >= days * DAY_MS;
+  // Read before the worktree goes: its path with links resolved names one of them.
+  const transcripts = claudeProjectDirs(state.workspace.worktree);
 
+  if (state.outcome === 'needs-input' && !named) return { job, removed: [], kept: 'it is waiting for an answer; name it to remove it now' };
   if (pr) {
     const prState = lookup(pr, hasRepo ? repo : animusHome());
     if (!prState) return { job, removed: [], kept: `the state of ${pr} could not be read` };
@@ -86,6 +91,10 @@ function cleanJob(job: string, pr: string | undefined, named: boolean, opts: Cle
   if (!old) return { job, removed, kept: `its folder stays until ${days} day(s) after its last run` };
   if (act) rmSync(dir, { recursive: true, force: true });
   removed.push(`folder ${dir}`);
+  for (const t of transcripts.filter((d) => existsSync(d))) {
+    if (act) rmSync(t, { recursive: true, force: true });
+    removed.push(`Claude Code transcripts ${t}`);
+  }
   return { job, removed };
 }
 

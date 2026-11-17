@@ -1,10 +1,11 @@
 import assert from 'node:assert/strict';
-import { existsSync, mkdtempSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
+import { claudeProjectDirs } from '../src/agent.ts';
 import { cleanup, KEEP_DAYS } from '../src/cleanup.ts';
-import { jobDir } from '../src/log.ts';
+import { jobDir, loadState } from '../src/log.ts';
 import { runJob } from '../src/pipeline.ts';
 import type { PrState } from '../src/pr.ts';
 import { git, tryGit, AnimusError } from '../src/proc.ts';
@@ -83,4 +84,33 @@ test('--dry-run says what would go and removes nothing; an unknown job is an err
   assert.deepEqual(result.removed, [`origin/animus/${job}`, `origin/animus-evidence/${job}`, `branch animus/${job}`, `folder ${jobDir(job)}`]);
   assert.deepEqual(left(), before);
   assert.throws(() => cleanup({ jobs: ['no-such-job'] }, () => 'MERGED'), AnimusError);
+});
+
+test('the transcripts Claude Code kept of a job\'s sessions go with its folder, and not before', async () => {
+  const { job, left } = await finishedJob({ keep: true });
+  const [transcripts] = claudeProjectDirs(loadState(job)!.workspace.worktree);
+  mkdirSync(transcripts!, { recursive: true });
+  writeFileSync(join(transcripts!, 'session-1.jsonl'), '{}\n');
+
+  only(job, 'MERGED');
+  assert.equal(left().folder, true);
+  assert.equal(existsSync(transcripts!), true);
+
+  assert.ok(only(job, 'MERGED', { now: LATER }).removed.includes(`Claude Code transcripts ${transcripts}`));
+  assert.equal(existsSync(transcripts!), false);
+});
+
+test('a job waiting for an answer is kept however old, until it is named', async () => {
+  const repo = makeRepo();
+  const { agent } = fakeAgent([() => ({ output: { status: 'needs-input', summary: '', question: 'Done, or finished?' } })]);
+  const run = await runJob({ repo, specFile: writeSpec('size: small\ndifficulty: routine\ntype: feature') }, deps(agent));
+  assert.equal(run.outcome, 'needs-input');
+
+  const kept = only(run.job, undefined, { now: LATER });
+  assert.deepEqual(kept.removed, []);
+  assert.match(kept.kept!, /waiting for an answer/);
+  assert.equal(existsSync(jobDir(run.job)), true);
+
+  only(run.job, undefined, { named: true });
+  assert.equal(existsSync(jobDir(run.job)), false);
 });

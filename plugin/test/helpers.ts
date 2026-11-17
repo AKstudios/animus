@@ -11,6 +11,8 @@ Object.assign(process.env, {
   GIT_COMMITTER_NAME: 'Test', GIT_COMMITTER_EMAIL: 'test@example.com',
   GIT_CONFIG_NOSYSTEM: '1', GIT_CONFIG_GLOBAL: '/dev/null',
   ANIMUS_HOME: mkdtempSync(join(tmpdir(), 'animus-home-')),
+  // Never the person's own Claude Code folder: cleanup removes transcripts from it.
+  CLAUDE_CONFIG_DIR: mkdtempSync(join(tmpdir(), 'animus-claude-')),
 });
 
 export function write(dir: string, file: string, text: string): void {
