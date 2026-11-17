@@ -8,6 +8,12 @@ clients with how to update.
 
 ## Unreleased
 
+- `animus ui` serves the local display on 127.0.0.1 (port 7420 or the next
+  free one) and opens it: every job in `~/.animus`, grouped by project, newest
+  first, each with its job page, and no people pages or sign-in. Ctrl-C stops
+  it. The display page tells its source apart by the new `local` flag on
+  `Display`; `animus ui --helix` is unchanged. Not breaking: Helix's API and
+  the job's files keep their shape.
 - `animus run` records its process in the job's `progress.json` (`pid` and
   `host`, added to `stage`, `who` and `at`). A job counts as running only on
   that host with that process alive; one whose process is gone and that has no

@@ -19,11 +19,9 @@ import { openPrs, type ListPrs } from './open-prs.ts';
 import { addProject, checkInChild, projectView, removeProject, type StartCheck } from './projects.ts';
 import type { Store } from './store.ts';
 import { Refused, type Submission, type Supervisor } from './supervisor.ts';
-import { asset } from './ui.ts';
+import { asset, CSP } from '../../plugin/src/assets.ts';
 
 const MAX_BODY = 1024 * 1024;
-/** The display loads only what Helix serves and talks only to Helix. A job's screenshots need a token, so the page fetches them and shows them as blobs. */
-const CSP = "default-src 'none'; script-src 'self'; style-src 'self'; font-src 'self'; img-src 'self' data: blob:; connect-src 'self'; base-uri 'none'; form-action 'none'";
 
 /** Who holds the request's token. Only its hash is looked up: a token is long and random, so the lookup's timing gives nothing away. */
 function whoIs(store: Store, req: IncomingMessage): string | undefined {

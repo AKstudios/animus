@@ -41,6 +41,8 @@ const shotKey = (src: string) => `${src}@${state.job?.shots?.at ?? ''}`;
 const esc = (s: string | number) => String(s).replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`);
 const pad = (n: number) => String(n).padStart(2, '0');
 const wall = (d: Date) => `${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
+/** A Helix job's number as `#7`; a local job is named by its title, not its long id. */
+const ref = (id: number | string) => (typeof id === 'number' ? `#${id}` : '');
 const picked = () => { try { return decodeURIComponent(location.hash.slice(1)) || null; } catch { return null; } };
 
 // ------------------------------------------------------------------ markup
@@ -88,11 +90,12 @@ function header(v: View | undefined): string {
   return `<header class="head">
     <div class="brand">${LOGO}<div class="wordmark">HELIX</div>${v ? `<div class="machine">${esc(v.name)}</div>` : ''}</div>
     <div class="stats">
-      <div class="stat-slots"><span class="k">SLOTS</span>${squares}<span class="b">${slots}</span></div>
-      <div><span class="k">QUEUED</span> <span class="b">${v?.queued ?? 0}</span></div>
+      ${v?.local ? `<div><span class="k">RUNNING</span> <span class="b">${v.running}</span></div>`
+        : `<div class="stat-slots"><span class="k">SLOTS</span>${squares}<span class="b">${slots}</span></div>
+      <div><span class="k">QUEUED</span> <span class="b">${v?.queued ?? 0}</span></div>`}
       <div><span class="k">NEEDS INPUT</span> <span class="asks">${v?.asks ?? 0}</span></div>
       <div class="time">${wall(new Date())}</div>
-      ${readToken(storage) ? '<button type="button" class="sign-out" data-sign-out>SIGN OUT</button>' : ''}
+      ${readToken(storage) && !v?.local ? '<button type="button" class="sign-out" data-sign-out>SIGN OUT</button>' : ''}
     </div>
   </header>
   <div class="rule"><span></span></div>`;
@@ -124,24 +127,24 @@ const track = (v: View, j: Live) => `<span class="track" aria-hidden="true">${Ar
 
 const card = (v: View, j: Live) => `<article class="card" data-key="j-${j.id}">
   <span class="corner-a" aria-hidden="true"></span><span class="corner-b" aria-hidden="true"></span>
-  <div class="card-top"><span><span class="b">#${j.id}</span> <span class="mute">${esc(j.repo)} · ${esc(j.person)}</span></span><span class="elapsed">${j.elapsed}</span></div>
+  <div class="card-top"><span><span class="b">${ref(j.id)}</span> <span class="mute">${esc(j.repo)} · ${esc(j.person)}</span></span><span class="elapsed">${j.elapsed}</span></div>
   <a class="card-title" href="${esc(j.page)}">${esc(j.title)}</a>
   <div class="card-stage">${track(v, j)}<div class="card-step"><span class="stage-name">${esc(j.stageText)}</span><span class="mute">${esc(j.stepText)}</span></div></div>
   <div class="card-feed"><div class="mute">${esc(j.who)}</div><div class="now">&gt; ${esc(j.now)}<span class="cursor">_</span></div></div>
 </article>`;
 
 const row = (v: View, j: Live) => `<div class="row" data-key="j-${j.id}">
-  <span class="id">#${j.id}</span><span class="repo">${esc(j.repo)}</span><a class="title" href="${esc(j.page)}">${esc(j.title)}</a>
+  <span class="id">${ref(j.id)}</span><span class="repo">${esc(j.repo)}</span><a class="title" href="${esc(j.page)}">${esc(j.title)}</a>
   ${track(v, j)}<span class="stage">${esc(j.stageText)} <span class="step">${esc(j.stepShort)}</span></span><span class="elapsed">${j.elapsed}</span>
 </div>`;
 
 const waiting = (j: Waiting) => `<div class="wait${j.ask ? ' ask' : ''}" data-key="j-${j.id}">
-  <span class="id">#${j.id}</span><span class="tag">${j.tag}</span><a class="title" href="${esc(j.page)}">${esc(j.title)}</a>
+  <span class="id">${ref(j.id)}</span><span class="tag">${j.tag}</span><a class="title" href="${esc(j.page)}">${esc(j.title)}</a>
   <span class="by">${esc(j.repo)} · ${esc(j.person)}</span><span class="note">${esc(j.note)}</span>
 </div>`;
 
 const recent = (j: Recent) => `<div class="done-row" data-key="j-${j.id}">
-  <span class="id">#${j.id}</span>
+  <span class="id">${ref(j.id)}</span>
   <span class="tag tone-${j.tone}">${esc(j.tag)}</span>
   <a class="title" href="${esc(j.page)}">${esc(j.title)}</a><span class="by">${esc(j.meta)}</span>
   ${j.reason ? `<span class="reason tone-${j.tone}">${esc(j.reason)}</span>` : ''}
@@ -171,17 +174,20 @@ function main(v: View): string {
   if (v.empty) {
     return `<main class="main">${scope}<div class="empty">
       ${v.idle ? SYNC : EMPTY_MARK}<h2>${esc(v.empty.title)}</h2><p>${esc(v.empty.text)}</p>
-      <code>animus submit &lt;spec file&gt;</code><div class="free">${esc(v.empty.free)}</div>
+      <code>${esc(v.empty.command)}</code>${v.empty.free ? `<div class="free">${esc(v.empty.free)}</div>` : ''}
     </div></main>`;
   }
   const live = v.idle ? SYNC : !v.live.length ? `<div class="none boxed">${esc(v.noLive)}</div>`
     : v.live.length > DENSE ? `<div class="rows">${v.live.map((j) => row(v, j)).join('')}</div>`
     : `<div class="cards${v.live.length > MANY ? ' many' : ''}">${v.live.map((j) => card(v, j)).join('')}</div>`;
+  const lists = v.local
+    ? v.byProject.map((g) => section('recent', `${esc(g.project.toUpperCase())} · ${g.jobs.length}`, g.jobs.map(recent).join(''))).join('')
+    : `${section('prs', `OPEN PRS · ${v.prs.length}`, v.prs.length ? v.prs.map(openPr).join('') : '<div class="none">No pull request opened by these jobs is open.</div>')}
+    ${section('recent', `RECENT · ${v.recent.length}`, v.recent.length ? v.recent.map(recent).join('') : '<div class="none">No job has failed or been cancelled here.</div>')}`;
   return `<main class="main">${scope}
     ${section('live', `AGENTS WORKING NOW · ${v.live.length}`, live, true)}
-    ${section('waiting', `WAITING · ${v.waiting.length}`, v.waiting.length ? v.waiting.map(waiting).join('') : '<div class="none">Nothing queued, and no job is waiting for an answer.</div>')}
-    ${section('prs', `OPEN PRS · ${v.prs.length}`, v.prs.length ? v.prs.map(openPr).join('') : '<div class="none">No pull request opened by these jobs is open.</div>')}
-    ${section('recent', `RECENT · ${v.recent.length}`, v.recent.length ? v.recent.map(recent).join('') : '<div class="none">No job has failed or been cancelled here.</div>')}
+    ${section('waiting', `WAITING · ${v.waiting.length}`, v.waiting.length ? v.waiting.map(waiting).join('') : `<div class="none">${v.local ? 'No job is waiting for an answer.' : 'Nothing queued, and no job is waiting for an answer.'}</div>`)}
+    ${lists}
   </main>`;
 }
 
@@ -219,11 +225,11 @@ function jobSections(v: JobPageView): string {
   ].join('');
 }
 
-function jobMain(id: number, now: number): string {
-  const notice = jobNotice(id, readToken(storage) !== null, state.jobStatus);
+function jobMain(id: number | string, now: number, local: boolean): string {
+  const notice = jobNotice(id, readToken(storage) !== null, state.jobStatus, local);
   const v = state.job?.job.id === id ? jobView(state.job, now) : undefined;
   const facts = v ? `<div class="facts">${v.facts.map((f) => `<div><span class="mute">${esc(f.k)}</span> ${f.href ? `<a href="${esc(f.href)}" target="_blank" rel="noopener noreferrer">${esc(f.v)}</a>` : esc(f.v)}</div>`).join('')}</div>` : '';
-  const scope = `<div class="scope"><div><div class="label">JOB #${id}</div><h1>${esc(v?.title ?? `Job #${id}`)}</h1></div>${notice ? '' : facts}</div>`;
+  const scope = `<div class="scope"><div><div class="label">JOB${typeof id === 'number' ? ` #${id}` : ''}</div><h1>${esc(v?.title ?? `Job ${ref(id) || id}`)}</h1></div>${notice ? '' : facts}</div>`;
   const body = notice ? `<div class="none boxed">${esc(notice.text)}</div>${notice.signIn ? signIn : ''}` : v ? jobSections(v) : '';
   return `<main class="main">${back}${scope}${body}</main>`;
 }
@@ -237,7 +243,8 @@ function page(): string {
   // While Helix is out of reach the clock it was last read at stands still, and so does every count of time.
   const now = (state.offline && state.heard ? state.heard.getTime() : Date.now()) + state.skew;
   const v = state.display ? view(state.display, picked(), now) : undefined;
-  const body = at.page === 'job' ? jobMain(at.id, now) : at.page === 'people' ? peopleMain(at.name) : v ? `${nav(v)}${main(v)}` : '';
+  // A job page waits for the display: whether it needs a sign-in depends on the source it answers.
+  const body = at.page === 'job' ? (state.display ? jobMain(at.id, now, state.display.local === true) : '') : at.page === 'people' ? peopleMain(at.name) : v ? `${nav(v)}${main(v)}` : '';
   return [
     header(v),
     state.offline ? offline() : '',
@@ -293,24 +300,26 @@ function draw(): void {
 let timer = 0;
 
 /** A job page's data, with the token as it is kept now; a token Helix refuses is forgotten. */
-async function readJob(id: number): Promise<void> {
+async function readJob(id: number | string): Promise<void> {
   const token = readToken(storage);
-  if (!token) return;
-  const res = await fetch(`/jobs/${id}/page-data`, { cache: 'no-store', headers: { authorization: `Bearer ${token}` } });
-  state.jobStatus = res.status;
-  if (res.status === 401) forgetToken(storage);
+  // Without a token it is asked all the same: the local display needs none, and Helix's 401 then only means a sign-in is due.
+  const res = await fetch(`/jobs/${encodeURIComponent(id)}/page-data`, { cache: 'no-store', headers: auth(token) });
+  state.jobStatus = res.status === 401 && !token ? undefined : res.status;
+  if (res.status === 401 && token) forgetToken(storage);
   if (!res.ok) return;
   state.job = (await res.json()) as JobPage;
   await readShots(state.job, token);
 }
 
-/** Fetches with the token each screenshot this browser does not hold yet, and lets go of the ones the job no longer has. */
-async function readShots(page: JobPage, token: string): Promise<void> {
+const auth = (token: string | null): Record<string, string> => (token ? { authorization: `Bearer ${token}` } : {});
+
+/** Fetches with the token (if there is one) each screenshot this browser does not hold yet, and lets go of the ones the job no longer has. */
+async function readShots(page: JobPage, token: string | null): Promise<void> {
   const srcs = jobView(page, 0).shots.map((s) => s.src);
   const keys = srcs.map(shotKey);
   for (const [k, u] of shotUrls) if (!keys.includes(k)) { URL.revokeObjectURL(u); shotUrls.delete(k); }
   await Promise.all(srcs.filter((src) => !shotUrls.has(shotKey(src))).map(async (src) => {
-    const res = await fetch(src, { cache: 'no-store', headers: { authorization: `Bearer ${token}` } });
+    const res = await fetch(src, { cache: 'no-store', headers: auth(token) });
     // One that is being taken again is read on a later poll.
     if (res.ok) shotUrls.set(shotKey(src), URL.createObjectURL(await res.blob()));
   }));

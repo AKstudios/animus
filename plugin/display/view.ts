@@ -34,7 +34,11 @@ export type View = {
   /** Nothing runs or waits in line and no project is picked: the overview shows the synchronizing helix. A job that only waits for an answer does not count. */
   idle: boolean;
   /** Shown in place of the three sections when there is no job to list. */
-  empty?: { title: string; text: string; free: string };
+  empty?: { title: string; text: string; free: string; command: string };
+  /** The local display: it has no slots or queue to show, and lists every job by project instead of PRs and RECENT. */
+  local: boolean;
+  /** Local display: every job of the shown projects, newest first, grouped by project in the order of their newest job. */
+  byProject: { project: string; jobs: Recent[] }[];
   live: Live[]; noLive: string;
   waiting: Waiting[];
   /** The newest open PRs the jobs opened. */
@@ -66,6 +70,7 @@ const firstLine = (s: string) => { const line = s.trim().split('\n')[0] ?? ''; r
 
 function tick(j: DisplayJob): Tick {
   if (j.state === 'running') return 'running';
+  if (j.state === 'stopped') return 'failed';
   if (isAsk(j)) return 'ask';
   if (j.state === 'queued' || j.state === 'cancelled') return 'queued';
   return j.outcome === 'failed' ? 'failed' : 'ended';
@@ -74,13 +79,19 @@ function tick(j: DisplayJob): Tick {
 /** Recent is where a job that did not deliver is read; what it delivered is a PR, listed while it is open. */
 const isMiss = (j: DisplayJob) => j.state === 'cancelled' || (j.state === 'ended' && j.outcome === 'failed');
 
+const LISTED: Record<string, [string, Tone]> = {
+  running: ['RUNNING', 'ink'], queued: ['QUEUED', 'mute'], stopped: ['STOPPED', 'fail'], cancelled: ['CANCELLED', 'mute'],
+  pr: ['PR', 'ink'], 'draft-pr': ['DRAFT PR', 'ink'], 'dry-run': ['DRY RUN', 'mute'], 'needs-input': ['NEEDS INPUT', 'ask'], failed: ['FAILED', 'fail'],
+};
+
+/** A row of a job in any state; a stopped one says how to carry on. */
 function recent(j: DisplayJob): Recent {
-  const [tag, tone]: [string, Tone] = j.state === 'cancelled' ? ['CANCELLED', 'mute'] : ['FAILED', 'fail'];
+  const [tag, tone] = LISTED[j.state === 'ended' ? j.outcome ?? 'failed' : j.state] ?? ['ENDED', 'mute'];
   const took = j.started && j.ended ? span(Date.parse(j.ended) - Date.parse(j.started)) : '';
   return {
     id: j.id, page: jobPage(j.id), tag, tone, title: j.title,
     meta: [j.repo, j.person, took, j.cost_usd !== undefined ? usd(j.cost_usd) : ''].filter(Boolean).join(' · '),
-    ...(j.reason ? { reason: firstLine(j.reason) } : {}),
+    ...(j.resume ? { reason: `It stopped before it ended. To carry on: ${j.resume}` } : j.reason ? { reason: firstLine(j.reason) } : {}),
   };
 }
 
@@ -145,13 +156,17 @@ export function view(d: Display, picked: string | null, now: number): View {
     idle: !sel && running === 0 && line.length === 0,
     ...(shown.length ? {} : { empty: {
       title: sel ? `No jobs for ${sel.name} yet` : 'Nothing is running',
-      text: sel ? 'Nobody has sent this project a spec. From its folder, run:' : 'No job has been submitted to this machine yet. From any project, send a spec:',
-      free: `${d.slots - running} of ${d.slots} slots free`,
+      text: d.local ? 'No job has run on this machine yet. From a project, run a spec:'
+        : sel ? 'Nobody has sent this project a spec. From its folder, run:' : 'No job has been submitted to this machine yet. From any project, send a spec:',
+      free: d.local ? '' : `${d.slots - running} of ${d.slots} slots free`,
+      command: d.local ? 'animus run <spec file>' : 'animus submit <spec file>',
     } }),
     live,
-    noLive: sel ? 'No agent is working on this project.' : `No agent is working right now. ${d.slots === 1 ? 'The one slot is' : `All ${d.slots} slots are`} free.`,
+    noLive: sel ? 'No agent is working on this project.' : d.local ? 'No agent is working right now.' : `No agent is working right now. ${d.slots === 1 ? 'The one slot is' : `All ${d.slots} slots are`} free.`,
     waiting,
     prs,
     recent: ended.slice(0, RECENT).map(recent),
+    local: d.local === true,
+    byProject: d.local ? [...Map.groupBy(shown, (j) => j.repo)].map(([project, jobs]) => ({ project, jobs: jobs.map(recent) })) : [],
   };
 }

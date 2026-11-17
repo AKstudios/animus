@@ -132,7 +132,9 @@ Helix serves; ADR 0004), `bin/animus`.
 | `projects.ts` | Adding a project and its check |
 | `check.ts` | Trying a person's GitHub and Claude tokens |
 | `container.ts` | Running a job in its own container |
-| `display.ts`, `ui.ts` | What the display page shows, and serving it (`plugin/display/`) |
+| `local-display.ts` | `animus ui`: the display page's local source, reading `~/.animus` |
+| `job-folder.ts`, `assets.ts` | Reading a job's folder for a job page, and serving the page's files (`plugin/display/`); Helix's display uses both too |
+| `display.ts` | What the display page shows from Helix |
 
 `helix/deploy/` holds the job image's Dockerfile and the Ubuntu setup
 scripts.

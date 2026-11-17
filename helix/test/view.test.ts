@@ -84,9 +84,9 @@ test('each project is summed up from its own jobs, and picking one narrows every
 
 test('with no job to list, the display says so and how to send one', () => {
   const none = view(shown([], 8), null, NOW);
-  assert.deepEqual(none.empty, { title: 'Nothing is running', text: 'No job has been submitted to this machine yet. From any project, send a spec:', free: '8 of 8 slots free' });
+  assert.deepEqual(none.empty, { title: 'Nothing is running', text: 'No job has been submitted to this machine yet. From any project, send a spec:', free: '8 of 8 slots free', command: 'animus submit <spec file>' });
   const d = shown([job({ repo: 'app', state: 'running', started: ago(1) })], 8);
-  assert.deepEqual(view(d, 'site', NOW).empty, { title: 'No jobs for site yet', text: 'Nobody has sent this project a spec. From its folder, run:', free: '7 of 8 slots free' });
+  assert.deepEqual(view(d, 'site', NOW).empty, { title: 'No jobs for site yet', text: 'Nobody has sent this project a spec. From its folder, run:', free: '7 of 8 slots free', command: 'animus submit <spec file>' });
   assert.equal(view(d, 'app', NOW).empty, undefined);
   assert.equal(view(shown([job({ state: 'queued' })], 1), null, NOW).noLive, 'No agent is working right now. The one slot is free.');
 });

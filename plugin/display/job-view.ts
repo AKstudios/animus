@@ -40,6 +40,7 @@ export function jobView(p: JobPage, now: number): JobPageView {
   const facts = [
     { k: 'project', v: j.repo }, { k: 'person', v: j.person }, { k: 'state', v: j.state },
     ...(j.outcome ? [{ k: 'outcome', v: OUTCOMES[j.outcome] ?? j.outcome }] : []),
+    ...(j.resume ? [{ k: 'carry on', v: j.resume }] : []),
     ...(j.pr ? [{ k: 'PR', v: pr ? `#${pr}` : j.pr, ...(/^https?:\/\//.test(j.pr) ? { href: j.pr } : {}) }] : []),
     ...(j.cost_usd !== undefined ? [{ k: 'cost', v: `$${j.cost_usd.toFixed(2)}` }] : []),
     { k: 'submitted', v: when(j.submitted) },
@@ -68,7 +69,7 @@ export function jobView(p: JobPage, now: number): JobPageView {
     questions: (p.questions ?? []).map((q) => ({ question: q.question, answer: q.answer ?? 'Not answered yet.', answered: q.answer !== undefined })),
     shots: (p.shots?.files ?? []).map((f) => ({
       name: (f.split('/').at(-1) ?? f).replace(/\.[^.]+$/, ''),
-      src: `/jobs/${j.id}/shots/${f.split('/').map(encodeURIComponent).join('/')}`,
+      src: `/jobs/${encodeURIComponent(j.id)}/shots/${f.split('/').map(encodeURIComponent).join('/')}`,
     })),
     log: p.log,
     follow: j.state === 'running' || j.state === 'queued',

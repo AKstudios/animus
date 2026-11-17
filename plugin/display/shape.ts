@@ -80,4 +80,6 @@ export type Display = {
   jobs: DisplayJob[];
   /** Open PRs the jobs opened, any order; left out by a source that does not ask GitHub. */
   prs?: DisplayPr[];
+  /** Set by the local display (`animus ui`): one person's own jobs, no sign-in and no people pages, listed by project rather than as a queue. */
+  local?: true;
 };

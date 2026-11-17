@@ -187,6 +187,13 @@ opens Helix that way, signed in as you. Sign out from the
 header. Do not sign in on a shared wall screen: the token can also submit and
 cancel jobs as you. `/people` and `/people/<name>` are still to come.
 
+The same page is also the local display, `animus ui`, which answers the same
+shapes from `~/.animus` with `local` set on `GET /display`. Its job ids are
+the jobs' folder names (`/jobs/<name>`), it needs no sign-in, and it has no
+people pages: those are Helix's alone. The files both serve and the reading of
+a job's folder live in the plugin (`plugin/src/assets.ts`,
+`plugin/src/job-folder.ts`), which Helix imports.
+
 A job page shows the job's project, person, state, outcome, pull request,
 cost and times; its spec as submitted; how long it spent in each stage,
 summed over its runs, and its slices when it was cut; the checks of its

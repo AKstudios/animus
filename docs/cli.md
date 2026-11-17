@@ -199,6 +199,16 @@ Answers a job's question. The job is queued again and resumes with it.
 
 Cancels a queued or running job.
 
+#### `animus ui`
+
+Serves the local display on `127.0.0.1` (port 7420, or the next free one),
+opens it in your browser and runs until Ctrl-C. It shows every job this machine
+ran, read from `~/.animus`, grouped by project and newest first, each with its
+job page. A job whose process is gone and that has no outcome shows as stopped,
+with `animus resume <job>`. It has no sign-in and no people pages, and answers
+only GET and only for the host names `127.0.0.1` and `localhost`. There is no
+run log to show, so a job page's log is empty.
+
 #### `animus ui --helix`
 
 Opens Helix's display in your browser, already signed in: it opens
