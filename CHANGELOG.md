@@ -36,6 +36,21 @@ clients with how to update.
 - The Slack app's manifest is in `helix/deploy/slack/manifest.yaml`;
   docs/helix-deploy.md walks from creating the app to `helix slack setup`,
   and docs/helix.md describes the bot's commands.
+- From Slack, `/helix jobs` lists a person's queued, running and waiting
+  jobs with where to follow each, and `/helix status` says Helix's slots in
+  use, the queue and its version, both privately. A person answers a job
+  that needs input by replying in its thread (in a channel, with @Helix),
+  and the thread's **Cancel job** button cancels it for its person or the
+  owner. The manifest adds interactivity and the `app_mention` event for
+  these.
+- The planner is told what a slice costs: each one is a fresh session that
+  reads the brief, the spec and the code before it writes, so it now cuts
+  fewer, larger slices and folds a small addition into the slice it builds
+  on. A large spec was cut into seven slices of two or three minutes each.
+- Animus's own test commands (`npm test` and the specs' `$` lines, all run
+  through `scripts/with-tmp.sh`) end a test that never settles after a
+  minute, and no longer wait on a server a test left open. One such test
+  held an implementer for eight minutes.
 
 ## 0.3.8 (2026-11-17)
 
