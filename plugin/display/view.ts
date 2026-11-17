@@ -31,6 +31,8 @@ export type View = {
   sel?: { id: string; base: string; gates: string; prs: number; spent: string };
   title: string;
   stages: number;
+  /** Nothing runs or waits in line and no project is picked: the overview shows the synchronizing helix. A job that only waits for an answer does not count. */
+  idle: boolean;
   /** Shown in place of the three sections when there is no job to list. */
   empty?: { title: string; text: string; free: string };
   live: Live[]; noLive: string;
@@ -140,6 +142,7 @@ export function view(d: Display, picked: string | null, now: number): View {
     } } : {}),
     title: sel ? sel.name : 'All projects',
     stages: d.stages.length,
+    idle: !sel && running === 0 && line.length === 0,
     ...(shown.length ? {} : { empty: {
       title: sel ? `No jobs for ${sel.name} yet` : 'Nothing is running',
       text: sel ? 'Nobody has sent this project a spec. From its folder, run:' : 'No job has been submitted to this machine yet. From any project, send a spec:',

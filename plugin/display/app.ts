@@ -58,6 +58,30 @@ const EMPTY_MARK = `<svg width="96" height="96" viewBox="0 0 96 96" fill="none" 
   <path class="s-ink" d="M38 30 H58 M42 48 H54 M38 66 H58" stroke-width="1"></path>
 </svg>`;
 
+/**
+ * The idle animation: the Helix mark unwinds into a slowly turning double helix
+ * of light, with glitch fragments and a word. Inline SVG and CSS transforms only
+ * (helix.css): no canvas, no frame loop. Each rung of the helix is flat when its
+ * --s is 1 and edge-on at 0; --s is also its resting pose under reduced motion.
+ */
+const RUNGS = 16;
+const rungs = Array.from({ length: RUNGS }, (_, i) => {
+  const turn = i / RUNGS * 1.5;
+  return `<g transform="translate(200 ${22 + i * 11})"><g class="sync-rung" style="--s:${Math.cos(turn * 2 * Math.PI).toFixed(2)};animation-delay:-${(turn * 12).toFixed(2)}s">
+    <line class="s-line" x1="-60" x2="60" stroke-width="1"></line><circle class="f-accent" cx="-60" r="4"></circle><circle class="f-ink" cx="60" r="4"></circle></g></g>`;
+}).join('');
+const SYNC = `<div class="sync" data-key="sync" role="img" aria-label="Synchronizing">
+  <div class="sync-drift"><svg viewBox="0 0 400 220" fill="none" aria-hidden="true">
+    <g class="sync-mark" transform="translate(200 110)"><g class="sync-unwind">
+      <path class="s-ink" d="M-24 -48 C-24 -20 24 0 24 48" stroke-width="2"></path>
+      <path class="s-accent" d="M24 -48 C24 -20 -24 0 -24 48" stroke-width="2"></path>
+      <path class="s-ink" d="M-18 -32 H18 M-12 0 H12 M-18 32 H18" stroke-width="1.5"></path>
+    </g></g>
+    <g class="sync-helix">${rungs}</g>
+    <g class="sync-glitch"><rect class="f-accent" x="120" y="60" width="46" height="2"></rect><rect class="f-ink" x="238" y="132" width="30" height="2"></rect><rect class="f-accent" x="170" y="176" width="64" height="1"></rect></g>
+  </svg><div class="sync-word">SYNCHRONIZING</div></div>
+</div>`;
+
 function header(v: View | undefined): string {
   const squares = v && v.slots <= 16 ? `<div class="squares">${Array.from({ length: v.slots }, (_, i) => `<span${i < v.running ? ' class="on"' : ''}></span>`).join('')}</div>` : '';
   const slots = v ? `${v.running}/${v.slots}` : 'connecting';
@@ -146,11 +170,11 @@ function main(v: View): string {
   </div>`;
   if (v.empty) {
     return `<main class="main">${scope}<div class="empty">
-      ${EMPTY_MARK}<h2>${esc(v.empty.title)}</h2><p>${esc(v.empty.text)}</p>
+      ${v.idle ? SYNC : EMPTY_MARK}<h2>${esc(v.empty.title)}</h2><p>${esc(v.empty.text)}</p>
       <code>animus submit &lt;spec file&gt;</code><div class="free">${esc(v.empty.free)}</div>
     </div></main>`;
   }
-  const live = !v.live.length ? `<div class="none boxed">${esc(v.noLive)}</div>`
+  const live = v.idle ? SYNC : !v.live.length ? `<div class="none boxed">${esc(v.noLive)}</div>`
     : v.live.length > DENSE ? `<div class="rows">${v.live.map((j) => row(v, j)).join('')}</div>`
     : `<div class="cards${v.live.length > MANY ? ' many' : ''}">${v.live.map((j) => card(v, j)).join('')}</div>`;
   return `<main class="main">${scope}
@@ -337,5 +361,7 @@ root.addEventListener('click', (event) => {
 });
 
 window.addEventListener('hashchange', draw);
+// helix.css holds every animation still while the tab is hidden.
+document.addEventListener('visibilitychange', () => document.documentElement.toggleAttribute('data-hidden', document.hidden));
 window.setInterval(draw, 1000);
 void poll();

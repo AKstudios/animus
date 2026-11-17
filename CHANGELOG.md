@@ -8,6 +8,13 @@ clients with how to update.
 
 ## Unreleased
 
+- With no job running or queued and no project picked, the display's overview
+  shows an original synchronizing-helix animation (inline SVG and CSS only: the
+  Helix mark unwinds into a slowly turning double helix, with glitch fragments
+  and "SYNCHRONIZING") in place of the empty working box. It holds still when
+  the browser asks for reduced motion, pauses while the tab is hidden and
+  drifts slowly so nothing burns into a wall screen. A job that only waits for
+  an answer does not keep it away.
 - The display's overview lists the ten newest open PRs Helix's jobs opened
   (for the picked project when one is picked), drafts marked, in place of
   merged and closed ones. Helix lists a project's open PRs on GitHub with the

@@ -95,3 +95,17 @@ test('times read at a glance', () => {
   assert.deepEqual([clock(0), clock(462_000), clock(7_925_000), clock(-5)], ['00:00', '07:42', '132:05', '00:00']);
   assert.deepEqual([span(45_000), span(60_000), span(22 * 60_000), span(190 * 60_000)], ['45s', '1m', '22m', '3h 10m']);
 });
+
+// Protects: the idle animation only shows when nothing runs or is queued and no project is picked. Fails when: a queued job, a running job or a picked project still gets the animation, or a job waiting for an answer keeps it away.
+test('the idle animation shows only with nothing running or queued and no project picked', () => {
+  const asking = job({ repo: 'app', state: 'ended', outcome: 'needs-input', question: '?' });
+  assert.equal(view(shown([], 8), null, NOW).idle, true);
+  assert.equal(view(shown([asking], 8), null, NOW).idle, true);
+  assert.equal(view(shown([job({ state: 'running', started: ago(1) })], 8), null, NOW).idle, false);
+  assert.equal(view(shown([job({ state: 'queued' })], 8), null, NOW).idle, false);
+  // A job on another project still counts: the slots are machine-wide.
+  assert.equal(view(shown([job({ repo: 'site', state: 'running', started: ago(1) })], 8), 'app', NOW).idle, false);
+  assert.equal(view(shown([asking], 8), 'app', NOW).idle, false);
+  // A picked project Helix no longer has is the same as none picked.
+  assert.equal(view(shown([], 8), 'gone', NOW).idle, true);
+});
