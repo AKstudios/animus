@@ -1,0 +1,12 @@
+# Animus's profile for this repository, drafted by `animus init` from what the root says.
+# Read it and correct it: the commands are the gates every job must pass.
+# Other keys (notes, protected, checks, installs, tests) are in Animus's docs/configuration.md.
+# Not found: package.json has no lint script.
+# Not found: package.json has no build script.
+# Not found: no web app was recognised (a dev script with vite or next), so there is no ui target: ui specs will be refused until you add one.
+
+setup: npm ci
+commands:
+  typecheck: npm run typecheck
+  test: npm run test
+base: main
