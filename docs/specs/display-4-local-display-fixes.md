@@ -2,7 +2,6 @@
 size: small
 difficulty: routine
 type: feature
-after: docs/specs/display-3-open-prs-idle-and-local.md
 ---
 # The local display stops pointing at what it does not have
 
