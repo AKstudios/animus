@@ -125,15 +125,25 @@ no sign-in: anyone who can reach Helix can read it. It only reads; submitting,
 answering and cancelling need a person's token. Click a project to narrow the
 page to it; `?theme=dark` or `?theme=light` fixes the theme.
 
+Every job on it links to its own page, `/jobs/<id>`, an address that can be
+shared and opened cold. A job page needs a sign-in: paste your Helix token
+(`~/.animus/helix.json`), or open an address ending `#token=<token>`, which
+that browser keeps and takes out of the address bar. Sign out from the
+header. Do not sign in on a shared wall screen: the token can also submit and
+cancel jobs as you. `/people` and `/people/<name>` are still to come.
+
 ## HTTP API
 
-Every route but `/`, `/display`, `/version`, `/invite` and `/join` needs a
-person's Helix token as `Authorization: Bearer <token>`. The client sends its
-version, and Helix answers 426 to one it cannot work with.
+Every route but the display's pages, `/display`, `/version`, `/invite` and
+`/join` needs a person's Helix token as `Authorization: Bearer <token>`. The
+client sends its version, and Helix answers 426 to one it cannot work with;
+the display's own request for a job page's data sends none.
 
 | Route | What it does |
 | --- | --- |
 | `GET /` | The display page |
+| `GET /jobs/<id>`, `/people`, `/people/<name>` | The display page, to a browser asking for HTML |
+| `GET /jobs/<id>/page-data` | What a job page shows, for any person |
 | `GET /display` | What the display shows, as JSON |
 | `GET /version` | Helix's version |
 | `POST /invite` | Who an invite code is for, and the projects there |

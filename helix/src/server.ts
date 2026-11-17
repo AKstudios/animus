@@ -5,7 +5,9 @@
 // only by whoever added it (projects.ts).
 // Joining (invite, join) carries a one-time code instead, and leave the
 // person's own token (join.ts).
-// It also serves the display: its page at /, and what it shows at /display.
+// It also serves the display: its pages at / and /jobs/<id> (ui.ts), what the
+// overview shows at /display, and a job page's data, with a token, at
+// /jobs/<id>/page-data.
 import { createServer, type IncomingMessage, type Server } from 'node:http';
 import { VERSION_HEADER } from '../../plugin/src/remote.ts';
 import { animusVersion, compatible } from '../../plugin/src/version.ts';

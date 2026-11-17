@@ -2,7 +2,7 @@
 // plugin's (plugin/display, ADR 0004), so a laptop can show the same page.
 // Its scripts are TypeScript like everything else here, with their types
 // stripped as they are sent. They hold no data: every number on the display
-// comes from /display.
+// comes from /display, or a job page's from /jobs/<id>/page-data.
 import { existsSync, readFileSync, statSync } from 'node:fs';
 import { stripTypeScriptTypes } from 'node:module';
 import { dirname, extname, join } from 'node:path';

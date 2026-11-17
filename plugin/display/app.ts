@@ -1,7 +1,10 @@
 // The display in the browser: asks Helix for /display every two seconds and
-// draws what view.ts makes of the answer. It needs no sign-in.
+// draws what view.ts makes of the answer, on the page its path names
+// (pages.ts). The overview needs no sign-in; a job page needs the person's
+// token, sent with each request for its data.
 // It only reads. Sent to the browser with its types stripped (helix/src/ui.ts).
-import type { Display } from './shape.ts';
+import { forgetToken, jobNotice, keepToken, readToken, route, takeToken } from './pages.ts';
+import type { Display, JobPage } from './shape.ts';
 import { view, type Live, type Project, type Recent, type View, type Waiting } from './view.ts';
 
 const POLL_MS = 2000;
@@ -13,9 +16,16 @@ const DENSE = 12;
 const root = document.getElementById('helix')!;
 const theme = new URLSearchParams(location.search).get('theme');
 if (theme === 'light' || theme === 'dark') document.documentElement.dataset.theme = theme;
+const storage = () => window.localStorage;
+// A token in the address is kept, and taken out of it before anything reads the hash.
+if (takeToken(location.hash, storage)) history.replaceState(null, '', location.pathname + location.search);
+const at = route(location.pathname);
 
 const state: {
   display?: Display;
+  /** On a job page: its data, and how Helix last answered for it. */
+  job?: JobPage;
+  jobStatus?: number;
   /** Helix's clock minus this browser's, in ms. */
   skew: number;
   offline: boolean;
@@ -53,6 +63,7 @@ function header(v: View | undefined): string {
       <div><span class="k">QUEUED</span> <span class="b">${v?.queued ?? 0}</span></div>
       <div><span class="k">NEEDS INPUT</span> <span class="asks">${v?.asks ?? 0}</span></div>
       <div class="time">${wall(new Date())}</div>
+      ${readToken(storage) ? '<button type="button" class="sign-out" data-sign-out>SIGN OUT</button>' : ''}
     </div>
   </header>
   <div class="rule"><span></span></div>`;
@@ -85,25 +96,25 @@ const track = (v: View, j: Live) => `<span class="track" aria-hidden="true">${Ar
 const card = (v: View, j: Live) => `<article class="card" data-key="j-${j.id}">
   <span class="corner-a" aria-hidden="true"></span><span class="corner-b" aria-hidden="true"></span>
   <div class="card-top"><span><span class="b">#${j.id}</span> <span class="mute">${esc(j.repo)} · ${esc(j.person)}</span></span><span class="elapsed">${j.elapsed}</span></div>
-  <div class="card-title">${esc(j.title)}</div>
+  <a class="card-title" href="${esc(j.page)}">${esc(j.title)}</a>
   <div class="card-stage">${track(v, j)}<div class="card-step"><span class="stage-name">${esc(j.stageText)}</span><span class="mute">${esc(j.stepText)}</span></div></div>
   <div class="card-feed"><div class="mute">${esc(j.who)}</div><div class="now">&gt; ${esc(j.now)}<span class="cursor">_</span></div></div>
 </article>`;
 
 const row = (v: View, j: Live) => `<div class="row" data-key="j-${j.id}">
-  <span class="id">#${j.id}</span><span class="repo">${esc(j.repo)}</span><span class="title">${esc(j.title)}</span>
+  <span class="id">#${j.id}</span><span class="repo">${esc(j.repo)}</span><a class="title" href="${esc(j.page)}">${esc(j.title)}</a>
   ${track(v, j)}<span class="stage">${esc(j.stageText)} <span class="step">${esc(j.stepShort)}</span></span><span class="elapsed">${j.elapsed}</span>
 </div>`;
 
 const waiting = (j: Waiting) => `<div class="wait${j.ask ? ' ask' : ''}" data-key="j-${j.id}">
-  <span class="id">#${j.id}</span><span class="tag">${j.tag}</span><span class="title">${esc(j.title)}</span>
+  <span class="id">#${j.id}</span><span class="tag">${j.tag}</span><a class="title" href="${esc(j.page)}">${esc(j.title)}</a>
   <span class="by">${esc(j.repo)} · ${esc(j.person)}</span><span class="note">${esc(j.note)}</span>
 </div>`;
 
 const recent = (j: Recent) => `<div class="done-row" data-key="j-${j.id}">
   <span class="id">#${j.id}</span>
   ${j.href ? `<a class="tag tone-${j.tone}" href="${esc(j.href)}" target="_blank" rel="noopener noreferrer">${esc(j.tag)}</a>` : `<span class="tag tone-${j.tone}">${esc(j.tag)}</span>`}
-  <span class="title">${esc(j.title)}</span><span class="by">${esc(j.meta)}</span>
+  <a class="title" href="${esc(j.page)}">${esc(j.title)}</a><span class="by">${esc(j.meta)}</span>
   ${j.reason ? `<span class="reason tone-${j.tone}">${esc(j.reason)}</span>` : ''}
 </div>`;
 
@@ -138,14 +149,37 @@ function main(v: View): string {
   </main>`;
 }
 
+const back = '<a class="back" href="/">&larr; OVERVIEW</a>';
+
+const signIn = `<form class="sign-in" data-sign-in>
+  <label for="token" class="label">HELIX TOKEN</label>
+  <input id="token" name="token" type="password" autocomplete="off" spellcheck="false" required>
+  <button type="submit">SIGN IN</button>
+</form>`;
+
+function jobMain(id: number): string {
+  const notice = jobNotice(id, readToken(storage) !== null, state.jobStatus);
+  const j = state.job?.job.id === id ? state.job.job : undefined;
+  const scope = `<div class="scope"><div><div class="label">JOB #${id}</div><h1>${esc(j?.title ?? `Job #${id}`)}</h1></div></div>`;
+  const body = notice ? `<div class="none boxed">${esc(notice.text)}</div>${notice.signIn ? signIn : ''}`
+    : j ? `<div class="mute">${esc([j.repo, j.person, j.state, j.outcome ?? ''].filter(Boolean).join(' · '))}</div>` : '';
+  return `<main class="main">${back}${scope}${body}</main>`;
+}
+
+const peopleMain = (name?: string) => `<main class="main">${back}
+  <div class="scope"><div><div class="label">${name ? 'PERSON' : 'PEOPLE'}</div><h1>${esc(name ?? 'People')}</h1></div></div>
+  <div class="none boxed">This page is coming: who is on this Helix and what each person has run.</div>
+</main>`;
+
 function page(): string {
   // While Helix is out of reach the clock it was last read at stands still, and so does every count of time.
   const now = (state.offline && state.heard ? state.heard.getTime() : Date.now()) + state.skew;
   const v = state.display ? view(state.display, picked(), now) : undefined;
+  const body = at.page === 'job' ? jobMain(at.id) : at.page === 'people' ? peopleMain(at.name) : v ? `${nav(v)}${main(v)}` : '';
   return [
     header(v),
     state.offline ? offline() : '',
-    v ? `<div class="body">${nav(v)}${main(v)}</div>` : '',
+    body ? `<div class="body">${body}</div>` : '',
   ].join('');
 }
 
@@ -191,10 +225,20 @@ function draw(): void {
 
 let timer = 0;
 
+/** A job page's data, with the token as it is kept now; a token Helix refuses is forgotten. */
+async function readJob(id: number): Promise<void> {
+  const token = readToken(storage);
+  if (!token) return;
+  const res = await fetch(`/jobs/${id}/page-data`, { cache: 'no-store', headers: { authorization: `Bearer ${token}` } });
+  state.jobStatus = res.status;
+  if (res.status === 401) forgetToken(storage);
+  if (res.ok) state.job = (await res.json()) as JobPage;
+}
+
 async function poll(): Promise<void> {
   window.clearTimeout(timer);
   try {
-    const res = await fetch('/display', { cache: 'no-store' });
+    const [res] = await Promise.all([fetch('/display', { cache: 'no-store' }), at.page === 'job' ? readJob(at.id) : undefined]);
     if (!res.ok) throw new Error(`Helix answered ${res.status}`);
     const display = (await res.json()) as Display;
     Object.assign(state, { display, skew: Date.parse(display.at) - Date.now(), offline: false, heard: new Date() });
@@ -205,7 +249,22 @@ async function poll(): Promise<void> {
   timer = window.setTimeout(() => { void poll(); }, state.offline ? RETRY_MS : POLL_MS);
 }
 
+root.addEventListener('submit', (event) => {
+  const form = (event.target as Element).closest('[data-sign-in]');
+  if (!form) return;
+  event.preventDefault();
+  keepToken(storage, (form.querySelector('input') as HTMLInputElement).value);
+  state.jobStatus = undefined;
+  void poll();
+});
+
 root.addEventListener('click', (event) => {
+  if ((event.target as Element).closest('[data-sign-out]')) {
+    forgetToken(storage);
+    Object.assign(state, { job: undefined, jobStatus: undefined });
+    draw();
+    return;
+  }
   const button = (event.target as Element).closest('[data-pick]');
   if (!button) return;
   const id = button.getAttribute('data-pick')!;
