@@ -27,7 +27,7 @@ export type JobPageView = {
   follow: boolean;
 };
 
-const OUTCOMES: Record<string, string> = { pr: 'pull request', 'draft-pr': 'draft pull request', 'dry-run': 'dry run', 'needs-input': 'needs input', failed: 'failed' };
+export const OUTCOMES: Record<string, string> = { pr: 'pull request', 'draft-pr': 'draft pull request', 'dry-run': 'dry run', 'needs-input': 'needs input', failed: 'failed' };
 const CHECK: Record<string, [string, Tone]> = { ok: ['ok', 'ink'], fail: ['FAIL', 'fail'], skip: ['skip', 'mute'] };
 const SEVERITY: Record<string, Tone> = { blocker: 'fail', 'should-fix': 'ask', note: 'mute' };
 

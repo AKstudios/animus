@@ -5,9 +5,9 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
 import { jobView } from '../../plugin/display/job-view.ts';
-import { peopleNotice, personPage } from '../../plugin/display/pages.ts';
-import { peopleView } from '../../plugin/display/people-view.ts';
-import type { Display, DisplayJob, JobPage, PeoplePage } from '../../plugin/display/shape.ts';
+import { peopleNotice, personNotice, personPage } from '../../plugin/display/pages.ts';
+import { peopleView, personView } from '../../plugin/display/people-view.ts';
+import type { Display, DisplayJob, JobPage, PeoplePage, PersonPage } from '../../plugin/display/shape.ts';
 import { view } from '../../plugin/display/view.ts';
 import { hashToken, type Config } from '../src/config.ts';
 import { serve } from '../src/server.ts';
@@ -35,7 +35,7 @@ async function helix() {
   await new Promise<void>((r) => { server.listen(0, '127.0.0.1', r); });
   const url = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
   const get = (path: string, token?: string) => fetch(new URL(path, url), token ? { headers: { authorization: `Bearer ${token}` } } : {});
-  return { get, stop: () => { supervisor.stop(); server.close(); store.close(); } };
+  return { get, store, stop: () => { supervisor.stop(); server.close(); store.close(); } };
 }
 
 // Protects: criterion 2, the people list. Fails when: a person is left off, a number is wrong, a person from before joined was kept shows a date, or Helix answers without a token.
@@ -90,4 +90,60 @@ test('the people list without a token, or with one Helix refused, says to sign i
   assert.match(peopleNotice(false)!, /^Sign in to see who is on this Helix/);
   assert.match(peopleNotice(false, 401)!, /^Helix did not take that token/);
   assert.equal(peopleNotice(true), undefined);
+});
+
+// Protects: criterion 3. Fails when: numbers, jobs newest first with their job page links (also one from before activity was kept, job 1 has none), or activity newest first are wrong, or a token is not needed.
+test('a person\'s page shows their numbers, their jobs newest first linking to their job pages, and their activity newest first', async () => {
+  const h = await helix();
+  h.store.record('ana', 'answered', { job: 1, answer: 'Use the second one' });
+  const [none, ok] = await Promise.all([h.get('/people/ana/page-data'), h.get('/people/ana/page-data', 'ben-token')]);
+  const v = personView((await ok.json()) as PersonPage);
+  h.stop();
+
+  assert.deepEqual([none.status, ok.status], [401, 200]);
+  assert.deepEqual(v.facts, [
+    { k: 'github', v: 'ana-gh' }, { k: 'joined', v: '2026-11-10' }, { k: 'jobs', v: '2' }, { k: 'PRs opened', v: '1' }, { k: 'spent', v: '$3.50' },
+    { k: 'last activity', v: v.facts.at(-1)!.v },
+  ]);
+  assert.match(v.facts.at(-1)!.v, / · answered a job$/);
+  assert.equal(v.left, undefined);
+  assert.deepEqual(v.jobs.map((j) => [j.id, j.title, j.page, j.tag]), [[2, 'Two', '/jobs/2', 'failed'], [1, 'One', '/jobs/1', 'pull request']]);
+  assert.deepEqual(v.activity.map((a) => [a.text, a.page, a.note]), [['answered a job #1', '/jobs/1', 'Use the second one'], ['submitted a job #2 for app', '/jobs/2', undefined]]);
+});
+
+// Protects: criterion 3, thirty at a time. Fails when: more than thirty jobs come at once, the next thirty repeat or skip one, or the page does not say whether older ones remain.
+test('a person\'s jobs come thirty at a time, newest first, each batch starting where the last stopped', async () => {
+  const h = await helix();
+  for (let i = 0; i < 32; i++) h.store.add({ state: 'ended', repo: 'app', spec: 'x', draft: false, submitted: '2026-11-17T10:00:00Z', person: 'cy', title: `Cy ${i}` });
+  const first = (await (await h.get('/people/cy/page-data', 'cy-token')).json()) as PersonPage;
+  const second = (await (await h.get('/people/cy/page-data?before=' + first.jobList.at(-1)!.id, 'cy-token')).json()) as PersonPage;
+  h.stop();
+
+  assert.deepEqual([first.jobList.length, first.jobList[0]!.title, first.more], [30, 'Cy 31', true]);
+  assert.deepEqual([second.jobList.map((j) => j.title), second.more], [['Cy 1', 'Cy 0'], false]);
+  assert.equal(personView(first, { jobs: second.jobList, more: second.more }).jobs.length, 32);
+});
+
+// Protects: a person who left keeps their page. Fails when: it is a 404, the jobs and activity are dropped, or it does not say they left.
+test('a person who left still has a page that says when they left; a name Helix never heard of has none', async () => {
+  const h = await helix();
+  h.store.record('ana', 'left');
+  h.store.dropPerson('ana');
+  const res = await h.get('/people/ana/page-data', 'ben-token');
+  const v = personView((await res.json()) as PersonPage);
+  const [ghost, odd] = await Promise.all([h.get('/people/nobody/page-data', 'ben-token'), h.get('/people/%E0%A4%A/page-data', 'ben-token')]);
+  h.stop();
+
+  assert.match(v.left!, /^ana left Helix on \d{4}-\d\d-\d\d\.$/);
+  assert.deepEqual(v.jobs.map((j) => j.id), [2, 1]);
+  assert.equal(v.activity[0]!.text, 'left');
+  assert.deepEqual([ghost.status, odd.status], [404, 404]);
+});
+
+// Protects: the person page says why it shows nothing. Fails when: a signed-out or refused person, or an unknown name, gets no explanation.
+test('a person\'s page without a token says to sign in, and for a name Helix does not know says so', () => {
+  assert.match(personNotice('ana', false)!, /^Sign in to see ana/);
+  assert.match(personNotice('ana', false, 401)!, /^Helix did not take that token/);
+  assert.equal(personNotice('ana', true, 404), 'Helix has never heard of ana.');
+  assert.equal(personNotice('ana', true, 200), undefined);
 });

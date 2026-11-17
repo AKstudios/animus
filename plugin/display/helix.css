@@ -89,7 +89,7 @@ h1, h2, p { margin: 0; }
 .is-offline .rule span, .is-offline .seg.on, .is-offline .cursor, .is-offline .pulse { animation: none; }
 
 /* ------------------------------------------------------------ sign-in */
-.sign-out, .sign-in button { min-height: 36px; padding: 6px 14px; background: transparent; color: var(--ink); border: 1px solid var(--ink); cursor: pointer; font-family: var(--mono); font-size: 13px; letter-spacing: 0.12em; }
+.sign-out, .sign-in button, .more { min-height: 36px; padding: 6px 14px; background: transparent; color: var(--ink); border: 1px solid var(--ink); cursor: pointer; font-family: var(--mono); font-size: 13px; letter-spacing: 0.12em; }
 .sign-in { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 14px; }
 .sign-in input { flex: 0 1 360px; min-width: 0; min-height: 36px; box-sizing: border-box; padding: 6px 10px; background: var(--panel); color: var(--ink); border: 1px solid var(--line); font-family: var(--mono); font-size: 14px; }
 .people { width: 100%; border-collapse: collapse; font-family: var(--mono); font-size: 14px; }

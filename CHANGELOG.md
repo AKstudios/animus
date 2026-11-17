@@ -17,6 +17,10 @@ clients with how to update.
   total spent and last activity, from a new authenticated route,
   `GET /people/page-data`. Every person named on the overview or a job page
   links to `/people/<name>`.
+- `/people/<name>` shows that person's numbers, their jobs newest first thirty
+  at a time, each linking to its job page (those from before activity was kept
+  too), and their activity newest first, and says when they left, from a new
+  authenticated route, `GET /people/<name>/page-data[?before=<job id>]`.
 - The installers take `join <url> <code>`: after setup they run `animus join`
   with them, so one line installs Animus and joins a Helix
   (`curl -fsSL …/install.sh | bash -s -- join <url> <code>`).
