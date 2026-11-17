@@ -132,6 +132,17 @@ that browser keeps and takes out of the address bar. Sign out from the
 header. Do not sign in on a shared wall screen: the token can also submit and
 cancel jobs as you. `/people` and `/people/<name>` are still to come.
 
+A job page shows the job's project, person, state, outcome, pull request,
+cost and times; its spec as submitted; how long it spent in each stage,
+summed over its runs, and its slices when it was cut; the checks of its
+latest gate run, with what a failed one printed; every review round's
+findings; each question it asked with the answer it was given; and Helix's
+log of it. The checks, reviews and questions come from the job's Animus
+folder, which keeps each gate run as `gates/run-<n>.txt`. While the job is
+queued or running the page reads it again every two seconds and keeps the log
+at its end, unless you have scrolled up in it; once it has ended the log is
+there whole.
+
 ## HTTP API
 
 Every route but the display's pages, `/display`, `/version`, `/invite` and

@@ -4,6 +4,7 @@
 // token, sent with each request for its data.
 // It only reads. Sent to the browser with its types stripped (helix/src/ui.ts).
 import { forgetToken, jobNotice, keepToken, readToken, route, takeToken } from './pages.ts';
+import { atEnd, jobView, type JobPageView } from './job-view.ts';
 import type { Display, JobPage } from './shape.ts';
 import { view, type Live, type Project, type Recent, type View, type Waiting } from './view.ts';
 
@@ -157,12 +158,33 @@ const signIn = `<form class="sign-in" data-sign-in>
   <button type="submit">SIGN IN</button>
 </form>`;
 
-function jobMain(id: number): string {
+const pre = (text: string, attrs = '') => `<pre class="text"${attrs}>${esc(text)}</pre>`;
+const none = (text: string) => `<div class="none">${esc(text)}</div>`;
+
+function jobSections(v: JobPageView): string {
+  const stages = `<div class="steps">${v.stages.map((s) => `<div class="step-row${s.on ? ' on' : ''}"><span>${esc(s.name)}</span><span class="mute">${s.on ? 'now' : esc(s.took)}</span></div>`).join('')}</div>`;
+  const slices = v.slices.length ? `<ol class="slices">${v.slices.map((s) => `<li${s.done ? ' class="done"' : ''}><span class="b">${esc(s.title)}</span> <span class="mute">${s.done ? 'done' : ''}</span><div class="mute">${esc(s.delivers)}</div></li>`).join('')}</ol>` : '';
+  const checks = v.checks.map((c) => `<div class="check"><span class="tag tone-${c.tone}">${esc(c.tag)}</span><span class="b">${esc(c.name)}</span><code>${esc(c.command)}</code><span class="mute">${esc(c.detail)}</span>${c.output !== undefined ? pre(c.output) : ''}</div>`).join('');
+  const reviews = v.reviews.map((r) => `<div class="round"><div class="label">${esc(r.title.toUpperCase())}</div><p>${esc(r.summary)}</p>
+    ${r.findings.map((f) => `<div class="finding"><span class="tag tone-${f.tone}">${esc(f.tag)}</span>${f.where ? `<code>${esc(f.where)}</code>` : ''}<p>${esc(f.problem)}</p>${f.fix ? `<p class="mute">${esc(f.fix)}</p>` : ''}</div>`).join('') || none('No findings.')}</div>`).join('');
+  const questions = v.questions.map((q) => `<div class="qa"><p><span class="label">ASKED</span> ${esc(q.question)}</p><p${q.answered ? '' : ' class="tone-ask"'}><span class="label">ANSWERED</span> ${esc(q.answer)}</p></div>`).join('');
+  return [
+    v.reason ? `<pre class="text why">${esc(v.reason)}</pre>` : '',
+    section('stages', 'STAGES', `${stages}${slices}`),
+    section('checks', 'CHECKS', checks || none('No checks have run yet.')),
+    section('review', 'REVIEW', reviews || none('Not reviewed yet.')),
+    section('questions', 'QUESTIONS', questions || none('It has asked nothing.')),
+    section('spec', 'SPEC', v.spec ? pre(v.spec) : none('Helix no longer has the spec.')),
+    section('log', 'LOG', v.log ? pre(v.log, ' data-log') : none('It has printed nothing yet.'), v.follow),
+  ].join('');
+}
+
+function jobMain(id: number, now: number): string {
   const notice = jobNotice(id, readToken(storage) !== null, state.jobStatus);
-  const j = state.job?.job.id === id ? state.job.job : undefined;
-  const scope = `<div class="scope"><div><div class="label">JOB #${id}</div><h1>${esc(j?.title ?? `Job #${id}`)}</h1></div></div>`;
-  const body = notice ? `<div class="none boxed">${esc(notice.text)}</div>${notice.signIn ? signIn : ''}`
-    : j ? `<div class="mute">${esc([j.repo, j.person, j.state, j.outcome ?? ''].filter(Boolean).join(' · '))}</div>` : '';
+  const v = state.job?.job.id === id ? jobView(state.job, now) : undefined;
+  const facts = v ? `<div class="facts">${v.facts.map((f) => `<div><span class="mute">${esc(f.k)}</span> ${f.href ? `<a href="${esc(f.href)}" target="_blank" rel="noopener noreferrer">${esc(f.v)}</a>` : esc(f.v)}</div>`).join('')}</div>` : '';
+  const scope = `<div class="scope"><div><div class="label">JOB #${id}</div><h1>${esc(v?.title ?? `Job #${id}`)}</h1></div>${notice ? '' : facts}</div>`;
+  const body = notice ? `<div class="none boxed">${esc(notice.text)}</div>${notice.signIn ? signIn : ''}` : v ? jobSections(v) : '';
   return `<main class="main">${back}${scope}${body}</main>`;
 }
 
@@ -175,7 +197,7 @@ function page(): string {
   // While Helix is out of reach the clock it was last read at stands still, and so does every count of time.
   const now = (state.offline && state.heard ? state.heard.getTime() : Date.now()) + state.skew;
   const v = state.display ? view(state.display, picked(), now) : undefined;
-  const body = at.page === 'job' ? jobMain(at.id) : at.page === 'people' ? peopleMain(at.name) : v ? `${nav(v)}${main(v)}` : '';
+  const body = at.page === 'job' ? jobMain(at.id, now) : at.page === 'people' ? peopleMain(at.name) : v ? `${nav(v)}${main(v)}` : '';
   return [
     header(v),
     state.offline ? offline() : '',
@@ -215,10 +237,15 @@ function morph(from: Element, to: Element): void {
 }
 
 function draw(): void {
+  // A running job's log keeps to its end, unless the person has scrolled up to read it.
+  const log = root.querySelector('[data-log]');
+  const follow = !log || atEnd(log);
   const next = root.cloneNode(false) as HTMLElement;
   next.className = `hx${state.offline ? ' is-offline' : ''}`;
   next.innerHTML = page();
   morph(root, next);
+  const drawn = root.querySelector('[data-log]');
+  if (drawn && follow && state.job && jobView(state.job, 0).follow) drawn.scrollTop = drawn.scrollHeight;
 }
 
 // ------------------------------------------------------------------- Helix

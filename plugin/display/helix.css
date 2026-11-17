@@ -191,6 +191,20 @@ a.title:hover, a.card-title:hover, .back:hover { text-decoration: underline; }
 .done-row .title { flex: 1 1 240px; font-size: 15px; overflow-wrap: anywhere; }
 .done-row .by { font-family: var(--mono); font-size: 14px; color: var(--mute); }
 .done-row .reason { flex-basis: 100%; padding-left: 62px; font-size: 14px; overflow-wrap: anywhere; }
+/* ------------------------------------------------------------- job page */
+.text { margin: 0; padding: 14px 16px; max-height: 480px; overflow: auto; background: var(--panel); border: 1px solid var(--line); font-family: var(--mono); font-size: 13px; line-height: 1.5; white-space: pre-wrap; overflow-wrap: anywhere; }
+.text.why { border-left: 3px solid var(--fail-ink); }
+.steps { display: flex; flex-direction: column; font-family: var(--mono); font-size: 14px; }
+.step-row { display: flex; justify-content: space-between; gap: 16px; padding: 8px 4px; border-bottom: 1px solid var(--line); }
+.step-row.on { color: var(--acc-ink); font-weight: 700; }
+.slices { margin: 0; padding-left: 24px; display: flex; flex-direction: column; gap: 8px; font-size: 15px; }
+.slices .done { color: var(--mute); }
+.check, .finding { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 16px; padding: 8px 4px; border-bottom: 1px solid var(--line); font-size: 15px; }
+.check .tag, .finding .tag { font-family: var(--mono); font-size: 13px; letter-spacing: 0.08em; font-weight: 700; width: 100px; }
+.check code, .finding code { font-family: var(--mono); font-size: 13px; color: var(--mute); overflow-wrap: anywhere; }
+.check .text, .finding p { flex-basis: 100%; }
+.round { display: flex; flex-direction: column; gap: 8px; }
+.qa { display: flex; flex-direction: column; gap: 6px; padding: 8px 4px; border-bottom: 1px solid var(--line); overflow-wrap: anywhere; }
 .tone-ink { color: var(--ink); }
 .tone-mute { color: var(--mute); }
 .tone-ask { color: var(--ask-ink); }

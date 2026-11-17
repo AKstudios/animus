@@ -13,6 +13,11 @@ clients with how to update.
   in the address as `#token=…`). Its data comes from a new authenticated
   route, `GET /jobs/<id>/page-data`; `/display` is unchanged and still
   needs no token. `/people` and `/people/<name>` say they are coming.
+- A job page shows the job's facts, its spec as submitted, its time in each
+  stage and its slices, its latest checks with a failed one's output, the
+  reviewer's findings, its questions and answers, and its log, which keeps
+  to its end while the job runs. A gate run's file, `gates/run-<n>.txt`,
+  now ends with all that each check printed.
 
 ## 0.3.8 (2026-11-17)
 
