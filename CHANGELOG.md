@@ -8,6 +8,10 @@ clients with how to update.
 
 ## Unreleased
 
+- The installers take `join <url> <code>`: after setup they run `animus join`
+  with them, so one line installs Animus and joins a Helix
+  (`curl -fsSL …/install.sh | bash -s -- join <url> <code>`).
+
 ## 0.3.8 (2026-11-17)
 
 - The installers and `animus setup` find Animus's marketplace by its GitHub
