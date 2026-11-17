@@ -18,7 +18,9 @@ import { loadProfile } from '../../plugin/src/profile.ts';
 import { checkInChild, checkProject, failInterruptedChecks, forgetProject, setupHere, setupInContainer } from './projects.ts';
 import { INVITE_HOURS, invite, takeOff } from './join.ts';
 import { ask } from '../../plugin/src/join.ts';
-import { slackEnvFile, slackSetup, slackWeb } from './slack-api.ts';
+import { describeInvite, describeRemoval } from '../../plugin/src/remote.ts';
+import { moveSlackOwner, setOwner } from './owner.ts';
+import { slackEnvFile, slackOwner, slackSetup, slackWeb } from './slack-api.ts';
 import { startSlack } from './slack-socket.ts';
 import { slackBot, slackInvite, slackNotifier } from './slack.ts';
 import { serve } from './server.ts';
@@ -77,6 +79,13 @@ const USAGE = `helix: runs Animus jobs for several people on one machine
         in one line that installs Animus and joins; it needs --github, and
         joining links that Slack user to the person.
         Run again for a new code; the earlier one stops working.
+        The owner runs the same from their laptop: animus invite.
+  helix owner <person>
+        Make someone who has joined the owner, in config.yaml: from their
+        own laptop they invite and remove people (animus invite, animus
+        remove-person), remove any project, cancel any job and see every
+        job (animus status --all). The owner cannot leave or be removed
+        until another is named.
   helix add-person <name> [--env-file <file>]
         Let a person submit, and print their token once. The file holds
         KEY=VALUE lines set for their jobs only (CLAUDE_CODE_OAUTH_TOKEN, GH_TOKEN).
@@ -85,6 +94,7 @@ const USAGE = `helix: runs Animus jobs for several people on one machine
         Take a person off: their token stops working, their queued and
         running jobs are cancelled, and their credentials file under
         ${helixHome()} is deleted. Prints what is left to do elsewhere.
+        The owner runs the same from their laptop: animus remove-person.
   helix remove-repo <name>
         Stop taking jobs for a project, whoever added it. People's clones of
         it are deleted, and Helix's own when animus project add made it; one
@@ -108,9 +118,10 @@ const USAGE = `helix: runs Animus jobs for several people on one machine
         logs and transcripts are kept. helix serve runs it once a day.
   helix slack setup
         Turn on the Slack bot: asks for the Slack app's bot token (xoxb-),
-        its app token (xapp-) and your own Slack member ID (U…), the bot's
-        owner. Both tokens are tried against Slack, then kept in
-        ${helixHome()}/credentials/slack.env; config.yaml gets slack: {enabled, owner}.
+        its app token (xapp-) and the owner's Slack member ID (U…), which
+        it links to the owner (helix owner first). Both tokens are tried
+        against Slack, then kept in ${helixHome()}/credentials/slack.env;
+        config.yaml gets slack: {enabled: true}.
   helix check [<name>]
         Try each person's credentials against GitHub and Claude: who the
         GitHub token is, when it ends, whether it may push to each repository,
@@ -126,6 +137,8 @@ function main(argv: string[]): number | undefined | Promise<number> {
   switch (command) {
     case 'serve': {
       const store = openHelix();
+      const movedSlack = moveSlackOwner(store);
+      if (movedSlack) console.error(`helix: ${movedSlack}`);
       const config = loadConfig();
       const home = helixHome();
       // A GitHub token that ended fails the job before it starts, with the reason.
@@ -165,7 +178,7 @@ function main(argv: string[]): number | undefined | Promise<number> {
       const slack = startSlack(config, { say });
       const supervisor = supervise({ store, config, home, preflight, say, ...isolation, ...(slack ? { notify: slackNotifier(slack, store, say) } : {}) });
       if (slack) slackBot(slack, { store, config, supervisor });
-      const server = serve({ config, store, supervisor, home, startCheck: checkInChild(store, home, say), ...(config.container ? { reap: removeContainer } : {}) });
+      const server = serve({ config, store, supervisor, home, startCheck: checkInChild(store, home, say), ...(config.container ? { reap: removeContainer } : {}), ...(slack ? { slack } : {}) });
       server.listen(config.port, config.host, () => console.error(`helix ${animusVersion()}: listening on http://${config.host}:${config.port}, ${config.slots} job(s) at once${config.container ? ', each in a container' : ''}, projects: ${Object.keys(readyRepos(store)).join(', ') || 'none yet'}`));
       // Someone changed the slots or the container limits: the same config object, so everything sees it at once.
       watchFile(configFile(), { interval: 2000 }, () => {
@@ -229,20 +242,9 @@ function main(argv: string[]): number | undefined | Promise<number> {
     case 'remove-person': {
       const name = positionals[0];
       if (!name) throw new AnimusError('usage: helix remove-person <name>');
-      const contained = Boolean(loadConfig().container);
-      const gone = withStore((store) => takeOff(name, store, contained ? removeContainer : undefined));
-      const { kept, cancelled, folder } = gone;
-      console.log([
-        `${name} is off Helix: their token no longer works${cancelled.length ? `, and job(s) ${cancelled.map((j) => j.id).join(', ')} were cancelled` : ''}.`,
-        kept ? `Their credentials file is outside ${helixHome()}, so it was left: delete ${kept}` : 'Their credentials file is deleted.',
-        `Their folder ${folder} (clones, job state, Claude config) is deleted.`,
-        '',
-        'Left to do elsewhere:',
-        '  - GitHub: revoke the token they gave Helix (they can, or an org owner under the org\'s personal access tokens), and take them off the organisation or repositories.',
-        '  - Claude: take them off your Claude organisation, or have them revoke the token they gave Helix.',
-        '  - Tailscale: remove them from the tailnet, which takes their devices off it.',
-        '  - Their open animus/* pull requests: close or take over; animus cleanup removes the branches of closed ones.',
-      ].join('\n'));
+      const config = loadConfig();
+      const { cancelled, ...gone } = withStore((store) => takeOff(name, store, config, config.container ? removeContainer : undefined));
+      console.log(describeRemoval({ name, cancelled: cancelled.map((j) => j.id), ...gone, home: helixHome() }));
       return 0;
     }
     case 'invite': {
@@ -250,15 +252,14 @@ function main(argv: string[]): number | undefined | Promise<number> {
       if (!name) throw new AnimusError('usage: helix invite <name> [--github <login>] [--slack <member-id>]');
       if (values.slack) return inviteOnSlack(name, values.github, values.slack);
       const made = withStore((store) => invite(store, name, values.github ? { github: values.github } : {}));
-      console.log([
-        `${name}'s code, shown this once, good until ${made.expires.slice(0, 16).replace('T', ' ')} UTC:`,
-        '',
-        `  ${made.code}`,
-        '',
-        'They install the animus plugin in Claude Code, then run:',
-        '',
-        `  animus join ${loadConfig().url ?? '<the address they reach Helix at; url: in config.yaml fills it in here>'} ${made.code}`,
-      ].join('\n'));
+      console.log(describeInvite({ name, ...made }, loadConfig().url));
+      return 0;
+    }
+    case 'owner': {
+      const name = positionals[0];
+      if (!name) throw new AnimusError('usage: helix owner <person>');
+      withStore((store) => setOwner(store, name));
+      console.log(`${name} is the owner of this Helix: from their own laptop they may invite and remove people, remove any project, cancel any job and see every job.`);
       return 0;
     }
     case 'verify': {
@@ -325,12 +326,16 @@ function main(argv: string[]): number | undefined | Promise<number> {
 
 /** helix slack setup: the tokens are asked for, never taken on the command line. */
 async function setupSlack(): Promise<number> {
+  const owner = slackOwner();
   if (!process.stdin.isTTY) throw new AnimusError('helix slack setup asks for two tokens, so it runs in a terminal');
   const bot = await ask('Bot User OAuth Token (xoxb-..., under OAuth & Permissions): ', true);
   const app = await ask('App-Level Token (xapp-..., under Basic Information, with connections:write): ', true);
-  const owner = await ask('Your Slack member ID (U..., in your profile under ⋮, Copy member ID): ');
-  const { team } = await slackSetup({ bot, app, owner });
-  console.log(`Slack works${team ? ` for ${team}` : ''}: the tokens are in ${slackEnvFile()}, and config.yaml has slack: {enabled: true, owner: ${owner.trim()}}. Restart helix serve to connect.`);
+  const user = await ask(`${owner}'s Slack member ID, as the owner (U..., in their profile under ⋮, Copy member ID): `);
+  const store = openHelix();
+  try {
+    const { team } = await slackSetup(store, { bot, app, user });
+    console.log(`Slack works${team ? ` for ${team}` : ''}: the tokens are in ${slackEnvFile()}, config.yaml has slack: {enabled: true}, and ${user.trim()} is linked to ${owner}, the owner. Restart helix serve to connect.`);
+  } finally { store.close(); }
   return 0;
 }
 
@@ -342,7 +347,7 @@ async function inviteOnSlack(name: string, github: string | undefined, user: str
   const store = openHelix();
   try {
     const made = await slackInvite(slackWeb(bot), { store, config: loadConfig() }, name, { ...(github ? { github } : {}), slack: user });
-    console.log(`The Slack bot sent ${user} the line that installs Animus and joins as ${name}; its code is good until ${made.expires.slice(0, 16).replace('T', ' ')} UTC.`);
+    console.log(describeInvite({ name, expires: made.expires, slack: user }, undefined));
     return 0;
   } finally { store.close(); }
 }

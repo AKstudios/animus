@@ -1,12 +1,14 @@
 // The Slack bot's core: what it does with each event Slack sends, through a
 // transport (slack-api.ts), so tests drive it without Slack. A Slack user with
 // no Slack link is told, privately, to ask the owner for an invite, and
-// nothing they send is kept. The owner may use the bot without a link. A
-// linked person's jobs post their progress to them, one DM thread per job.
+// nothing they send is kept. The owner is the Slack user linked to the owner
+// person. A linked person's jobs post their progress to them, one DM thread
+// per job.
 import { AnimusError } from '../../plugin/src/proc.ts';
 import { SOURCE } from '../../plugin/src/setup.ts';
 import type { Config } from './config.ts';
 import { INVITE_HOURS, invite } from './join.ts';
+import { isOwner } from './owner.ts';
 import { SLACK_USER, type SlackEvent, type Transport } from './slack-api.ts';
 import type { HelixJob, Store } from './store.ts';
 import type { Supervisor } from './supervisor.ts';
@@ -31,25 +33,26 @@ const cancelBlocks = (id: number, text: string) => [
 const threadLink = (t: { channel: string; ts: string }) => `https://slack.com/app_redirect?channel=${t.channel}&message_ts=${t.ts}`;
 
 /**
- * Answers what reaches the bot. The owner is read from config at each event,
- * so a config edit changes it. Without `supervisor`, jobs can be neither
- * answered nor cancelled from Slack.
+ * Answers what reaches the bot. The owner and their Slack link are read at
+ * each event, so helix owner or a new link changes who it is. Without
+ * `supervisor`, jobs can be neither answered nor cancelled from Slack.
  */
 export function slackBot(transport: Transport, opts: Core & { supervisor?: Jobs }): void {
   const { store, config, supervisor } = opts;
   transport.onEvent(async (event) => {
-    const owner = config.slack?.owner ?? '';
+    const ownerUser = config.owner ? store.slackOf(config.owner) : undefined;
+    const owner = ownerUser ? `<@${ownerUser}>` : 'the owner';
     // A command or button may come from a channel the bot is not in, where Slack refuses postEphemeral; its response_url works anywhere.
     const reply = (text: string) => event.kind === 'message' ? transport.ephemeral(event.channel, event.user, text) : transport.respond(event.responseUrl, text);
-    const isOwner = event.user === owner;
     const person = store.personBySlack(event.user);
-    if (!isOwner && !person) return reply(`You're not on this Helix. Ask <@${owner}> for an invite.`);
+    if (!person) return reply(`You're not on this Helix. Ask ${owner} for an invite.`);
+    const byOwner = isOwner(config, person);
     if (event.kind === 'message') return supervisor && answer(transport, store, supervisor, event, person);
     if (event.kind === 'action') {
       if (event.action !== CANCEL || !supervisor) return;
       const job = store.get(Number(event.value));
       if (!job) return reply(`There is no job ${event.value}.`);
-      if (!isOwner && job.person !== person) return reply(`Only ${job.person} or <@${owner}> may cancel job ${job.id}.`);
+      if (!byOwner && job.person !== person) return reply(`Only ${job.person} or ${owner} may cancel job ${job.id}.`);
       try {
         supervisor.cancel(job.person, job.id);
       } catch (err) {
@@ -63,9 +66,9 @@ export function slackBot(transport: Transport, opts: Core & { supervisor?: Jobs 
     const [sub, ...args] = event.text.trim().split(/\s+/);
     if (sub === 'jobs') return reply(jobsCommand(store, person));
     if (sub === 'status') return reply(statusCommand(store, config));
-    if (sub === 'invite') return reply(isOwner ? await inviteCommand(transport, opts, args) : `Only <@${owner}> invites people to this Helix.`);
-    if (sub === 'link') return reply(isOwner ? link(store, args) : `Only <@${owner}> links Slack users to people on this Helix.`);
-    if (sub === 'notify') return reply(notifyCommand(store, event.user, args));
+    if (sub === 'invite') return reply(byOwner ? await inviteCommand(transport, opts, args) : `Only ${owner} invites people to this Helix.`);
+    if (sub === 'link') return reply(byOwner ? link(store, args) : `Only ${owner} links Slack users to people on this Helix.`);
+    if (sub === 'notify') return reply(notifyCommand(store, person, args));
     return reply(USAGE);
   });
 }
@@ -76,8 +79,8 @@ export function slackBot(transport: Transport, opts: Core & { supervisor?: Jobs 
  * with D), or in a channel one that mentions the bot. Anything else is not
  * for the bot and is ignored without a word.
  */
-async function answer(transport: Transport, store: Store, supervisor: Jobs, event: Extract<SlackEvent, { kind: 'message' }>, person: string | undefined): Promise<void> {
-  if (!event.thread || !person || !(event.mentioned || event.channel.startsWith('D'))) return;
+async function answer(transport: Transport, store: Store, supervisor: Jobs, event: Extract<SlackEvent, { kind: 'message' }>, person: string): Promise<void> {
+  if (!event.thread || !(event.mentioned || event.channel.startsWith('D'))) return;
   const id = store.jobOfThread(event.channel, event.thread);
   const job = id === undefined ? undefined : store.get(id);
   const text = event.text.replace(/<@[A-Z0-9]+>/g, '').trim();
@@ -87,8 +90,7 @@ async function answer(transport: Transport, store: Store, supervisor: Jobs, even
 }
 
 /** /helix jobs: the person's jobs that are not over or wait for an answer, each with where to follow it. */
-function jobsCommand(store: Store, person: string | undefined): string {
-  if (!person) return 'Your Slack user is linked to no person on this Helix, so you have no jobs: /helix link @you <person> first.';
+function jobsCommand(store: Store, person: string): string {
   const mine = [...store.inState('running'), ...store.inState('queued'), ...store.inState('ended').filter((j) => j.outcome === 'needs-input')].filter((j) => j.person === person);
   if (!mine.length) return 'You have no queued, running or waiting jobs.';
   return mine.map((j) => {
@@ -104,10 +106,7 @@ function statusCommand(store: Store, config: Config): string {
 }
 
 /** /helix notify off|on: whether the sender's jobs post their progress to them. */
-function notifyCommand(store: Store, user: string, args: string[]): string {
-  const name = store.personBySlack(user);
-  // Only the owner gets here without a link.
-  if (!name) return 'Your Slack user is linked to no person on this Helix, so no job posts to you: /helix link @you <person> first.';
+function notifyCommand(store: Store, name: string, args: string[]): string {
   if (args.length !== 1 || (args[0] !== 'on' && args[0] !== 'off')) return USAGE;
   store.setNotify(name, args[0] === 'on');
   return args[0] === 'on' ? 'Job notifications are on: each of your jobs posts its progress to a thread in our DM.' : 'Job notifications are off. /helix notify on starts them again.';

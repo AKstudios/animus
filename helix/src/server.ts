@@ -1,23 +1,30 @@
 // Helix's HTTP API: five actions on jobs (submit, status, result, cancel,
 // answer) and three on projects (add, list, remove), over JSON, for the
-// private network only. Each of those carries a person's token; a job can be
-// cancelled or answered only by whoever submitted it, and a project removed
-// only by whoever added it (projects.ts).
+// private network only. Each of those carries a person's token; the queue
+// lists a person's own jobs, a job can be answered only by whoever submitted
+// it and cancelled by them or the owner, and a project removed only by whoever
+// added it or the owner (projects.ts).
 // Joining (invite, join) carries a one-time code instead, and leave the
-// person's own token (join.ts).
+// person's own token (join.ts). Inviting and removing people (POST /people,
+// DELETE /people/<name>) and every person's queue (GET /jobs?all) are the
+// owner's alone (owner.ts).
 // It also serves the display: its pages at / and /jobs/<id> (ui.ts), what the
 // overview shows at /display, and a job page's data and screenshots, with a
 // token, at /jobs/<id>/page-data and /jobs/<id>/shots/<name>, and the people
 // list's at /people/page-data and a person's at /people/<name>/page-data.
 import { createServer, type IncomingMessage, type Server } from 'node:http';
-import { VERSION_HEADER } from '../../plugin/src/remote.ts';
+import { AnimusError } from '../../plugin/src/proc.ts';
+import { VERSION_HEADER, type MadeInvite, type RemovedPerson } from '../../plugin/src/remote.ts';
 import { animusVersion, compatible } from '../../plugin/src/version.ts';
 import { parseSkills, type PersonalSkill } from '../../plugin/src/personal.ts';
 import { hashToken, helixHome, type Config } from './config.ts';
 import { display, jobPage, jobShot, peoplePage, personPage } from './display.ts';
-import { inviteDetails, joinHelix, takeOff, verifyInChild, type Verify } from './join.ts';
+import { invite, inviteDetails, joinHelix, takeOff, verifyInChild, type Verify } from './join.ts';
 import { openPrs, type ListPrs } from './open-prs.ts';
+import { isOwner, requireOwner } from './owner.ts';
 import { addProject, checkInChild, projectView, removeProject, type StartCheck } from './projects.ts';
+import type { Transport } from './slack-api.ts';
+import { slackInvite } from './slack.ts';
 import type { Store } from './store.ts';
 import { Refused, type Submission, type Supervisor } from './supervisor.ts';
 import { asset, CSP } from '../../plugin/src/assets.ts';
@@ -53,6 +60,8 @@ export function serve(opts: {
   startCheck?: StartCheck;
   /** Helix's home: where projects' clones and checks go. */
   home?: string;
+  /** The Slack bot, when it runs: how the owner's animus invite --slack is sent. */
+  slack?: Pick<Transport, 'dm' | 'post'>;
   /** How a project's open PRs are listed on GitHub, with a person's token; by default GitHub's API. */
   listPrs?: ListPrs;
 }): Server {
@@ -61,6 +70,23 @@ export function serve(opts: {
   const home = opts.home ?? helixHome();
   const startCheck = opts.startCheck ?? checkInChild(store, home);
   const version = animusVersion();
+  /** `animus invite`: what helix invite does on the machine, the Slack DM through this Helix's own bot. */
+  const invitePerson = async (b: Record<string, unknown>): Promise<MadeInvite> => {
+    const { name, github, slack } = b;
+    if (typeof name !== 'string') throw new Refused(400, 'name is who the invite is for');
+    if ((github !== undefined && typeof github !== 'string') || (slack !== undefined && typeof slack !== 'string')) throw new Refused(400, 'github and slack are text');
+    const who = { ...(github ? { github } : {}), ...(slack ? { slack } : {}) };
+    try {
+      if (!slack) return { name, ...invite(store, name, who), ...(config.url ? { url: config.url } : {}) };
+      if (!opts.slack) throw new Refused(409, 'the Slack bot is not running on this Helix: helix slack setup on the machine, then restart helix serve');
+      const { expires } = await slackInvite(opts.slack, { store, config }, name, { ...who, slack });
+      return { name, expires, slack };
+    } catch (err) {
+      // A bad name, or no url for the join line: the owner's to fix, not Helix's failure.
+      if (err instanceof AnimusError && !(err instanceof Refused)) throw new Refused(400, err.message);
+      throw err;
+    }
+  };
   const prs = openPrs({ store, ...(opts.listPrs ? { list: opts.listPrs } : {}) });
   return createServer((req, res) => {
     const send = (status: number, value: unknown) => {
@@ -120,22 +146,36 @@ export function serve(opts: {
         return res.end(image.body);
       }
       if (!current) return outdated();
+      if (req.method === 'POST' && url.pathname === '/people') {
+        requireOwner(config, person, 'invite people');
+        return send(201, await invitePerson(await body(req)));
+      }
       if (req.method === 'POST' && url.pathname === '/leave') {
-        const { cancelled, kept } = takeOff(person, store, opts.reap);
+        const { cancelled, kept } = takeOff(person, store, config, opts.reap);
         return send(200, { name: person, cancelled: cancelled.map((j) => j.id), ...(kept ? { kept } : {}) });
       }
       const [, root, id, action] = url.pathname.split('/');
+      if (root === 'people' && id && !action && req.method === 'DELETE') {
+        requireOwner(config, person, 'remove people');
+        const name = decodeURIComponent(id);
+        if (!store.person(name)) throw new Refused(404, `Helix has no person named ${name}`);
+        const { cancelled, ...gone } = takeOff(name, store, config, opts.reap);
+        return send(200, { name, cancelled: cancelled.map((j) => j.id), ...gone, home } satisfies RemovedPerson);
+      }
       if (root === 'projects') {
         const name = id ? decodeURIComponent(id) : undefined;
         if (!name && req.method === 'GET') return send(200, { projects: store.projects().map(({ dir: _dir, ...p }) => p) });
         if (!name && req.method === 'POST') { const { dir: _dir, ...p } = addProject({ store, home, startCheck }, person, await body(req)); return send(202, p); }
         if (name && !action && req.method === 'GET') { const { dir: _dir, ...p } = projectView(store, home, name); return send(200, p); }
-        if (name && !action && req.method === 'DELETE') { const { dir: _dir, ...p } = removeProject({ store, home }, person, name); return send(200, p); }
+        if (name && !action && req.method === 'DELETE') { const { dir: _dir, ...p } = removeProject({ store, home, config }, person, name); return send(200, p); }
         return send(404, { error: `nothing at ${req.method} ${url.pathname}` });
       }
       if (root !== 'jobs') return send(404, { error: `nothing at ${url.pathname}` });
       if (!id) {
-        if (req.method === 'GET') return send(200, { slots: config.slots, jobs: store.list() });
+        if (req.method === 'GET') {
+          if (url.searchParams.has('all')) requireOwner(config, person, 'see every job');
+          return send(200, { slots: config.slots, jobs: url.searchParams.has('all') ? store.list() : store.list().filter((j) => j.person === person) });
+        }
         if (req.method === 'POST') {
           const b = await body(req);
           if (typeof b.repo !== 'string' || typeof b.spec !== 'string') throw new Refused(400, 'a submission needs repo (its name here) and spec (the file\'s text)');
@@ -151,7 +191,8 @@ export function serve(opts: {
           const job = store.get(n);
           return job ? send(200, { ...job, log: supervisor.log(n) }) : send(404, { error: `no job ${n}` });
         }
-        if (req.method === 'POST' && action === 'cancel') return send(200, supervisor.cancel(person, n));
+        // The owner cancels anyone's job as if it were theirs, as the Slack owner's Cancel button does.
+        if (req.method === 'POST' && action === 'cancel') return send(200, supervisor.cancel(isOwner(config, person) ? (store.get(n)?.person ?? person) : person, n));
         if (req.method === 'POST' && action === 'answer') {
           const b = await body(req);
           if (typeof b.answer !== 'string' || !b.answer.trim()) throw new Refused(400, 'answer must be text');

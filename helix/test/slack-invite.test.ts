@@ -9,15 +9,17 @@ import { slackBot, slackInvite } from '../src/slack.ts';
 import { openStore } from '../src/store.ts';
 import { fakeTransport } from './fake-slack.ts';
 
-const CONFIG: Config = { host: '127.0.0.1', port: 0, slots: 1, url: 'https://helix.example.ts.net', slack: { enabled: true, owner: 'U0OWNER' } };
+const CONFIG: Config = { host: '127.0.0.1', port: 0, slots: 1, url: 'https://helix.example.ts.net', owner: 'ajmal', slack: { enabled: true } };
 const NOT_ON = 'You\'re not on this Helix. Ask <@U0OWNER> for an invite.';
 const URL = 'https://hooks.slack.com/commands/T0/1/x';
 
-/** A Helix with ana on it, and the bot's core listening on a fake transport. */
+/** A Helix with ana on it and ajmal its owner, linked to U0OWNER, and the bot's core listening on a fake transport. */
 function helix() {
   process.env.HELIX_HOME = mkdtempSync(join(tmpdir(), 'helix-slack-invite-'));
   const store = openStore(join(process.env.HELIX_HOME, 'helix.db'));
   store.putPerson('ana', { token_sha256: hashToken('ana-token') });
+  store.putPerson('ajmal', { token_sha256: hashToken('ajmal-token') });
+  store.linkSlack('ajmal', 'U0OWNER');
   const slack = fakeTransport();
   slackBot(slack.transport, { store, config: CONFIG });
   return { store, slack };
@@ -114,7 +116,7 @@ test('a person taken off Helix loses their Slack link, and the bot then treats t
   const { store, slack } = helix();
   store.linkSlack('ana', 'U0ANA');
 
-  takeOff('ana', store);
+  takeOff('ana', store, {});
   await slack.deliver({ kind: 'message', user: 'U0ANA', channel: 'D0ANA', text: 'hello' });
 
   assert.equal(store.personBySlack('U0ANA'), undefined);

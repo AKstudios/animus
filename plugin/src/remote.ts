@@ -72,7 +72,8 @@ export async function helixVersion(url: string): Promise<string> {
 
 export type SentSkill = { name: string; roles: string[]; types?: string[]; text: string };
 export const submit = (s: { repo: string; spec: string; name: string; draft?: boolean; skills?: SentSkill[] }) => call<RemoteJob>('POST', '/jobs', s);
-export const jobs = () => call<{ slots: number; jobs: RemoteJob[] }>('GET', '/jobs');
+/** The person's own jobs; with all, every person's, which only the owner may see. */
+export const jobs = (all = false) => call<{ slots: number; jobs: RemoteJob[] }>('GET', all ? '/jobs?all' : '/jobs');
 export const job = (id: string) => call<RemoteJob>('GET', `/jobs/${encodeURIComponent(id)}`);
 export const cancel = (id: string) => call<RemoteJob>('POST', `/jobs/${encodeURIComponent(id)}/cancel`);
 export const answer = (id: string, text: string) => call<RemoteJob>('POST', `/jobs/${encodeURIComponent(id)}/answer`, { answer: text });
@@ -96,6 +97,46 @@ export const leave = () => call<{ name: string; cancelled: number[]; kept?: stri
 /** What an invite is for: asked with its code, before any token exists. */
 export type InviteDetails = { name: string; github?: string; expires: string; repos: { name: string; url: string }[] };
 export const inviteDetails = (url: string, code: string) => request<InviteDetails>('POST', url, '/invite', undefined, { code });
+/** An invite Helix made: its code, or the Slack user its bot sent it to; url is where Helix says people reach it. */
+export type MadeInvite = { name: string; expires: string; code?: string; slack?: string; url?: string };
+/** `animus invite`, from the owner's laptop: the same as helix invite on the machine. */
+export const invite = (p: { name: string; github?: string; slack?: string }) => call<MadeInvite>('POST', '/people', p);
+
+/** What helix invite and animus invite print: the code and the line to join with, or where the Slack bot sent it. */
+export function describeInvite(made: MadeInvite, url: string | undefined): string {
+  const until = made.expires.slice(0, 16).replace('T', ' ');
+  if (made.slack) return `The Slack bot sent ${made.slack} the line that installs Animus and joins as ${made.name}; its code is good until ${until} UTC.`;
+  return [
+    `${made.name}'s code, shown this once, good until ${until} UTC:`,
+    '',
+    `  ${made.code}`,
+    '',
+    'They install the animus plugin in Claude Code, then run:',
+    '',
+    `  animus join ${url ?? '<the address they reach Helix at; url: in config.yaml fills it in here>'} ${made.code}`,
+  ].join('\n');
+}
+
+/** A person Helix took off: their cancelled jobs, a credentials file it kept outside its home, their deleted folder. */
+export type RemovedPerson = { name: string; cancelled: number[]; kept?: string; folder: string; home: string };
+/** `animus remove-person`, from the owner's laptop: the same as helix remove-person on the machine. */
+export const removePerson = (name: string) => call<RemovedPerson>('DELETE', `/people/${encodeURIComponent(name)}`);
+
+/** What helix remove-person and animus remove-person print: what was done, and what is left to do elsewhere. */
+export function describeRemoval(gone: RemovedPerson): string {
+  return [
+    `${gone.name} is off Helix: their token no longer works${gone.cancelled.length ? `, and job(s) ${gone.cancelled.join(', ')} were cancelled` : ''}.`,
+    gone.kept ? `Their credentials file is outside ${gone.home}, so it was left: delete ${gone.kept}` : 'Their credentials file is deleted.',
+    `Their folder ${gone.folder} (clones, job state, Claude config) is deleted.`,
+    '',
+    'Left to do elsewhere:',
+    '  - GitHub: revoke the token they gave Helix (they can, or an org owner under the org\'s personal access tokens), and take them off the organisation or repositories.',
+    '  - Claude: take them off your Claude organisation, or have them revoke the token they gave Helix.',
+    '  - Tailscale: remove them from the tailnet, which takes their devices off it.',
+    '  - Their open animus/* pull requests: close or take over; animus cleanup removes the branches of closed ones.',
+  ].join('\n');
+}
+
 export const join = (url: string, code: string, tokens: { claude_token: string; github_token: string }) =>
   request<{ name: string; token: string; github?: string; cannot_push?: string[] }>('POST', url, '/join', undefined, { code, ...tokens });
 

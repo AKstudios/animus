@@ -13,8 +13,9 @@ import { githubUrl } from '../../plugin/src/git.ts';
 import { loadProfile, PROFILE_PATH } from '../../plugin/src/profile.ts';
 import { failureExcerpt } from '../../plugin/src/proc.ts';
 import { githubPush, type Runner } from './check.ts';
-import { checkName, credentialEnv, personEnv } from './config.ts';
+import { checkName, credentialEnv, personEnv, type Config } from './config.ts';
 import { personDirs, runArgs, type ContainerConfig } from './container.ts';
+import { isOwner } from './owner.ts';
 import type { Project, Store } from './store.ts';
 import { Refused } from './supervisor.ts';
 
@@ -69,12 +70,12 @@ export function forgetProject(home: string, project: Project): void {
   if (project.added_by && project.dir === projectDir(home, project.name)) rmSync(project.dir, { recursive: true, force: true });
 }
 
-/** `DELETE /projects/<name>`: only whoever added it, and only with none of its jobs queued or running. */
-export function removeProject(opts: { store: Store; home: string }, person: string, name: string): Project {
+/** `DELETE /projects/<name>`: only whoever added it or the owner, and only with none of its jobs queued or running. */
+export function removeProject(opts: { store: Store; home: string; config: Pick<Config, 'owner'> }, person: string, name: string): Project {
   const { store, home } = opts;
   const project = store.project(name);
   if (!project) throw new Refused(404, `Helix has no project named ${name}`);
-  if (project.added_by !== person) throw new Refused(403, `${name} was added ${project.added_by ? `by ${project.added_by}` : 'on the machine'}: only ${project.added_by ?? 'whoever runs Helix'} can remove it${project.added_by ? ', or whoever runs Helix' : ''} (helix remove-repo ${name})`);
+  if (project.added_by !== person && !isOwner(opts.config, person)) throw new Refused(403, `${name} was added ${project.added_by ? `by ${project.added_by}` : 'on the machine'}: only ${project.added_by ?? 'whoever runs Helix'} can remove it${project.added_by ? ', or whoever runs Helix' : ''} (helix remove-repo ${name})`);
   if (project.state === 'checking') throw new Refused(409, `Helix is still checking ${name}: remove it once the check ends`);
   const busy = [...store.inState('queued'), ...store.inState('running')].filter((j) => j.repo === name);
   if (busy.length) throw new Refused(409, `job(s) ${busy.map((j) => j.id).join(', ')} are queued or running for ${name}: wait for them, or cancel them, first`);
