@@ -8,6 +8,16 @@ clients with how to update.
 
 ## Unreleased
 
+- Helix follows the `stable` branch by itself. `helix upgrade --follow`
+  moves the machine to the release `stable` is at when it is not already on
+  it, and a systemd timer from `setup.sh` (`helix-upgrade.timer`) runs it
+  every 15 minutes. A release that failed on the machine is not tried again
+  on its own; each try is kept in `helix.db`. A second `helix upgrade` while
+  one is under way is refused.
+- `npm run deploy -- <ssh-host>` runs that upgrade over ssh now rather than
+  at the timer's next run, and `npm run release -- <version> --deploy
+  <ssh-host>` pushes the release and then deploys it.
+
 - The README says only how to install and use Animus. Everything else is in
   `docs/`: a CLI reference, the spec format, configuration, architecture,
   releases and development. Helix's READMEs moved to `docs/helix.md` and

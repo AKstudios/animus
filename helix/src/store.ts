@@ -64,6 +64,9 @@ export type Project = {
 /** A one-time code given to someone to join with (`helix invite`). Only the code's hash is kept. */
 export type Invite = { code_sha256: string; name: string; github?: string; expires: string };
 
+/** One try at moving this machine to a release (`helix upgrade`): when, and whether it went on. */
+export type Upgrade = { tag: string; at: string; ok: boolean; detail?: string };
+
 export type Store = {
   add(job: Omit<HelixJob, 'id'>): HelixJob;
   get(id: number): HelixJob | undefined;
@@ -90,6 +93,10 @@ export type Store = {
   putProject(project: Project): void;
   /** Removes a project; whether there was one. */
   dropProject(name: string): boolean;
+  /** The last try at this release on this machine, if any. */
+  upgrade(tag: string): Upgrade | undefined;
+  /** Keeps a try at a release, replacing any earlier one at the same tag. */
+  putUpgrade(upgrade: Upgrade): void;
   close(): void;
 };
 
@@ -102,6 +109,7 @@ export function openStore(file: string): Store {
   db.exec('create table if not exists invites (code_sha256 text primary key, name text not null unique, data text not null)');
   db.exec('create table if not exists people (name text primary key, token_sha256 text not null, data text not null)');
   db.exec('create table if not exists projects (name text primary key, data text not null)');
+  db.exec('create table if not exists upgrades (tag text primary key, data text not null)');
   const data = <T>(r: unknown): T => JSON.parse((r as { data: string }).data) as T;
   const asInvite = (r: unknown): Invite => JSON.parse((r as { data: string }).data) as Invite;
   const live = (i: Invite, at: Date) => Date.parse(i.expires) > at.getTime();
@@ -139,6 +147,8 @@ export function openStore(file: string): Store {
     projects: () => db.prepare('select data from projects order by name').all().map((r) => data<Project>(r)),
     putProject(p) { db.prepare('insert into projects (name, data) values (?, ?) on conflict (name) do update set data = excluded.data').run(p.name, JSON.stringify(p)); },
     dropProject: (name) => Number(db.prepare('delete from projects where name = ?').run(name).changes) > 0,
+    upgrade: (tag) => { const r = db.prepare('select data from upgrades where tag = ?').get(tag); return r ? data<Upgrade>(r) : undefined; },
+    putUpgrade(u) { db.prepare('insert into upgrades (tag, data) values (?, ?) on conflict (tag) do update set data = excluded.data').run(u.tag, JSON.stringify(u)); },
     close: () => db.close(),
   };
 }

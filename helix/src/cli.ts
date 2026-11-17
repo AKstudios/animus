@@ -17,6 +17,7 @@ import { checkInChild, checkProject, failInterruptedChecks, forgetProject, setup
 import { INVITE_HOURS, invite, takeOff } from './join.ts';
 import { serve } from './server.ts';
 import { openStore, type Store } from './store.ts';
+import { releaseToFollow } from './upgrade.ts';
 import { cancelJobsOf, pauseFile, supervise, UNTIL_RESTART } from './supervisor.ts';
 
 /** This checkout of Animus: what `helix upgrade` moves to another release. */
@@ -79,11 +80,14 @@ const USAGE = `helix: runs Animus jobs for several people on one machine
         Stop taking jobs for a project, whoever added it. People's clones of
         it are deleted, and Helix's own when animus project add made it; one
         added with add-repo stays on disk.
-  helix upgrade <tag>
+  helix upgrade <tag> | --follow
         Move this machine to a release: stop starting jobs, wait for the
         running ones to end, check out the tag, install, run the tests, and
         restart Helix (its service manager starts it again). If the tests
         fail, the checkout goes back to where it was.
+        --follow: to the release origin's stable branch is at, when that is
+        not the one here; a release that failed here is not tried again.
+        The helix-upgrade timer runs this every 15 minutes.
   helix image
         Build the image jobs run in (animus-job:<version>). Jobs run in
         containers when config.yaml has a container: entry.
@@ -98,7 +102,7 @@ again whenever it changes. Host and port need a restart.`;
 
 function main(argv: string[]): number | undefined {
   const [command, ...rest] = argv;
-  const { values, positionals } = parseArgs({ args: rest, allowPositionals: true, options: { 'env-file': { type: 'string' }, github: { type: 'string' } } });
+  const { values, positionals } = parseArgs({ args: rest, allowPositionals: true, options: { 'env-file': { type: 'string' }, github: { type: 'string' }, follow: { type: 'boolean' } } });
   switch (command) {
     case 'serve': {
       const store = openHelix();
@@ -249,8 +253,8 @@ function main(argv: string[]): number | undefined {
     case 'image':
       return buildImage() ? 0 : 1;
     case 'upgrade':
-      if (!positionals[0]) throw new AnimusError('usage: helix upgrade <tag>');
-      return upgrade(positionals[0]);
+      if (!positionals[0] === !values.follow) throw new AnimusError('usage: helix upgrade <tag> | --follow');
+      return upgrade(positionals[0], Boolean(values.follow));
     case 'add-person': {
       if (!positionals[0]) throw new AnimusError('usage: helix add-person <name> [--env-file <file>]');
       const token = withStore((store) => addPerson(store, positionals[0]!, values['env-file']));
@@ -270,44 +274,82 @@ function run(command: string, args: string[]): boolean {
   return spawnSync(command, args, { cwd: ROOT, stdio: 'inherit', shell: process.platform === 'win32' }).status === 0;
 }
 
-function upgrade(ref: string): number {
+/**
+ * Moves this checkout to a release: the tag given, or with follow the
+ * release origin's stable branch is at (upgrade.ts says when it stays).
+ * Each try is kept in helix.db, so follow does not retry a release that
+ * failed here.
+ */
+function upgrade(ref: string | undefined, follow: boolean): number {
   const git = (...args: string[]) => spawnSync('git', args, { cwd: ROOT, encoding: 'utf8' });
+  const home = helixHome();
+  // The pause an upgrade leaves stays until helix serve restarts: one upgrade at a time.
+  if (existsSync(pauseFile(home)) && readFileSync(pauseFile(home), 'utf8').trim() === UNTIL_RESTART) {
+    throw new AnimusError(`another helix upgrade is under way (${pauseFile(home)} says so). If none is, restart helix.service, which clears it`);
+  }
   if (git('status', '--porcelain').stdout.trim()) throw new AnimusError(`${ROOT} has changes of its own; a release goes only onto a clean checkout`);
-  if (!run('git', ['fetch', '--tags', '--force', 'origin'])) throw new AnimusError('git fetch failed: nothing was changed');
+  if (!run('git', ['fetch', '--quiet', '--tags', '--force', 'origin'])) throw new AnimusError('git fetch failed: nothing was changed');
+  if (follow) {
+    // Named, so a clone of one branch follows stable too.
+    git('fetch', '--quiet', 'origin', '+refs/heads/stable:refs/remotes/origin/stable');
+    const stable = git('rev-parse', '--verify', '--quiet', 'origin/stable^{commit}');
+    const to = withStore((store) => releaseToFollow({
+      head: git('rev-parse', 'HEAD').stdout.trim(),
+      stable: stable.status === 0 ? stable.stdout.trim() : undefined,
+      tags: git('tag', '--points-at', 'origin/stable').stdout.split('\n').filter(Boolean),
+      last: (tag) => store.upgrade(tag),
+    }));
+    if ('stay' in to) { console.log(`helix: staying: ${to.stay}`); return 0; }
+    ref = to.tag;
+  }
+  if (!ref) throw new AnimusError('usage: helix upgrade <tag> | --follow');
   if (git('rev-parse', '--verify', '--quiet', `${ref}^{commit}`).status !== 0) throw new AnimusError(`there is no ${ref} to move to`);
   const before = git('rev-parse', 'HEAD').stdout.trim();
-  const home = helixHome();
-  const store = openHelix();
+  console.log(`moving to ${ref}`);
   // No job starts on one release and resumes on the next: the machine drains first.
   writeFileSync(pauseFile(home), `${UNTIL_RESTART}\n`);
-  console.log('no new job starts now; submissions still queue');
-  let said = '';
-  for (let running = store.inState('running'); running.length; running = store.inState('running')) {
-    const now = `waiting for job(s) ${running.map((j) => j.id).join(', ')} to end`;
-    if (now !== said) console.log(now);
-    said = now;
-    sleep(5000);
+  let failed: string | undefined;
+  try {
+    console.log('no new job starts now; submissions still queue');
+    withStore((store) => {
+      let said = '';
+      for (let running = store.inState('running'); running.length; running = store.inState('running')) {
+        const now = `waiting for job(s) ${running.map((j) => j.id).join(', ')} to end`;
+        if (now !== said) console.log(now);
+        said = now;
+        sleep(5000);
+      }
+    });
+    const contained = Boolean(loadConfig().container);
+    // The new release's image is built from its own Dockerfile, tagged with its own version.
+    const steps: [string, () => boolean][] = [
+      ['checkout', () => run('git', ['checkout', '--quiet', '--detach', ref])],
+      ['npm ci', () => run('npm', ['ci'])],
+      ['tests', () => run('npm', ['test'])],
+      ['typecheck', () => run('npm', ['run', 'typecheck'])],
+      ['job image', () => !contained || spawnSync(process.execPath, ['--disable-warning=ExperimentalWarning', join(ROOT, 'helix', 'src', 'cli.ts'), 'image'], { cwd: ROOT, stdio: 'inherit' }).status === 0],
+    ];
+    failed = steps.find(([, step]) => !step())?.[0];
+  } catch (err) {
+    rmSync(pauseFile(home), { force: true });
+    throw err;
   }
-  store.close();
-  const contained = Boolean(loadConfig().container);
-  // The new release's image is built from its own Dockerfile, tagged with its own version.
-  const moved = run('git', ['checkout', '--quiet', '--detach', ref]) && run('npm', ['ci']) && run('npm', ['test']) && run('npm', ['run', 'typecheck'])
-    && (!contained || spawnSync(process.execPath, ['--disable-warning=ExperimentalWarning', join(ROOT, 'helix', 'src', 'cli.ts'), 'image'], { cwd: ROOT, stdio: 'inherit' }).status === 0);
-  if (!moved) {
-    console.error(`helix: ${ref} did not install or pass its tests here; going back to ${before.slice(0, 12)}`);
+  if (failed) {
+    console.error(`helix: ${ref} failed at its ${failed} here; going back to ${before.slice(0, 12)}`);
     run('git', ['checkout', '--quiet', '--detach', before]);
     run('npm', ['ci']);
   }
+  withStore((store) => store.putUpgrade({ tag: ref, at: new Date().toISOString(), ok: !failed, ...(failed ? { detail: `${failed} failed` } : {}) }));
   const pid = existsSync(pidFile()) ? Number(readFileSync(pidFile(), 'utf8')) : 0;
   try {
     if (!pid) throw new Error('no pid');
     process.kill(pid, 'SIGTERM');
-    console.log(`helix serve (pid ${pid}) is stopping; its service manager starts it again on ${moved ? ref : 'the release it had'}, and the queue goes on`);
+    console.log(`helix serve (pid ${pid}) is stopping; its service manager starts it again on ${failed ? 'the release it had' : ref}, and the queue goes on`);
   } catch {
     rmSync(pauseFile(home), { force: true });
-    console.log(`helix serve is not running: start it to run ${moved ? ref : 'the release it had'}`);
+    console.log(`helix serve is not running: start it to run ${failed ? 'the release it had' : ref}`);
   }
-  return moved ? 0 : 1;
+  return failed ? 1 : 0;
 }
 
 try {

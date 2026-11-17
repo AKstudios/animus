@@ -70,7 +70,9 @@ path. Keep the same account name and the same folders, and a copy of
 Helix needs Node 24, git, gh, Claude Code, and something that starts `helix
 serve` at boot and starts it again when it stops: launchd on a Mac, a
 Windows service, or any process supervisor. `helix upgrade` depends on that
-restart. `helix/deploy/ubuntu/setup.sh` is only the Ubuntu way to set this up.
+restart. To follow releases there too, run `helix/bin/helix upgrade
+--follow` from that system's scheduler every 15 minutes, as the account
+Helix runs as. `helix/deploy/ubuntu/setup.sh` is only the Ubuntu way to set this up.
 
 ## Someone leaves
 

@@ -10,7 +10,8 @@
   "scripts": {
     "test": "sh scripts/with-tmp.sh node --disable-warning=ExperimentalWarning --test 'plugin/test/**/*.test.ts' 'helix/test/**/*.test.ts'",
     "typecheck": "tsc --noEmit",
-    "release": "node scripts/release.ts"
+    "release": "node scripts/release.ts",
+    "deploy": "node scripts/deploy.ts"
   },
   "dependencies": {
     "yaml": "2.9.1"

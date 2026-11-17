@@ -121,7 +121,8 @@ sessions), `bin/animus`.
 | `cli.ts` | The `helix` command, including `upgrade` |
 | `server.ts` | The HTTP API and the display page |
 | `supervisor.ts` | The queue: starts jobs while slots are free, restarts, cancels, answers |
-| `store.ts` | `helix.db`: jobs, people, projects, invites |
+| `store.ts` | `helix.db`: jobs, people, projects, invites, upgrades |
+| `upgrade.ts` | Which release `helix upgrade --follow` moves to |
 | `config.ts` | `config.yaml`, people and projects |
 | `join.ts` | Invites, joining and leaving |
 | `projects.ts` | Adding a project and its check |
