@@ -3,11 +3,11 @@
 // under Animus's home, outside every repository, so a job leaves nothing in
 // the project but its branch.
 import { appendFileSync, existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
-import { homedir } from 'node:os';
+import { homedir, hostname } from 'node:os';
 import { join } from 'node:path';
 import type { Tokens } from './agent.ts';
 import type { Plan } from './profiles.ts';
-import type { Finding } from './review.ts';
+import type { Finding, Review } from './review.ts';
 import type { Slicing } from './slices.ts';
 import type { Workspace } from './workspace.ts';
 
@@ -97,13 +97,19 @@ export type JobState = {
   /** The questions this job stopped to ask, each with the person's answer: the reviewer reads them beside the spec. */
   answers?: { question: string; answer: string }[];
   findings?: Finding[];
+  /** Set when the catch-up stopped to ask: the reviewed work is done, so a resumed job starts at the catch-up with what the PR needs from before it. */
+  catch_up?: { summary: string; notes?: string; review?: Review; review_rounds: number };
 };
 
 export const STAGES = ['setup', 'plan', 'implement', 'gates', 'review', 'evidence', 'pr'] as const;
 export type Stage = (typeof STAGES)[number];
 
 /** Where a running job is, for whoever watches it: the stage, and who or what is doing it. */
-export type Progress = { stage: Stage; who: string; at: string };
+export type Progress = {
+  stage: Stage; who: string; at: string;
+  /** The `animus run` process and machine writing it: a job is running only where that process is alive. */
+  pid?: number; host?: string;
+};
 
 export function writeJson(file: string, value: unknown): void {
   mkdirSync(join(file, '..'), { recursive: true });
@@ -121,7 +127,7 @@ export function loadState(job: string): JobState | undefined {
 }
 
 export function saveProgress(job: string, stage: Stage, who: string): void {
-  writeJson(join(jobDir(job), 'progress.json'), { stage, who, at: new Date().toISOString() } satisfies Progress);
+  writeJson(join(jobDir(job), 'progress.json'), { stage, who, at: new Date().toISOString(), pid: process.pid, host: hostname() } satisfies Progress);
 }
 
 /** A job's progress; home is the Animus home it ran under, when not this process's (a Helix job in a container). */
@@ -134,9 +140,10 @@ export function appendRun(run: Run): void {
   appendFileSync(runLog(), `${JSON.stringify(run)}\n`);
 }
 
-export function readRuns(): Run[] {
-  if (!existsSync(runLog())) return [];
-  return readFileSync(runLog(), 'utf8').split('\n').filter(Boolean).flatMap((line) => {
+/** The run log's lines; file is another Animus home's run log (a Helix person's). */
+export function readRuns(file = runLog()): Run[] {
+  if (!existsSync(file)) return [];
+  return readFileSync(file, 'utf8').split('\n').filter(Boolean).flatMap((line) => {
     try { return [JSON.parse(line) as Run]; } catch { return []; }
   });
 }

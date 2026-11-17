@@ -9,7 +9,7 @@ import { uptime } from 'node:os';
 import { basename, dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { AnimusError } from '../../plugin/src/proc.ts';
-import { loadProgress, type Progress } from '../../plugin/src/log.ts';
+import { animusHome, loadProgress, type Progress } from '../../plugin/src/log.ts';
 import type { PersonalSkill } from '../../plugin/src/personal.ts';
 import { parseSpec } from '../../plugin/src/spec.ts';
 import { credentialEnv, personEnv, readyRepos, type Config } from './config.ts';
@@ -58,6 +58,8 @@ export type Supervisor = {
   log(id: number, lines?: number): string;
   /** Where a running job says it is, from the Animus state it writes. */
   progress(job: HelixJob): Progress | undefined;
+  /** The Animus home a person's jobs keep their folders and run log in. */
+  animusHome(person: string): string;
   /** Starts what the queue holds while slots are free: after the config changed, or a pause ended. */
   wake(): void;
   /** Stops starting jobs and ends the ones running. */
@@ -224,6 +226,7 @@ export function supervise(opts: {
       writeFileSync(job.spec, s.spec);
       if (s.skills?.length) writeFileSync(skillsFile(job), `${JSON.stringify(s.skills, null, 2)}\n`);
       store.save(job);
+      store.record(person, 'submitted', { job: job.id, repo: s.repo });
       tick();
       return store.get(job.id)!;
     },
@@ -232,6 +235,7 @@ export function supervise(opts: {
       if (job.state !== 'queued' && job.state !== 'running') throw new Refused(409, `job ${id} has already ${job.state === 'cancelled' ? 'been cancelled' : 'ended'}`);
       const { pid, ...rest } = job;
       store.save({ ...rest, state: 'cancelled', ended: now() });
+      store.record(person, 'cancelled', { job: id });
       if (pid) kill(pid, children.get(id));
       reap(id);
       return store.get(id)!;
@@ -241,6 +245,7 @@ export function supervise(opts: {
       if (job.state !== 'ended' || job.outcome !== 'needs-input') throw new Refused(409, `job ${id} is not waiting for an answer`);
       const { outcome: _o, question: _q, reason: _r, ended: _e, ...rest } = job;
       store.save({ ...rest, state: 'queued', queued: now(), answer: text });
+      store.record(person, 'answered', { job: id, answer: text });
       tick();
       return store.get(id)!;
     },
@@ -250,6 +255,7 @@ export function supervise(opts: {
     },
     wake: () => tick(),
     progress: (job) => (job.animus_job ? loadProgress(job.animus_job, opts.animusHomeOf?.(job.person)) : undefined),
+    animusHome: (person) => opts.animusHomeOf?.(person) ?? animusHome(),
     stop() {
       stopped = true;
       for (const [id, child] of children) {

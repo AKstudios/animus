@@ -1,6 +1,7 @@
-import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { dirname, join } from 'node:path';
+import { delimiter, dirname, join } from 'node:path';
+import { setTimeout as sleep } from 'node:timers/promises';
 import type { Agent, AgentRequest, AgentResult } from '../src/agent.ts';
 import { loadFactory } from '../src/profiles.ts';
 import type { Deps } from '../src/pipeline.ts';
@@ -71,3 +72,24 @@ export function deps(agent: Agent, over: Partial<Deps> = {}): Deps & { published
     ...over,
   };
 }
+
+/** The system's opener, faked: `open` and `xdg-open` on PATH that write down the address they were given. */
+export function fakeOpener(): { path: string; opened: () => Promise<string | undefined> } {
+  const bin = mkdtempSync(join(tmpdir(), 'animus-opener-'));
+  const out = join(bin, 'opened.txt');
+  for (const name of ['open', 'xdg-open']) {
+    writeFileSync(join(bin, name), `#!/bin/sh\nprintf '%s' "$1" > "${out}"\n`);
+    chmodSync(join(bin, name), 0o755);
+  }
+  return {
+    path: `${bin}${delimiter}${process.env.PATH}`,
+    // The opener runs detached, so it may write after animus has exited.
+    opened: async () => {
+      for (let i = 0; i < 20 && !existsSync(out); i++) await sleep(50);
+      return existsSync(out) ? readFileSync(out, 'utf8') : undefined;
+    },
+  };
+}
+
+/** The animus command's entry point, for spawning. */
+export const cli = join(import.meta.dirname, '..', 'src', 'cli.ts');

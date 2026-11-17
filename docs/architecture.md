@@ -25,7 +25,7 @@ spec.md ──► animus start ──┬─► animus run  (this machine, in the
   the skills that shape a spec, and the `animus` command that runs a job.
 - **Helix** (`helix/`) is the supervisor for a shared machine: a queue in
   SQLite, an HTTP API, a display page, and one `animus run` process per job.
-  It imports from `plugin/src` and is never shipped in the plugin. It holds no
+  It imports from `plugin/` and is never shipped in the plugin. It holds no
   state of its own beyond `helix.db` and the job files, so a restart carries
   on from them. See [helix.md](helix.md).
 
@@ -78,7 +78,7 @@ A job leaves nothing in the target repository but its branch.
 | Where | What |
 | --- | --- |
 | `~/.animus/runs.jsonl` | One line per run: job, labels, outcome, cost, duration, PR |
-| `~/.animus/jobs/<job>/` | Its state, spec, gate output, reviews, PR body, screenshots, transcripts, `progress.json` |
+| `~/.animus/jobs/<job>/` | Its state, spec, gate output, reviews, PR body, screenshots, transcripts, `progress.json` (stage, who, and the `pid` and `host` of the `animus run` writing it: a job with no outcome is running only on that host with that process alive, and stopped otherwise) |
 | `../.worktrees/<repo>/` | The job's worktree, removed when the job ends unless `--keep` |
 | `<repo>/.git/animus/installs/` | The install cache: the two saves used last per install path, and any used in the last hour |
 | `~/.claude/projects/<worktree>/` | Claude Code's transcripts of the job's sessions, kept |
@@ -114,7 +114,8 @@ A job leaves nothing in the target repository but its branch.
 Also in `plugin/`: `prompts/` (each role's instructions), `config/profiles.yaml`,
 `skills/` (the Claude Code skills a person uses: grill-with-docs, to-spec,
 domain-modeling, helix), `vendor/` (pinned copies of skills granted to job
-sessions), `bin/animus`.
+sessions), `display/` (the display's page, styles, fonts and scripts, which
+Helix serves; ADR 0004), `bin/animus`.
 
 ### helix/src
 
@@ -123,7 +124,7 @@ sessions), `bin/animus`.
 | `cli.ts` | The `helix` command, including `upgrade` |
 | `server.ts` | The HTTP API and the display page |
 | `supervisor.ts` | The queue: starts jobs while slots are free, restarts, cancels, answers |
-| `store.ts` | `helix.db`: jobs, people, projects, invites, upgrades |
+| `store.ts` | `helix.db`: jobs, people, projects, invites, upgrades, activity (what each person did, kept for good) |
 | `upgrade.ts` | Which release `helix upgrade --follow` moves to |
 | `cleanup.ts` | `helix cleanup`: each person's `animus cleanup`, old job folders, old job images |
 | `config.ts` | `config.yaml`, people and projects |
@@ -131,7 +132,9 @@ sessions), `bin/animus`.
 | `projects.ts` | Adding a project and its check |
 | `check.ts` | Trying a person's GitHub and Claude tokens |
 | `container.ts` | Running a job in its own container |
-| `display.ts`, `ui.ts` | What the display page shows, and serving it (`helix/ui/`) |
+| `local-display.ts` | `animus ui`: the display page's local source, reading `~/.animus` |
+| `job-folder.ts`, `assets.ts` | Reading a job's folder for a job page, and serving the page's files (`plugin/display/`); Helix's display uses both too |
+| `display.ts` | What the display page shows from Helix |
 
 `helix/deploy/` holds the job image's Dockerfile and the Ubuntu setup
 scripts.

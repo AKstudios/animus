@@ -215,6 +215,23 @@ Answers a job's question. The job is queued again and resumes with it.
 
 Cancels a queued or running job of yours, or anyone's for the owner.
 
+#### `animus ui`
+
+Serves the local display on `127.0.0.1` (port 7420, or the next free one),
+opens it in your browser and runs until Ctrl-C. It shows every job this machine
+ran, read from `~/.animus`, grouped by project and newest first, each with its
+job page. A job whose process is gone and that has no outcome shows as stopped,
+with `animus resume <job>`. It has no sign-in and no people pages, and answers
+only GET and only for the host names `127.0.0.1` and `localhost`. There is no
+run log to show, so a job page's log is empty.
+
+#### `animus ui --helix`
+
+Opens Helix's display in your browser, already signed in: it opens
+`<url>/#token=<token>` with the address and token you joined with, and the
+page keeps the token and takes it out of the address bar. Do not run it on a
+shared wall screen: the token can also submit and cancel jobs as you.
+
 ### Inside a job's worktree
 
 The implementer runs these during a job. They fail anywhere else.

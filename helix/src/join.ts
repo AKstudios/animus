@@ -115,6 +115,7 @@ export async function joinHelix(opts: { store: Store; verify: Verify; at?: Date 
 export function takeOff(name: string, store: Store, config: Pick<Config, 'owner'>, reap?: (id: number) => void): { kept?: string; cancelled: HelixJob[]; folder: string } {
   keepOwner(config, name);
   const { kept } = removePerson(store, name);
+  store.record(name, 'left');
   const cancelled = cancelJobsOf(store, name, reap);
   const folder = personDirs(helixHome(), name).root;
   rmSync(folder, { recursive: true, force: true });

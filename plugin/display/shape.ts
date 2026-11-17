@@ -1,0 +1,124 @@
+// What the display page reads from its source (ADR 0004): Helix's /display
+// answers this shape. It lives with the page, since the plugin never imports
+// Helix.
+import type { Progress } from '../src/log.ts';
+import type { Review } from '../src/review.ts';
+
+/** A job as the display sees it: Helix's row without what is only Helix's business (the spec's path, the pid, the answer's text). */
+export type DisplayJob = {
+  /** Helix's number, or a local job's own id. */
+  id: number | string;
+  state: 'queued' | 'running' | 'ended' | 'cancelled' | 'stopped';
+  person: string;
+  /** The repository's name in Helix's config. */
+  repo: string;
+  title: string;
+  submitted: string;
+  /** When it last went back into the queue: after an answer, or when Helix stopped while it ran. */
+  queued?: string;
+  started?: string;
+  ended?: string;
+  /** Animus's own id for the job, once its run has said it. */
+  animus_job?: string;
+  /** How the run ended: Animus's outcome (pr, draft-pr, needs-input, failed). */
+  outcome?: string;
+  pr?: string;
+  reason?: string;
+  question?: string;
+  cost_usd?: number;
+  /** A stopped job (its process is gone, with no outcome): the command that picks it up again. */
+  resume?: string;
+  /** Why a queued job is in the queue a second time. */
+  resumed?: 'answer' | 'restart';
+  /** Running jobs: the stage and who is working, as the job last said. */
+  progress?: Progress;
+  /** Running jobs: the last line of the job's output. */
+  now?: string;
+};
+
+/** One check of a job's latest gate run; a failed one carries all it printed. */
+export type JobCheck = { name: string; command: string; status: 'ok' | 'fail' | 'skip'; detail: string; output?: string };
+
+/**
+ * What a job page reads: from Helix, GET /jobs/<id>/page-data, with a
+ * person's token. Each part the job has not reached yet is left out.
+ */
+export type JobPage = {
+  /** The source's clock, as in Display. */
+  at: string;
+  stages: readonly string[];
+  job: DisplayJob;
+  /** The spec as it was submitted. */
+  spec?: string;
+  /** Wall time per stage in ms, added up over the job's runs that have ended. */
+  ms?: Record<string, number>;
+  /** When it was cut into more than one slice: each in order, and whether its gates passed. */
+  slices?: { title: string; delivers: string; done: boolean }[];
+  checks?: JobCheck[];
+  /** Every review round, first to last. */
+  reviews?: Pick<Review, 'summary' | 'findings'>[];
+  /** Every question the job asked, with the answer it was given; the one it waits on has none. */
+  questions?: { question: string; answer?: string }[];
+  /** Its latest screenshots, as named in its shots folder (`build/…`), each served with a token at /jobs/<id>/shots/<name>; `at` is when they were taken. */
+  shots?: { at: string; files: string[] };
+  /** What the job's run has printed, all of it. */
+  log: string;
+};
+
+/** An open pull request one of Helix's jobs opened, as GitHub lists it now. */
+export type DisplayPr = { job: number; repo: string; person: string; number: number; title: string; url: string; draft: boolean; created: string };
+
+export type DisplayRepo ={ name: string; base?: string; gates?: string[] };
+
+export type Display = {
+  name: string;
+  /** The source's clock, so a display with another clock still counts elapsed time right. */
+  at: string;
+  slots: number;
+  stages: readonly string[];
+  repos: DisplayRepo[];
+  jobs: DisplayJob[];
+  /** Open PRs the jobs opened, any order; left out by a source that does not ask GitHub. */
+  prs?: DisplayPr[];
+  /** Set by the local display (`animus ui`): one person's own jobs, no sign-in and no people pages, listed by project rather than as a queue. */
+  local?: true;
+};
+
+/** One person on the people list: from Helix, GET /people/page-data, with a person's token. */
+export type PersonRow = {
+  name: string;
+  /** The login their GitHub token signed in as when they joined. */
+  github?: string;
+  /** The day they joined (ISO); left out for a person who joined before it was kept. */
+  joined?: string;
+  jobs: number;
+  /** Jobs that opened a pull request. */
+  prs: number;
+  spent: number;
+  /** The newest thing they did, when anything is kept. */
+  last?: { at: string; kind: string };
+};
+
+export type PeoplePage = { at: string; people: PersonRow[] };
+
+/** A job on a person's page: only Helix has people pages, so its id is Helix's number. */
+export type PersonJob = { id: number } & Pick<DisplayJob, 'title' | 'repo' | 'state' | 'submitted'> & Partial<Pick<DisplayJob, 'outcome' | 'pr' | 'cost_usd'>>;
+
+/** The most jobs a person's page is sent at a time. */
+export const PERSON_JOBS = 30;
+
+/**
+ * One person's page: from Helix, GET /people/<name>/page-data, with a
+ * person's token. `jobs` are newest first, at most PERSON_JOBS, those before
+ * the job in `?before=`; `more` says older ones remain. `left` is there for
+ * someone no longer on Helix, with when they left if that was kept.
+ */
+export type PersonPage = PersonRow & {
+  /** The source's clock, as in Display. */
+  at: string;
+  left?: { at?: string };
+  jobList: PersonJob[];
+  more: boolean;
+  /** Everything they did that Helix kept, newest first. */
+  activity: { at: string; kind: string; detail?: Record<string, string | number> }[];
+};

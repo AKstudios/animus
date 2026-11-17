@@ -8,26 +8,28 @@
 // person's own token (join.ts). Inviting and removing people (POST /people,
 // DELETE /people/<name>) and every person's queue (GET /jobs?all) are the
 // owner's alone (owner.ts).
-// It also serves the display: its page at /, and what it shows at /display.
+// It also serves the display: its pages at / and /jobs/<id> (ui.ts), what the
+// overview shows at /display, and a job page's data and screenshots, with a
+// token, at /jobs/<id>/page-data and /jobs/<id>/shots/<name>, and the people
+// list's at /people/page-data and a person's at /people/<name>/page-data.
 import { createServer, type IncomingMessage, type Server } from 'node:http';
 import { AnimusError } from '../../plugin/src/proc.ts';
 import { VERSION_HEADER, type MadeInvite, type RemovedPerson } from '../../plugin/src/remote.ts';
 import { animusVersion, compatible } from '../../plugin/src/version.ts';
 import { parseSkills, type PersonalSkill } from '../../plugin/src/personal.ts';
 import { hashToken, helixHome, type Config } from './config.ts';
-import { display } from './display.ts';
+import { display, jobPage, jobShot, peoplePage, personPage } from './display.ts';
 import { invite, inviteDetails, joinHelix, takeOff, verifyInChild, type Verify } from './join.ts';
+import { openPrs, type ListPrs } from './open-prs.ts';
 import { isOwner, requireOwner } from './owner.ts';
 import { addProject, checkInChild, projectView, removeProject, type StartCheck } from './projects.ts';
 import type { Transport } from './slack-api.ts';
 import { slackInvite } from './slack.ts';
 import type { Store } from './store.ts';
 import { Refused, type Submission, type Supervisor } from './supervisor.ts';
-import { asset } from './ui.ts';
+import { asset, CSP } from '../../plugin/src/assets.ts';
 
 const MAX_BODY = 1024 * 1024;
-/** The display loads only what Helix serves and talks only to Helix. */
-const CSP = "default-src 'none'; script-src 'self'; style-src 'self'; font-src 'self'; img-src 'self' data:; connect-src 'self'; base-uri 'none'; form-action 'none'";
 
 /** Who holds the request's token. Only its hash is looked up: a token is long and random, so the lookup's timing gives nothing away. */
 function whoIs(store: Store, req: IncomingMessage): string | undefined {
@@ -60,6 +62,8 @@ export function serve(opts: {
   home?: string;
   /** The Slack bot, when it runs: how the owner's animus invite --slack is sent. */
   slack?: Pick<Transport, 'dm' | 'post'>;
+  /** How a project's open PRs are listed on GitHub, with a person's token; by default GitHub's API. */
+  listPrs?: ListPrs;
 }): Server {
   const { config, store, supervisor } = opts;
   const verify = opts.verify ?? verifyInChild;
@@ -83,6 +87,7 @@ export function serve(opts: {
       throw err;
     }
   };
+  const prs = openPrs({ store, ...(opts.listPrs ? { list: opts.listPrs } : {}) });
   return createServer((req, res) => {
     const send = (status: number, value: unknown) => {
       res.writeHead(status, { 'content-type': 'application/json', 'helix-version': version });
@@ -91,13 +96,14 @@ export function serve(opts: {
     void (async () => {
       const url = new URL(req.url ?? '/', 'http://helix');
       // The display's page, scripts and fonts need no token.
-      const file = req.method === 'GET' ? asset(url.pathname) : undefined;
+      const file = req.method === 'GET' ? asset(url.pathname, req.headers.accept) : undefined;
       if (file) {
-        res.writeHead(200, { 'content-type': file.type, 'cache-control': file.cache, 'content-security-policy': CSP, 'x-content-type-options': 'nosniff' });
+        // vary: a job's path is its page to a browser and JSON to animus, so neither answer stands in for the other.
+        res.writeHead(200, { 'content-type': file.type, 'cache-control': file.cache, 'content-security-policy': CSP, 'x-content-type-options': 'nosniff', vary: 'accept' });
         return res.end(file.body);
       }
       // What the display shows needs no token either: Helix listens on a private network only, and this only reads.
-      if (req.method === 'GET' && url.pathname === '/display') return send(200, display(opts));
+      if (req.method === 'GET' && url.pathname === '/display') return send(200, { ...display(opts), prs: await prs() });
       // Which release this is, for `animus doctor`; it says no more than the display does.
       if (req.method === 'GET' && url.pathname === '/version') return send(200, { version });
       // A client from a release this one cannot work with is told how to catch up, before anything is done for it.
@@ -112,6 +118,33 @@ export function serve(opts: {
       }
       const person = whoIs(store, req);
       if (!person) return send(401, { error: 'a valid token is needed: Authorization: Bearer <token>' });
+      // A job page's data, for any person on this Helix. The display is served by this Helix, so it sends no client version.
+      const pageData = req.method === 'GET' ? /^\/jobs\/(\d+)\/page-data$/.exec(url.pathname)?.[1] : undefined;
+      if (pageData) {
+        const page = jobPage(opts, Number(pageData));
+        return page ? send(200, page) : send(404, { error: `no job ${pageData}` });
+      }
+      // The people list's data, for any person on this Helix.
+      if (req.method === 'GET' && url.pathname === '/people/page-data') return send(200, peoplePage(opts));
+      // One person's page, with the jobs older than ?before=<job id>: thirty at a time.
+      const who = req.method === 'GET' ? /^\/people\/([^/]+)\/page-data$/.exec(url.pathname)?.[1] : undefined;
+      if (who) {
+        let name: string | undefined;
+        try { name = decodeURIComponent(who); } catch { /* does not decode: no such person */ }
+        const before = Number(url.searchParams.get('before') ?? Infinity);
+        const page = name === undefined || Number.isNaN(before) ? undefined : personPage(opts, name, before);
+        return page ? send(200, page) : send(404, { error: `no person ${name ?? who}` });
+      }
+      // One of a job's screenshots, for its page: the name is as its shots folder lists it, and only such a name is served.
+      const shot = req.method === 'GET' ? /^\/jobs\/(\d+)\/shots\/(.+)$/.exec(url.pathname) : undefined;
+      if (shot) {
+        let name: string | undefined;
+        try { name = decodeURIComponent(shot[2]!); } catch { /* does not decode: no such screenshot */ }
+        const image = name === undefined ? undefined : jobShot(opts, Number(shot[1]), name);
+        if (!image) return send(404, { error: `no such screenshot of job ${shot[1]}` });
+        res.writeHead(200, { 'content-type': image.type, 'cache-control': 'private, no-cache', 'x-content-type-options': 'nosniff', 'helix-version': version });
+        return res.end(image.body);
+      }
       if (!current) return outdated();
       if (req.method === 'POST' && url.pathname === '/people') {
         requireOwner(config, person, 'invite people');

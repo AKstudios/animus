@@ -8,6 +8,56 @@ clients with how to update.
 
 ## Unreleased
 
+- A job catches up with its base before the push: when the base branch
+  gained commits while the job ran and they merge cleanly, the job merges
+  them in with one merge commit, runs every gate again with two fix rounds of
+  its own, and the pull request names the base commit it caught up to. A
+  failed job's draft pull request goes through the same catch-up. A base that
+  did not move is left alone.
+- A catch-up that conflicts goes to a fresh implementer session with the
+  conflicting files, the spec and the base's commits that touched them. The
+  job goes on only with no conflict markers left and every gate green within
+  two fix rounds, and the pull request lists the resolved files. A conflict
+  in a protected path, one the session cannot settle, or gates that still
+  fail end the job as needs input; `animus resume <job> --answer` picks it up
+  at the catch-up, not from the start.
+- Helix keeps an activity, with who and when, each time a person submits,
+  answers (with the answer's text) or cancels a job, joins, leaves, or adds or
+  removes a project, and the day each new person joined. Nothing from before
+  is filled in.
+- `/people` on Helix's display lists each person with their GitHub login, the
+  day they joined (blank before it was kept), jobs submitted, PRs opened,
+  total spent and last activity, from a new authenticated route,
+  `GET /people/page-data`. Every person named on the overview or a job page
+  links to `/people/<name>`.
+- `/people/<name>` shows that person's numbers, their jobs newest first thirty
+  at a time, each linking to its job page (those from before activity was kept
+  too), and their activity newest first, and says when they left, from a new
+  authenticated route, `GET /people/<name>/page-data[?before=<job id>]`.
+- `animus ui` serves the local display on 127.0.0.1 (port 7420 or the next
+  free one) and opens it: every job in `~/.animus`, grouped by project, newest
+  first, each with its job page, and no people pages or sign-in. Ctrl-C stops
+  it. The display page tells its source apart by the new `local` flag on
+  `Display`; `animus ui --helix` is unchanged. Not breaking: Helix's API and
+  the job's files keep their shape.
+- `animus run` records its process in the job's `progress.json` (`pid` and
+  `host`, added to `stage`, `who` and `at`). A job counts as running only on
+  that host with that process alive; one whose process is gone and that has no
+  outcome is stopped, and the local display's reader of `~/.animus` shows it
+  with `animus resume <job>` as the way on.
+- With no job running or queued and no project picked, the display's overview
+  shows an original synchronizing-helix animation (inline SVG and CSS only: the
+  Helix mark unwinds into a slowly turning double helix, with glitch fragments
+  and "SYNCHRONIZING") in place of the empty working box. It holds still when
+  the browser asks for reduced motion, pauses while the tab is hidden and
+  drifts slowly so nothing burns into a wall screen. A job that only waits for
+  an answer does not keep it away.
+- The display's overview lists the ten newest open PRs Helix's jobs opened
+  (for the picked project when one is picked), drafts marked, in place of
+  merged and closed ones. Helix lists a project's open PRs on GitHub with the
+  token of the person whose job opened one, at most once a minute per project;
+  a PR whose person has left is not listed. RECENT now keeps only failed and
+  cancelled jobs. `GET /display` gains `prs`.
 - The installers take `join <url> <code>`: after setup they run `animus join`
   with them, so one line installs Animus and joins a Helix
   (`curl -fsSL …/install.sh | bash -s -- join <url> <code>`).
@@ -36,6 +86,36 @@ clients with how to update.
 - The Slack app's manifest is in `helix/deploy/slack/manifest.yaml`;
   docs/helix-deploy.md walks from creating the app to `helix slack setup`,
   and docs/helix.md describes the bot's commands.
+- From Slack, `/helix jobs` lists a person's queued, running and waiting
+  jobs with where to follow each, and `/helix status` says Helix's slots in
+  use, the queue and its version, both privately. A person answers a job
+  that needs input by replying in its thread (in a channel, with @Helix),
+  and the thread's **Cancel job** button cancels it for its person or the
+  owner. The manifest adds interactivity and the `app_mention` event for
+  these.
+- The planner is told what a slice costs: each one is a fresh session that
+  reads the brief, the spec and the code before it writes, so it now cuts
+  fewer, larger slices and folds a small addition into the slice it builds
+  on. A large spec was cut into seven slices of two or three minutes each.
+- Animus's own test commands (`npm test` and the specs' `$` lines, all run
+  through `scripts/with-tmp.sh`) end a test that never settles after a
+  minute, and no longer wait on a server a test left open. One such test
+  held an implementer for eight minutes.
+- Every job on Helix's display links to its own page, `/jobs/<id>`, which
+  a person reads after signing in with their Helix token (pasted, or given
+  in the address as `#token=…`). Its data comes from a new authenticated
+  route, `GET /jobs/<id>/page-data`; `/display` is unchanged and still
+  needs no token. `/people` and `/people/<name>` say they are coming.
+- A job page shows the job's facts, its spec as submitted, its time in each
+  stage and its slices, its latest checks with a failed one's output, the
+  reviewer's findings, its questions and answers, and its log, which keeps
+  to its end while the job runs. A gate run's file, `gates/run-<n>.txt`,
+  now ends with all that each check printed.
+- A job page shows the job's latest screenshots. Helix serves each, to a
+  valid token only, at `GET /jobs/<id>/shots/<name>`, and only names the
+  job's `shots/manifest.json` lists, never a file outside its shots folder.
+- `animus ui --helix` opens the Helix this machine joined in the browser,
+  already signed in with its token.
 
 ## 0.3.8 (2026-11-17)
 

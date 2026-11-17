@@ -43,6 +43,7 @@ export function addProject(opts: { store: Store; home: string; startCheck: Start
   if (same) throw new Refused(409, `${url} is already on Helix as ${same.name}`);
   const project: Project = { name, url, dir: projectDir(home, name), state: 'checking', added: (opts.at ?? new Date()).toISOString(), added_by: person };
   store.putProject(project);
+  store.record(person, 'project-added', { project: name });
   rmSync(checkLog(home, name), { force: true });
   opts.startCheck(name);
   return project;
@@ -79,6 +80,7 @@ export function removeProject(opts: { store: Store; home: string; config: Pick<C
   const busy = [...store.inState('queued'), ...store.inState('running')].filter((j) => j.repo === name);
   if (busy.length) throw new Refused(409, `job(s) ${busy.map((j) => j.id).join(', ')} are queued or running for ${name}: wait for them, or cancel them, first`);
   store.dropProject(name);
+  store.record(person, 'project-removed', { project: name });
   forgetProject(home, project);
   return project;
 }

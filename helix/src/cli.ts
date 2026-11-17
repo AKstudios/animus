@@ -294,6 +294,8 @@ function main(argv: string[]): number | undefined | Promise<number> {
         if (busy.length) throw new AnimusError(`job(s) ${busy.map((j) => j.id).join(', ')} are queued or running for ${name}: wait for them, or cancel them, first`);
         const project = store.project(name);
         removeRepo(store, name);
+        // Done on the machine, not by a person on Helix.
+        store.record('machine', 'project-removed', { project: name });
         if (project) forgetProject(helixHome(), project);
         return project;
       });

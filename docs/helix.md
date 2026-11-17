@@ -200,21 +200,70 @@ process ends, however it ends, so a cancelled job leaves nothing serving.
 ## The display
 
 Helix serves a page at its own address showing the slots, each running job's
-stage, the queue, jobs waiting for an answer, and jobs that ended. It needs
+stage, the queue, jobs waiting for an answer, the ten newest open pull
+requests its jobs opened (drafts marked), and the jobs that failed or were
+cancelled. Helix finds the open PRs by asking GitHub, once a minute per
+project, with the GitHub token of the person whose job opened one; a PR
+whose person has left Helix is not listed. It needs
 no sign-in: anyone who can reach Helix can read it. It only reads; submitting,
 answering and cancelling need a person's token. Click a project to narrow the
 page to it; `?theme=dark` or `?theme=light` fixes the theme.
 
+Every job on it links to its own page, `/jobs/<id>`, an address that can be
+shared and opened cold. A job page needs a sign-in: paste your Helix token
+(`~/.animus/helix.json`), or open an address ending `#token=<token>`, which
+that browser keeps and takes out of the address bar; `animus ui --helix`
+opens Helix that way, signed in as you. Sign out from the
+header. Do not sign in on a shared wall screen: the token can also submit and
+cancel jobs as you.
+
+Every person named on the overview or a job page links to their page,
+`/people/<name>`. `/people` (the header's PEOPLE) lists each person on the
+Helix, for anyone signed in: their GitHub login, the day they joined (blank
+for a person who joined before Helix kept it), jobs submitted, PRs opened,
+total spent and their last activity. Someone who has left is not listed.
+
+A person's page, `/people/<name>`, shows those numbers, their jobs newest first
+(thirty at a time, with SHOW MORE for older ones), each linking to its job page,
+and their activity newest first: what they submitted, answered (with the
+answer's text), cancelled, joined, left, and the projects they added or
+removed. Their jobs come from the jobs table, so jobs from before Helix kept
+activity show too. Someone who has left keeps a page that says so.
+
+The same page is also the local display, `animus ui`, which answers the same
+shapes from `~/.animus` with `local` set on `GET /display`. Its job ids are
+the jobs' folder names (`/jobs/<name>`), it needs no sign-in, and it has no
+people pages: those are Helix's alone. The files both serve and the reading of
+a job's folder live in the plugin (`plugin/src/assets.ts`,
+`plugin/src/job-folder.ts`), which Helix imports.
+
+A job page shows the job's project, person, state, outcome, pull request,
+cost and times; its spec as submitted; how long it spent in each stage,
+summed over its runs, and its slices when it was cut; the checks of its
+latest gate run, with what a failed one printed; every review round's
+findings; each question it asked with the answer it was given; its latest
+screenshots, for a UI job; and Helix's log of it. The checks, reviews,
+questions and screenshots come from the job's Animus folder, which keeps each gate run as `gates/run-<n>.txt`. While the job is
+queued or running the page reads it again every two seconds and keeps the log
+at its end, unless you have scrolled up in it; once it has ended the log is
+there whole.
+
 ## HTTP API
 
-Every route but `/`, `/display`, `/version`, `/invite` and `/join` needs a
-person's Helix token as `Authorization: Bearer <token>`. The client sends its
-version, and Helix answers 426 to one it cannot work with.
+Every route but the display's pages, `/display`, `/version`, `/invite` and
+`/join` needs a person's Helix token as `Authorization: Bearer <token>`. The
+client sends its version, and Helix answers 426 to one it cannot work with;
+the display's own request for a job page's data sends none.
 
 | Route | What it does |
 | --- | --- |
 | `GET /` | The display page |
-| `GET /display` | What the display shows, as JSON |
+| `GET /jobs/<id>`, `/people`, `/people/<name>` | The display page, to a browser asking for HTML |
+| `GET /jobs/<id>/page-data` | What a job page shows, for any person |
+| `GET /people/page-data` | What the people list shows, for any person |
+| `GET /people/<name>/page-data[?before=<job id>]` | What a person's page shows: their numbers, thirty jobs older than that one, and all their activity; 404 for a name Helix never heard of |
+| `GET /jobs/<id>/shots/<name>` | One of a job's screenshots, by its name in `shots/manifest.json`; nothing outside its shots folder |
+| `GET /display` | What the display shows, as JSON, with the open PRs of the jobs (`prs`) |
 | `GET /version` | Helix's version |
 | `POST /invite` | Who an invite code is for, and the projects there |
 | `POST /join` | Join with a code and both tokens; returns the Helix token |
