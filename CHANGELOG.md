@@ -8,6 +8,8 @@ clients with how to update.
 
 ## Unreleased
 
+## 0.3.6 (2026-11-17)
+
 - The marketplace is now called `akstudios`, so the plugin is
   `animus@akstudios`; existing installs move once. `animus setup` removes the one called `animus` and
   its plugin; by hand, `claude plugin marketplace remove animus`, then add
