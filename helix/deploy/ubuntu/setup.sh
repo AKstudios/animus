@@ -134,7 +134,7 @@ say "8. $NEW_USER may run Docker"
 # Membership of the docker group is as good as root on this machine: the
 # account already has sudo, and only Helix uses it. Jobs never get the socket.
 if getent group docker >/dev/null; then usermod -aG docker "$NEW_USER"
-else echo "  Docker is not installed: jobs run on the machine until it is (see helix/deploy/README.md)"; fi
+else echo "  Docker is not installed: jobs run on the machine until it is (see docs/helix-deploy.md)"; fi
 
 say "read back"
 printf '  %-22s %s\n' \

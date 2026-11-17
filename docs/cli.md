@@ -1,0 +1,197 @@
+# CLI reference
+
+Two commands: `animus`, which the plugin installs, and `helix`, which runs
+on the Helix machine only. In a Claude Code session you rarely type
+`animus` yourself: the plugin's skills run it when you ask. `animus help`
+and `helix help` print the same list in short.
+
+Exit codes: 0 for success, 1 when the command ran but its result is a
+failure (a job that did not end in a PR, a failing gate, a doctor problem),
+2 for a usage error or a refusal (printed as `animus: <reason>`).
+
+## animus
+
+### Jobs on this machine
+
+#### `animus start <spec.md> [--local | --helix] [--repo <dir>] [--draft]`
+
+Starts one job, here or on Helix. Where it runs is decided in this order:
+
+1. `--local` or `--helix`.
+2. `run:` in `~/.animus/config.yaml`, the repository's entry and then the
+   top ([configuration.md](configuration.md#your-own-settings)).
+3. Helix, when this machine has joined one that has the repository.
+4. Otherwise here.
+
+Here, it is `animus run` and waits for the job to end. On Helix, it is
+`animus submit` and returns at once. `/animus:to-spec` starts jobs with
+this command.
+
+#### `animus run <spec.md> [--repo <dir>] [--dry-run] [--draft] [--keep] [--skills <file>]`
+
+Runs one job on this machine, from spec to PR: a worktree, the planner for a
+medium or large spec, the implementer, the gates, the review, the PR
+([architecture.md](architecture.md#what-a-job-does)). Run it from inside
+the target repository, or name it with `--repo`.
+
+- `--dry-run`: stops before the push, so no PR opens.
+- `--draft`: opens the PR as a draft.
+- `--keep`: leaves the worktree when the job ends.
+- `--skills <file>`: the personal skills as JSON, instead of reading
+  `~/.animus/config.yaml`. Helix passes them this way.
+
+A spec with `after: <spec.md>` waits until that spec's PR is merged. Prints
+the result as JSON; exits 0 when the job ended in a PR.
+
+#### `animus resume <job> [--answer <text>] [--dry-run] [--keep]`
+
+Picks up a job that stopped with a question, or was interrupted. `--answer`
+gives it the answer to its question.
+
+#### `animus plan <spec.md> [--slices] [--repo <dir>]`
+
+Checks a spec and prints what its labels would run: stages, tier, effort,
+reviewer, the skills each role gets (yours marked), what it waits for, and
+each criterion with its check command. Starts no job.
+
+`--slices` also asks the planner how it would cut the spec. That is one
+read-only model session in the repository, so it costs a little.
+
+#### `animus init [--repo <dir>] [--force]`
+
+Drafts `.animus/animus.yaml` from the repository's `package.json`,
+`pyproject.toml`, `go.mod` or `Cargo.toml`. Runs nothing. Read the draft
+before the first job: its commands are the gates. `--force` replaces an
+existing profile.
+
+### The record
+
+#### `animus runs [-n <count>] [--json]`
+
+The run log (`~/.animus/runs.jsonl`), newest last, 20 lines unless `-n`
+says otherwise.
+
+#### `animus outcomes [--json]`
+
+What became of each PR, read from GitHub with `gh`: merged or closed, time
+to merge, commits by people, reverted or reworked within 30 days. Then the
+five numbers split by task class. Without `gh`, it shows what it last read.
+
+#### `animus cleanup [<job>...] [--days <n>] [--dry-run]`
+
+Removes what finished jobs left behind: the branches (local and on origin)
+and worktree of a job whose PR is merged or closed, and the folder of a job
+that last ran more than `--days` ago (default 14). A job with an open PR is
+kept. Named jobs are removed without waiting for `--days`. `--dry-run`
+lists what would be removed.
+
+### This machine
+
+#### `animus doctor`
+
+Checks that this machine can run and submit jobs: Node, Claude Code, git,
+`gh`, the repository's profile, your config, Helix and its version, and
+anything in your own setup that would reach a job (orbit's plugin, git
+hooks, commit signing). Exits 1 if anything would stop a job.
+
+#### `animus skills`
+
+The vendored skills, the commit each was copied at, and which role gets
+each.
+
+#### `animus version`
+
+The plugin's version and the commit of Animus it runs from (marked `-dirty`
+when that checkout has changes).
+
+### Helix
+
+These need a Helix this machine has joined (`~/.animus/helix.json`), or
+`HELIX_URL` and `HELIX_TOKEN` set, which win.
+
+#### `animus join <url> <code>`
+
+Joins a Helix with the one-time code from `helix invite`. It runs `animus
+doctor`, runs `claude setup-token` and asks for the token it printed, opens
+GitHub's page for a fine-grained token (contents and pull requests, write)
+and asks for that token, then sends both. Helix tries them and refuses them
+with the reason if either fails. The Helix token it returns is kept in
+`~/.animus/helix.json`.
+
+#### `animus leave [--yes]`
+
+Takes you off Helix: your queued and running jobs are cancelled and your
+tokens there deleted. Asks first unless `--yes`, which a session without a terminal needs.
+
+#### `animus project add [<name>]`
+
+Puts this checkout's repository on Helix, named after its folder unless
+given a name. Helix clones it with your GitHub token, checks the token may
+push, reads `.animus/animus.yaml` from the default branch and runs its setup
+once. The command waits and prints the check as it goes. Anyone on Helix
+whose GitHub token may push to the repository can then submit for it.
+
+#### `animus project list`
+
+The projects on Helix: state (ready, checking or failed, with the reason), GitHub address and who added each.
+
+#### `animus project remove <name>`
+
+Removes a project you added. Refused while any of its jobs is queued or
+running. The clones Helix and people's jobs made of it are deleted.
+
+#### `animus submit <spec.md> [--repo <dir>] [--draft]`
+
+Queues a spec on Helix for the project with this checkout's GitHub address
+(or, failing that, the one named after its folder), with your personal
+skills. Returns the job's number at once.
+
+#### `animus status [<id>]`
+
+With no id, the queue and the slots. With one, that job and the end of its
+log.
+
+#### `animus result <id>`
+
+One job as JSON. Exits 0 once it has ended in a PR.
+
+#### `animus answer <id> <text>`
+
+Answers a job's question. The job is queued again and resumes with it.
+
+#### `animus cancel <id>`
+
+Cancels a queued or running job.
+
+### Inside a job's worktree
+
+The implementer runs these during a job. They fail anywhere else.
+
+| Command | What it does |
+| --- | --- |
+| `animus check` | Runs the job's gates now: the profile's commands, then the criteria's commands (only those of the slices so far, part-way through a sliced job), and `fails-on-base` for a bug. |
+| `animus shots [--again]` | Screenshots a UI job's pages. Reuses the last set when the worktree has not changed since, unless `--again`. |
+| `animus ui up \| down` | Starts or stops a UI job's app. |
+
+## helix
+
+Run on the Helix machine as `helix/bin/helix`, with its files under
+`~/.helix` (`HELIX_HOME`). See [helix.md](helix.md) for what Helix is and
+[helix-deploy.md](helix-deploy.md) for setting a machine up.
+
+| Command | What it does |
+| --- | --- |
+| `helix serve` | Listens for submissions and runs them, as many at once as `slots` in `config.yaml`. The service manager runs this. |
+| `helix invite <name> [--github <login>]` | Prints a one-time join code for a person, good for 24 hours, and the `animus join` command to send them. A new invite replaces the old. `--github` takes only a GitHub token that signs in as that login. |
+| `helix add-person <name> [--env-file <file>]` | Adds a person by hand instead of an invite, and prints their Helix token once. The file holds `KEY=VALUE` lines set for their jobs only (`CLAUDE_CODE_OAUTH_TOKEN`, `GH_TOKEN`). Run again for a new token. |
+| `helix remove-person <name>` | Their token stops working, their queued and running jobs are cancelled, their credentials file and folder are deleted. Prints what is left to revoke on GitHub, Claude and Tailscale. |
+| `helix check [<name>]` | Tries each person's tokens for real: who the GitHub token is, when it ends, whether it may push to each project, whether the Claude token answers. Exits 1 if anything but a push fails. |
+| `helix add-repo <name> <dir>` | Adds a clone made by hand, ready at once. People add theirs with `animus project add` instead. |
+| `helix remove-repo <name>` | Removes any project, whoever added it. Refused while any of its jobs is queued or running. A clone added with `add-repo` stays on disk. |
+| `helix image` | Builds the image jobs run in (`animus-job:<version>`). Used when `config.yaml` has a `container:` entry. |
+| `helix upgrade <tag>` | Moves the machine to a release: stops starting jobs, waits for the running ones, checks out the tag, installs, runs the tests and typecheck, builds the job image when jobs run in containers, and exits for the service manager to restart it. If any step fails, the checkout goes back. |
+
+Helix also runs three commands on itself, which you do not type: `helix
+verify` (tries a joining person's tokens), `helix check-project <name>` (a
+project's check) and `helix setup <worktree>` (a project's setup, in the job
+image when jobs run in containers).

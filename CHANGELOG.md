@@ -8,6 +8,11 @@ clients with how to update.
 
 ## Unreleased
 
+- The README says only how to install and use Animus. Everything else is in
+  `docs/`: a CLI reference, the spec format, configuration, architecture,
+  releases and development. Helix's READMEs moved to `docs/helix.md` and
+  `docs/helix-deploy.md`.
+
 ## 0.3.3 (2026-11-17)
 
 - A person's own settings in `~/.animus/config.yaml` (`ANIMUS_HOME`), never in

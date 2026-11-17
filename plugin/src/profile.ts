@@ -81,7 +81,7 @@ const DEFAULTS: Profile = {
 
 export function loadProfile(dir: string): Profile {
   const file = join(dir, PROFILE_PATH);
-  if (!existsSync(file)) throw new AnimusError(`no ${PROFILE_PATH} in ${dir}. It names the project's setup and check commands; see the README for its keys`);
+  if (!existsSync(file)) throw new AnimusError(`no ${PROFILE_PATH} in ${dir}. It names the project's setup and check commands; see docs/configuration.md in Animus for its keys`);
   return parseProfile(readFileSync(file, 'utf8'), file);
 }
 

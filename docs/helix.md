@@ -1,27 +1,12 @@
 # Helix
 
 The supervisor for a machine that runs Animus jobs for several people
-(docs/factory.md, "The office machine"). It is not part of the plugin and is
-not installed with it. It keeps the queue, the people and their projects in
-one SQLite file, starts each job as its own `animus run` process while slots
-are free, and answers over HTTP. Setting up a machine, or moving Helix to
-another one, is [deploy/README.md](deploy/README.md).
-
-## Commands
-
-On the machine, with its files under `~/.helix` (`HELIX_HOME`):
-
-```sh
-helix/bin/helix serve
-helix/bin/helix invite ajmal [--github <login>]   # a one-time code to join with
-helix/bin/helix check [<name>]                    # each person's tokens, tried against GitHub and Claude
-helix/bin/helix remove-person ajmal               # token off, jobs cancelled, credentials and folder deleted
-helix/bin/helix add-repo <name> <dir>             # a clone made by hand; people add theirs with animus project add
-helix/bin/helix remove-repo <name>                # any project, whoever added it
-helix/bin/helix image                             # the image jobs run in
-helix/bin/helix upgrade v<version>                # drain, check out the release, install, test, restart
-helix/bin/helix add-person <name> --env-file <f>  # by hand instead of invite: prints their token once
-```
+([factory.md](factory.md), "The office machine"). It lives in `helix/`, is
+not part of the plugin and is not installed with it. It keeps the queue, the
+people and their projects in one SQLite file, starts each job as its own
+`animus run` process while slots are free, and answers over HTTP. Setting up
+a machine, or moving Helix to another one, is
+[helix-deploy.md](helix-deploy.md). Its commands are in [cli.md](cli.md#helix).
 
 ## config.yaml
 
@@ -76,7 +61,7 @@ people's jobs made of it, and keeps a clone added with `add-repo`.
 
 With `container: {memory: 6g, cpus: 2}` in `config.yaml`, each job runs in a
 Docker container of its own, from the image `helix image` builds
-(`deploy/image/Dockerfile`). It sees only its submitter's folder under
+(`helix/deploy/image/Dockerfile`). It sees only its submitter's folder under
 `~/.helix/people/` (their clone, job state and Claude config), Animus
 read-only and their credentials, with no Docker socket and no published port.
 Without it, jobs run in worktrees on the machine and share its tools, ports
@@ -84,7 +69,7 @@ and network.
 
 ## Running unattended
 
-[deploy/ubuntu/setup.sh](deploy/ubuntu/setup.sh) sets up an Ubuntu machine:
+[helix/deploy/ubuntu/setup.sh](../helix/deploy/ubuntu/setup.sh) sets up an Ubuntu machine:
 an account for Helix, Node 24, no sleep, and a systemd unit that starts it at
 boot and again whenever it stops. Anything else that does that works too.
 With Tailscale, leave `host` at 127.0.0.1, run `tailscale serve
@@ -107,3 +92,27 @@ stage, the queue, jobs waiting for an answer, and jobs that ended. It needs
 no sign-in: anyone who can reach Helix can read it. It only reads; submitting,
 answering and cancelling need a person's token. Click a project to narrow the
 page to it; `?theme=dark` or `?theme=light` fixes the theme.
+
+## HTTP API
+
+Every route but `/`, `/display`, `/version`, `/invite` and `/join` needs a
+person's Helix token as `Authorization: Bearer <token>`. The client sends its
+version, and Helix answers 426 to one it cannot work with.
+
+| Route | What it does |
+| --- | --- |
+| `GET /` | The display page |
+| `GET /display` | What the display shows, as JSON |
+| `GET /version` | Helix's version |
+| `POST /invite` | Who an invite code is for, and the projects there |
+| `POST /join` | Join with a code and both tokens; returns the Helix token |
+| `POST /leave` | Take yourself off |
+| `GET /projects` | The projects |
+| `POST /projects` | Add a project; its check runs in the background (202) |
+| `GET /projects/<name>` | One project, with its check's log |
+| `DELETE /projects/<name>` | Remove a project you added |
+| `GET /jobs` | The slots and the queue |
+| `POST /jobs` | Submit: `repo`, `spec`, and optionally `name`, `draft`, `skills` |
+| `GET /jobs/<id>` | One job, with the end of its log |
+| `POST /jobs/<id>/answer` | Answer its question (`answer`); it is queued again |
+| `POST /jobs/<id>/cancel` | Cancel it |

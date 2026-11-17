@@ -1,4 +1,4 @@
-# Running Helix on another machine
+# Deploying Helix
 
 Helix keeps nothing that cannot be copied or made again. What a machine
 running it holds:
@@ -10,7 +10,7 @@ running it holds:
 | Each job's state, gate output, review and transcripts; the run log | `~/.animus` | no: copy it to keep history and resume jobs |
 | Clones added by hand with `helix add-repo`, and their worktrees | `~/repos`, `~/repos/.worktrees` | yes: clone over https |
 | Claude Code, gh, Node 24, agent-browser's Chrome | `~/.local/bin`, `/usr/local/bin`, `~/.agent-browser` | yes |
-| The service, Tailscale Serve, no sleep, the browser sandbox | set up by `ubuntu/setup.sh` | yes |
+| The service, Tailscale Serve, no sleep, the browser sandbox | set up by `helix/deploy/ubuntu/setup.sh` | yes |
 
 `helix.db` names the projects' clones and the credentials files by absolute
 path. Keep the same account name and the same folders, and a copy of
@@ -70,7 +70,7 @@ path. Keep the same account name and the same folders, and a copy of
 Helix needs Node 24, git, gh, Claude Code, and something that starts `helix
 serve` at boot and starts it again when it stops: launchd on a Mac, a
 Windows service, or any process supervisor. `helix upgrade` depends on that
-restart. `setup.sh` is only the Ubuntu way to set this up.
+restart. `helix/deploy/ubuntu/setup.sh` is only the Ubuntu way to set this up.
 
 ## Someone leaves
 

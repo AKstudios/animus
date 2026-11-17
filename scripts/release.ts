@@ -5,7 +5,7 @@
 // Unreleased section into this release's, commits, tags v<version> and moves
 // the stable branch to it. It pushes nothing: it prints the push.
 //
-// Teammates' Claude Code follows stable (README, "Releases"); Helix moves with
+// Teammates' Claude Code follows stable (docs/releases.md); Helix moves with
 // `helix upgrade v<version>`. A version that Helix and older clients cannot
 // share (version.ts, compatible) needs --breaking, to say it was meant.
 import { spawnSync } from 'node:child_process';

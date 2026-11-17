@@ -70,7 +70,7 @@ const ECOSYSTEMS: [name: string, detect: (repo: string) => Found | undefined][] 
 /** The profile's text for this repository, and what could not be worked out. */
 export function draftProfile(repo: string): { text: string; said: string[] } {
   const found = ECOSYSTEMS.flatMap(([name, detect]) => { const f = detect(repo); return f ? [{ name, ...f }] : []; });
-  if (!found.length) throw new AnimusError(`nothing at the root of ${repo} says how it is built (no package.json, pyproject.toml, go.mod or Cargo.toml). Write ${PROFILE_PATH} by hand: the README's "Configuration" shows its keys`);
+  if (!found.length) throw new AnimusError(`nothing at the root of ${repo} says how it is built (no package.json, pyproject.toml, go.mod or Cargo.toml). Write ${PROFILE_PATH} by hand: docs/configuration.md in Animus lists its keys`);
   const commands: Record<string, string> = {};
   // Two ecosystems at one root both have a test command: the second is named for its ecosystem.
   for (const f of found) for (const [gate, run] of f.commands) commands[gate in commands ? `${f.name}-${gate}` : gate] = run;
@@ -84,7 +84,7 @@ export function draftProfile(repo: string): { text: string; said: string[] } {
   const text = [
     '# Animus\'s profile for this repository, drafted by `animus init` from what the root says.',
     '# Read it and correct it: the commands are the gates every job must pass.',
-    '# Other keys (notes, protected, checks, installs, tests) are in Animus\'s README.',
+    '# Other keys (notes, protected, checks, installs, tests) are in Animus\'s docs/configuration.md.',
     ...said.map((s) => `# Not found: ${s}.`),
     '',
     stringify(profile, { lineWidth: 0 }),
