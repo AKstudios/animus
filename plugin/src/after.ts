@@ -30,10 +30,16 @@ export async function waitForMerged(p: { repo: string; files: readonly string[];
   for (const file of p.files) {
     let said = '';
     // The pull request is titled after its spec, so one the run log lacks is found on GitHub by that title.
-    const title = existsSync(file) ? loadSpec(file).title : undefined;
+    // Read only once the run log has nothing, so a spec edited since its run still lets a logged merge through.
+    let title: string | undefined;
+    let read = false;
     for (;;) {
       let pr = readRuns().findLast((r) => r.repo === p.repo && r.spec_file === file && r.pr)?.pr;
       let state = pr ? p.lookup(pr, p.repo) : undefined;
+      if (!pr && !read) {
+        read = true;
+        title = existsSync(file) ? loadSpec(file).title : undefined;
+      }
       if (!pr && title) {
         const found = p.find(title, p.repo);
         pr = found?.url;
