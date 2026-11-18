@@ -8,6 +8,36 @@ clients with how to update.
 
 ## Unreleased
 
+- **Breaking:** a spec's header is held to its keys. A key other than `title`,
+  `size`, `difficulty`, `type`, `base`, `ui`, `after` and `design` (or, under
+  `ui`, other than `target` and `pages`) is refused with "did you mean", where
+  it used to be ignored. Specs written with a misspelt or invented key must be
+  corrected. Specs that `after:` names are still read as before.
+- A spec is admitted against its project before it runs. One script, with no
+  model, checks it against the factory and the project's profile and lists
+  every problem at once, each marked as fixed in the spec or in the profile
+  (with the YAML to add and the branch the profile was read from): an unknown
+  key, a `ui` of the wrong shape, no or an unknown UI target, an unknown page,
+  a design file or base branch that is missing, a type not built, a `bug` spec
+  with no command, a spec where no criterion has one. `animus plan` shows the
+  target, pages, gates, problems and warnings, and exits 1 when refused;
+  `animus run` and `start` admit before any work, and a warning is shown when
+  every criterion's command is a gate or all are the same.
+- Helix admits against the base branch as GitHub has it: `POST /jobs` answers
+  400 with the list, `animus start --helix` warns when the checkout's profile
+  differs, `after:` is refused on Helix with a pointer to `--local`, and a
+  queued job is admitted again when it starts and ends as `refused`, with the
+  list, if it no longer passes. Jobs and drafts read the profile from
+  `origin/<base>`, not from whatever the clone has checked out.
+- Drafts on Slack and GitHub are written knowing the project (base, gates,
+  runnable types, UI targets and pages), admit's problems go back to the
+  session once within the $0.50 cap, the posted draft carries a summary
+  outside its spec, and Submit is refused with the problems while any remain.
+  A draft's criterion may have no command.
+- A UI spec's `pages` may give a path such as `/masjid/subscribe`; the job
+  screenshots it on its target as it does a named page.
+- `issue_link: refs` in the project's profile makes a PR for a GitHub issue say
+  `Refs #N` instead of `Closes #N`; the default is `closes`.
 - Helix jobs and drafts read the project's base branch as GitHub has it. Before a job starts or a draft is written, Helix fetches the base branch (the profile's `base`, `main` when unset) with the person's token, so a profile fixed on GitHub is the one the next job reads, even from an older clone. A fetch that fails (token refused, GitHub unreachable) ends the job or draft before any work, with the reason. A person's own branches and uncommitted work in a clone are left alone.
 - The display's overview leads with what needs you: a headline from the counts
   ("1 job needs you. 3 agents at work.") and the last job that finished, an

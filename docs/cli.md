@@ -56,9 +56,19 @@ gives it the answer to its question.
 
 #### `animus plan <spec.md> [--slices] [--repo <dir>]`
 
-Checks a spec and prints what its labels would run: stages, tier, effort,
-reviewer, the skills each role gets (yours marked), what it waits for, and
-each criterion with its check command. Starts no job.
+Admits a spec ([specs.md](specs.md#checking-a-spec)) against the factory and
+the checkout's profile and prints what its labels would run: stages, tier,
+effort, reviewer, the skills each role gets (yours marked), what it waits for,
+and each criterion with its check command. For a UI spec it shows the target
+and the pages it will screenshot; it also shows the base, the gates, and any
+warnings. A spec that is refused prints every problem, marked spec or profile
+(a profile problem with the YAML to add), and exits 1. Starts no job.
+
+`animus run` and `animus start` admit the spec the same way before any work,
+and `animus start --helix` and `animus submit` are admitted by Helix against
+the base branch on GitHub ([helix.md](helix.md#admit)). `start --helix` warns
+when the checkout's profile differs from the base branch's. A spec with
+`after:` is refused on Helix with a pointer to `--local`.
 
 `--slices` also asks the planner how it would cut the spec. That is one
 read-only model session in the repository, so it costs a little.
