@@ -13,7 +13,7 @@ import { revParse } from './git.ts';
 export type FixEntry = { ask: string; job: string; cost_usd: number };
 
 /** The fix on this pull request that is running here or waiting for an answer, if any. */
-function activeFix(pr: string): { job: string; what: string } | undefined {
+export function activeFix(pr: string): { job: string; what: string } | undefined {
   let names: string[] = [];
   try { names = readdirSync(jobDir('')); } catch { /* no jobs yet */ }
   for (const job of names) {

@@ -9,6 +9,7 @@
 // analysis: only a job named on the command line goes whole, and at once.
 import { existsSync, readdirSync, rmSync, statSync } from 'node:fs';
 import { join } from 'node:path';
+import { activeFix } from './fix.ts';
 import { revParse } from './git.ts';
 import { animusHome, jobDir, loadState, readRuns } from './log.ts';
 import { evidenceBranch, type PrState } from './pr.ts';
@@ -42,7 +43,8 @@ export function cleanup(opts: CleanupOptions, lookup: PrEnd): Cleaned[] {
   const prs = new Map<string, string>();
   for (const run of readRuns()) if (run.pr) prs.set(run.job, run.pr);
   const named = Boolean(opts.jobs?.length);
-  return (named ? opts.jobs! : all).map((job) => cleanJob(job, prs.get(job), named, opts, lookup));
+  // A fix that failed has no pull request in its run, but its state names the one it was updating.
+  return (named ? opts.jobs! : all).map((job) => cleanJob(job, prs.get(job) ?? loadState(job)!.pr, named, opts, lookup));
 }
 
 function cleanJob(job: string, pr: string | undefined, named: boolean, opts: CleanupOptions, lookup: PrEnd): Cleaned {
@@ -58,6 +60,9 @@ function cleanJob(job: string, pr: string | undefined, named: boolean, opts: Cle
   // Since when nobody needs its branches: its pull request ended, or, with none, it last ran.
   let since = lastRun;
   if (pr) {
+    // A fix of the pull request works in this worktree and on this branch, merged pull request or not.
+    const active = activeFix(pr);
+    if (active && !(named && active.job === job)) return { job, removed: [], kept: `fix ${active.job} is ${active.what}` };
     const end = lookup(pr, hasRepo ? repo : animusHome());
     if (!end) return { job, removed: [], kept: `the state of ${pr} could not be read` };
     if (end.state === 'OPEN') return { job, removed: [], kept: `${pr} is open` };
