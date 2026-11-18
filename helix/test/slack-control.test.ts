@@ -144,6 +144,96 @@ for (const [who, user, cancels] of [['the job\'s person', 'U0ANA', true], ['the 
   });
 }
 
+const add = (h: ReturnType<typeof helix>, j: Partial<HelixJob>) =>
+  h.store.add({ person: 'ana', repo: 'app', spec: '', draft: false, submitted: '', state: 'queued', title: 't', ...j });
+
+// Protects: criterion 1. Fails when: a state's details, or the thread and PR links, are missing.
+test('/helix job shows the title, project, person, state and links, and what is particular to its state', async () => {
+  const h = helix();
+  const waiting = add(h, { title: 'waits', waiting: 'waiting for memory: 1 GB free' });
+  const done = add(h, { state: 'ended', outcome: 'pr', title: 'done', pr: 'https://example.test/pr/2' });
+  const failed = add(h, { state: 'ended', outcome: 'failed', title: 'broke', reason: 'gates failed' });
+  const asking = add(h, { state: 'ended', outcome: 'needs-input', title: 'asks', question: 'which one?' });
+  h.store.putSlackThread(done.id, { channel: 'D0ANA', ts: '1.5' });
+
+  for (const j of [waiting, done, failed, asking]) await h.slack.deliver(command('U0ANA', `job #${j.id}`));
+  h.stop();
+
+  const [w, d, f, a] = h.respondedTo();
+  assert.equal(w, `Job ${waiting.id}: waits\nProject app, person ana\nState: queued\nWaiting: waiting for memory: 1 GB free`);
+  assert.equal(d, `Job ${done.id}: done\nProject app, person ana\nState: ended\nOutcome: pr\nPull request: https://example.test/pr/2\nThread: https://slack.com/app_redirect?channel=D0ANA&message_ts=1.5`);
+  assert.match(f!, /Outcome: failed\nReason: gates failed/);
+  assert.match(a!, /Outcome: needs-input\nQuestion: which one\?/);
+});
+
+// Protects: criterion 1, a running job. Fails when: the stage and who is working are missing, or shown from before the job started.
+test('/helix job shows a running job\'s stage and who is working, only from progress written since it started', async () => {
+  const h = helix();
+  const home = h.supervisor.animusHome('ana');
+  const running = (animus_job: string, at: string) => {
+    mkdirSync(join(home, 'jobs', animus_job), { recursive: true });
+    writeFileSync(join(home, 'jobs', animus_job, 'progress.json'), JSON.stringify({ stage: 'review', who: 'the reviewer', at }));
+    return add(h, { state: 'running', animus_job, started: '2026-01-01T00:00:10.000Z' });
+  };
+  const fresh = running('fresh', '2026-01-01T00:00:20.000Z');
+  const stale = running('stale', '2026-01-01T00:00:05.000Z');
+
+  await h.slack.deliver(command('U0ANA', `job ${fresh.id}`));
+  await h.slack.deliver(command('U0ANA', `job ${stale.id}`));
+  h.stop();
+
+  const [shown, hidden] = h.respondedTo();
+  assert.match(shown!, /State: running\nStage review, the reviewer working/);
+  assert.doesNotMatch(hidden!, /Stage/);
+});
+
+// Protects: criterion 2. Fails when: another person's or a missing job is shown to someone not the owner.
+test('/helix job says there is no such job for a missing one or another person\'s, and shows the owner any', async () => {
+  const h = helix();
+  const bens = add(h, { person: 'ben', title: 'secret' });
+
+  await h.slack.deliver(command('U0ANA', `job ${bens.id}`));
+  await h.slack.deliver(command('U0ANA', 'job 999'));
+  await h.slack.deliver(command('U0OWNER', `job ${bens.id}`));
+  h.stop();
+
+  const [other, missing, owners] = h.respondedTo();
+  assert.equal(other, `There is no such job of yours: ${bens.id}`);
+  assert.equal(missing, 'There is no such job of yours: 999');
+  assert.match(owners!, /secret/);
+});
+
+// Protects: criteria 3 and 4. Fails when: the command differs from the button, or acts on an ended, missing or non-numeric job.
+test('/helix cancel cancels like the button, and refuses others, ended, missing and non-numeric jobs without changing anything', async () => {
+  const h = helix({ paused: true });
+  const mine = h.submit('ana', 'cancel me');
+  h.store.putSlackThread(mine.id, { channel: 'D0ANA', ts: '9.1' });
+  const bens = h.submit('ben', 'not yours');
+  const ended = add(h, { state: 'ended', outcome: 'pr' });
+
+  await h.slack.deliver(command('U0ANA', `cancel #${mine.id}`));
+  await h.slack.deliver(command('U0ANA', `cancel ${bens.id}`));
+  await h.slack.deliver(command('U0ANA', `cancel ${ended.id}`));
+  await h.slack.deliver(command('U0ANA', 'cancel 999'));
+  await h.slack.deliver(command('U0ANA', 'cancel soon'));
+  await h.slack.deliver(command('U0OWNER', `cancel ${bens.id}`));
+  h.stop();
+
+  assert.equal(h.store.get(mine.id)?.state, 'cancelled');
+  assert.equal(h.store.get(bens.id)?.state, 'cancelled');
+  assert.equal(h.store.get(ended.id)?.state, 'ended');
+  assert.deepEqual(h.slack.sent[0], { method: 'post', channel: 'D0ANA', thread: '9.1', text: `Job ${mine.id} was cancelled by <@U0ANA>.` });
+  assert.deepEqual(h.slack.sent.map((s) => 'text' in s ? s.text : ''), [
+    `Job ${mine.id} was cancelled by <@U0ANA>.`,
+    `Job ${mine.id} was cancelled.`,
+    `Only ben or <@U0OWNER> may cancel job ${bens.id}.`,
+    `job ${ended.id} has already ended`,
+    'There is no job 999.',
+    'There is no job soon.',
+    `Job ${bens.id} was cancelled.`,
+  ]);
+});
+
 // Fails when: help, an empty command or an unknown one does not list the commands, or shows the owner's commands to someone else.
 test('/helix help, an empty command and an unknown one list the commands, the owner\'s only to the owner', async () => {
   const h = helix();
@@ -156,7 +246,7 @@ test('/helix help, an empty command and an unknown one list the commands, the ow
   const [help, empty, unknown, owners] = h.respondedTo();
   assert.equal(help, helpText(false));
   assert.deepEqual([empty, unknown], [help, help]);
-  for (const c of ['draft', 'jobs', 'status', 'project', 'notify', 'help']) assert.match(help!, new RegExp('/helix ' + c));
+  for (const c of ['draft', 'jobs', 'job <id>', 'cancel <id>', 'status', 'project', 'notify', 'help']) assert.match(help!, new RegExp('/helix ' + c));
   assert.doesNotMatch(help!, /invite|\/helix link/);
   assert.match(owners!, /\/helix invite @user <github-login>.*owner only/);
   assert.match(owners!, /\/helix link @user <person>.*owner only/);
