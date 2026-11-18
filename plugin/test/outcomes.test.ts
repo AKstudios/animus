@@ -1,10 +1,13 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import type { Run } from '../src/log.ts';
-import { numbers, refreshOutcomes, type Outcomes } from '../src/outcomes.ts';
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { describeNumbers, numbers, outcomesFile, refreshOutcomes, type Outcomes } from '../src/outcomes.ts';
 import { runJob } from '../src/pipeline.ts';
 import type { PrFacts } from '../src/pr.ts';
-import { git } from '../src/proc.ts';
+import { git, tryGit } from '../src/proc.ts';
 import { clean, deps, done, fakeAgent, makeRepo, write, writeSpec } from './helpers.ts';
 
 const DAY = 24 * 60 * 60 * 1000;
@@ -33,6 +36,32 @@ test('a merged pull request records its time to merge and the commits a person a
   const o = read({ ...facts, commits: [run.started, new Date(Date.parse(run.ended) + 60_000).toISOString()] });
   assert.deepEqual([o.state, o.job, o.ms_to_merge, o.human_commits, o.reverted, o.reworked], ['MERGED', run.job, 90_000, 1, false, false]);
   assert.equal(read().human_commits, 0);
+});
+
+test('a pull request records the lines a person added and removed after the job', async () => {
+  const { repo, run, facts, commit, read } = await mergedJob();
+  commit('src/feature.txt', 'one\ndone\nthree\nfour\nfive\n');
+  commit('src/other.txt', 'x\n');
+  const late = [run.started, new Date(Date.parse(run.ended) + 60_000).toISOString()];
+  const o = read({ ...facts, commits: late, head: git(repo, ['rev-parse', 'HEAD']) });
+  assert.deepEqual(o.human_lines, { added: 3, removed: 0 });
+  assert.deepEqual(read({ ...facts, commits: [run.started] }).human_lines, { added: 0, removed: 0 });
+});
+
+test('a head that is only on the remote is fetched before the lines are counted, and an unreadable head leaves them absent', async () => {
+  const { repo, run, facts, read } = await mergedJob();
+  // A person's push lives on GitHub: a bare remote holds the commit, the clone does not.
+  const person = mkdtempSync(join(tmpdir(), 'animus-person-'));
+  git(repo, ['clone', '-q', repo, person]);
+  write(person, 'src/feature.txt', 'one\ndone\nthree\nfour\n');
+  git(person, ['commit', '-qam', 'a person adds a line']);
+  const head = git(person, ['rev-parse', 'HEAD']);
+  git(repo, ['remote', 'add', 'origin', person]);
+  assert.equal(tryGit(repo, ['cat-file', '-e', head]), undefined);
+  const late = [run.started, new Date(Date.parse(run.ended) + 60_000).toISOString()];
+  assert.deepEqual(read({ ...facts, commits: late, head }).human_lines, { added: 1, removed: 0 });
+  rmSync(outcomesFile());
+  assert.equal(read({ ...facts, commits: late, head: 'f'.repeat(40) }).human_lines, undefined);
 });
 
 test('a later change to the lines a pull request added is rework; a change elsewhere, or after 30 days, is not', async () => {
@@ -68,7 +97,7 @@ test('a closed pull request is settled and not asked about again; an open or new
 
 test('the five numbers are counted per job and split by task class', () => {
   const run = (job: string, type: string, over: Partial<Run> = {}) => ({ job, type, cost_usd: 1, ms: { total: 60_000 }, gates: [{ attempt: 1, ok: true }], ...over }) as Run;
-  const outcome = (pr: string, over: Partial<Outcomes[string]>) => ({ [pr]: { pr, job: '', state: 'MERGED', opened: '', human_commits: 0, reverted: false, reworked: false, checked: '', ...over } }) as Outcomes;
+  const outcome = (pr: string, over: Partial<Outcomes[string]>) => ({ [pr]: { pr, job: '', state: 'MERGED', opened: '', human_commits: 0, human_lines: { added: 0, removed: 0 }, reverted: false, reworked: false, checked: '', ...over } }) as Outcomes;
   const rows = numbers([
     run('a', 'feature', { pr: 'a' }),                                    // merged, untouched
     run('b', 'feature', { gates: [{ attempt: 1, ok: false }] as Run['gates'], outcome: 'needs-input' }),
@@ -79,7 +108,23 @@ test('the five numbers are counted per job and split by task class', () => {
   ], { ...outcome('a', {}), ...outcome('b', { human_commits: 2, reworked: true }), ...outcome('c', { state: 'CLOSED' }) });
 
   const [feature, ui, all] = rows;
-  assert.deepEqual(feature, { type: 'feature', jobs: 4, prs: 3, open: 0, merged: 2, closed: 1, untouched: 1, gated: 4, first_time: 3, cost_usd: 5, ms: 300_000, watched: 2, reverted_or_reworked: 1 });
+  assert.deepEqual(feature, { type: 'feature', jobs: 4, prs: 3, open: 0, merged: 2, closed: 1, untouched: 1, gated: 4, first_time: 3, cost_usd: 5, ms: 300_000, watched: 2, reverted_or_reworked: 1, causes: {} });
   assert.deepEqual([ui!.jobs, ui!.prs, ui!.open, ui!.merged], [1, 1, 1, 0]);
   assert.deepEqual([all!.type, all!.jobs, all!.merged, all!.cost_usd], ['all', 5, 2, 6]);
+});
+
+// Protects: criterion 3's per-class counts. Fails when: outcomes drops causes, counts a resumed job's earlier stop, or mixes classes.
+test('runs that did not deliver are counted per task class by the cause the job last stopped for', () => {
+  const run = (job: string, type: string, over: Partial<Run> = {}) => ({ job, type, cost_usd: 0, ms: { total: 0 }, gates: [], ...over }) as Run;
+  const [feature, ui, all] = numbers([
+    run('a', 'feature', { cause: 'gates' }),
+    run('b', 'feature', { cause: 'needs-input' }),
+    run('b', 'feature', { pr: 'b' }),             // resumed and delivered: no cause now
+    run('c', 'feature', { cause: 'gates' }),
+    run('d', 'ui', { cause: 'review' }),
+  ], {});
+  assert.deepEqual(feature!.causes, { gates: 2 });
+  assert.deepEqual(ui!.causes, { review: 1 });
+  assert.deepEqual(all!.causes, { gates: 2, review: 1 });
+  assert.match(describeNumbers([feature!]), /gates 2/);
 });

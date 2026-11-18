@@ -13,7 +13,7 @@ import { ensureSetup } from './workspace.ts';
 
 /** criterion: the acceptance criterion (from 1) the command proves. skip: why this job does not run it. */
 export type Check = { name: string; command: string; cwd?: string; skip?: string; env?: Record<string, string>; note?: string; criterion?: number };
-export type CheckResult = { name: string; command: string; ok: boolean; skipped: boolean; ms: number; output: string; note?: string; criterion?: number };
+export type CheckResult = { name: string; command: string; ok: boolean; skipped: boolean; ms: number; output: string; note?: string; criterion?: number; flaky?: boolean };
 
 /** The project's own tool folders, in front of PATH, so `vitest` or `pytest` runs the worktree's copy. */
 const TOOL_DIRS = ['node_modules/.bin', '.venv/bin'];

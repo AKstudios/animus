@@ -6,19 +6,20 @@
 // function behind a queue.
 import { spawnSync } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
-import { copyFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { appendFileSync, copyFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { userInfo } from 'node:os';
-import { basename, join, resolve } from 'node:path';
+import { basename, dirname, join, resolve } from 'node:path';
 import { resolveAfter, waitForMerged } from './after.ts';
 import type { Agent, AgentResult } from './agent.ts';
 import { describe, failsOnBase, gateReport, jobChecks, LATER_SLICE, runChecks, type CheckResult } from './gates.ts';
 import { commitAll, mainCheckout, matchesAny, touchedFiles } from './git.ts';
-import { appendRun, jobDir, saveProgress, saveState, writeJson, type JobState, type Outcome, type Run, type Stage } from './log.ts';
+import { appendRun, CANCELLED_MARKER, jobDir, toolsLog, saveProgress, saveState, writeJson, type Cause, type FindingLog, type JobState, type Outcome, type Run, type Stage } from './log.ts';
 import { evidenceBranch, findPrByTitle, prBody, prState, type PrFind, type Evidence, type PrLookup, type Publish } from './pr.ts';
 import { admitFile, profileOnBase, refusal, type Admitted } from './admit.ts';
 import { loadProfile } from './profile.ts';
 import { describePlan, escalate, modelFor, PLUGIN_ROOT, raise, readPrompt, type Factory, type Plan, type Tier } from './profiles.ts';
 import { animusCommand, git, AnimusError, tryGit } from './proc.ts';
+import { factoryVersion } from './version.ts';
 import { asReport, asReview, blockers, criteriaList, listFindings, REPORT_SCHEMA, REVIEW_SCHEMA, type Finding, type Report, type Review } from './review.ts';
 import { loadJobSkills, saveJobSkills, type PersonalSkill } from './personal.ts';
 import { roleSkills } from './skills.ts';
@@ -40,6 +41,8 @@ export type Deps = {
   prState?: PrLookup;
   findPr?: PrFind;
   sleep?: (ms: number) => Promise<void>;
+  /** Ends the process after a signal has been logged; replaced in tests. */
+  exit?: (code: number) => never;
 };
 
 export type RunOptions = {
@@ -64,11 +67,18 @@ export type RunOptions = {
 /** Ends the job where it is thrown, with an outcome that is not a pull request. */
 class Stop extends Error {
   outcome: 'needs-input' | 'failed';
-  constructor(outcome: 'needs-input' | 'failed', reason: string) {
+  cause: Cause;
+  detail: { failing_checks?: string[]; blockers_left?: number };
+  constructor(outcome: 'needs-input' | 'failed', reason: string, cause?: Cause, detail: Stop['detail'] = {}) {
     super(reason);
     this.outcome = outcome;
+    this.cause = outcome === 'needs-input' ? 'needs-input' : cause ?? 'agent-error';
+    this.detail = detail;
   }
 }
+
+/** The cause of a session that did not end well, from how the provider says it ended. */
+const sessionCause = (status: string): Cause => (/max_budget/.test(status) ? 'budget' : /context|prompt is too long/i.test(status) ? 'context' : 'agent-error');
 
 const REVIEW_TIMEOUT_MS = 30 * 60 * 1000;
 const MARKER = 'animus-job.json';
@@ -85,23 +95,58 @@ export function jobOf(cwd: string): string | undefined {
   return (JSON.parse(readFileSync(join(dir, MARKER), 'utf8')) as { job: string }).job;
 }
 
-export function factoryVersion(): string {
-  const head = tryGit(PLUGIN_ROOT, ['rev-parse', '--short', 'HEAD']);
-  if (!head) return 'unknown';
-  return tryGit(PLUGIN_ROOT, ['status', '--porcelain']) ? `${head}-dirty` : head;
-}
-
 /** Puts the worktree back to its last commit: what the gates or a reviewer changed is not the job's work. */
 function restore(worktree: string): void {
   tryGit(worktree, ['checkout', '--quiet', '--', '.']);
   tryGit(worktree, ['clean', '-fdq']);
 }
 
+function blankRun(p: { job: string; repo: string; opts: RunOptions; spec: Spec; size: string; difficulty: string; type: string; startedAt: number; dir?: string; factory?: Factory }): Run {
+  const { job, repo, opts, spec } = p;
+  return {
+    job, repo, submitter: process.env.ANIMUS_USER ?? tryGit(repo, ['config', 'user.email']) ?? userInfo().username,
+    trigger: opts.trigger ?? (opts.resume ? 'resume' : 'cli'), title: spec.title,
+    size: p.size, difficulty: p.difficulty, type: p.type, labels_defaulted: spec.defaulted, escalations: [],
+    provider: p.factory?.provider ?? 'unknown', factory_version: factoryVersion(), skills: [],
+    started: new Date(p.startedAt).toISOString(), ended: '',
+    ms: { queue: 0, setup: 0, plan: 0, implement: 0, gates: 0, review: 0, evidence: 0, pr: 0, total: 0 },
+    agents: [], cost_usd: 0, turns: 0, tokens: { input: 0, output: 0, cache_read: 0, cache_write: 0 },
+    gates: [], fix_rounds: 0, review: null, outcome: 'failed', branch: '', base: '', protected_touched: [], dir: p.dir ?? '',
+  };
+}
+
 export const uiJobOf = (job: string, spec: Spec): UiJob => ({ id: job, pages: spec.ui.pages, designs: spec.design, ...(spec.ui.target ? { target: spec.ui.target } : {}) });
 
+/**
+ * Runs a job. A SIGINT or SIGTERM leaves the run in the log, `cancelled` when Helix marked the job so and
+ * `interrupted` otherwise, before the process ends.
+ */
 export async function runJob(opts: RunOptions, deps: Deps): Promise<Run> {
+  const live: { run?: Run; startedAt: number } = { startedAt: Date.now() };
+  const stop = (code: number) => () => {
+    const run = live.run;
+    if (run && !run.ended) {
+      const cancelled = opts.specFile !== undefined && existsSync(join(dirname(opts.specFile), CANCELLED_MARKER));
+      Object.assign(run, { outcome: 'failed', cause: cancelled ? 'cancelled' : 'interrupted', reason: cancelled ? 'the job was cancelled' : 'the job was interrupted', ended: new Date().toISOString() });
+      run.ms.total = Date.now() - live.startedAt;
+      appendRun(run);
+    }
+    (deps.exit ?? process.exit)(code);
+  };
+  const [onInt, onTerm] = [stop(130), stop(143)];
+  process.on('SIGINT', onInt);
+  process.on('SIGTERM', onTerm);
+  try {
+    return await runJobWith(opts, deps, live);
+  } finally {
+    process.off('SIGINT', onInt);
+    process.off('SIGTERM', onTerm);
+  }
+}
+
+async function runJobWith(opts: RunOptions, deps: Deps, live: { run?: Run; startedAt: number }): Promise<Run> {
   const { factory, log } = deps;
-  const startedAt = Date.now();
+  const startedAt = live.startedAt;
   // What this job's sessions serve stops when this process ends, however it ends (ui.ts).
   process.env[JOB_PID] = String(process.pid);
   const repo = mainCheckout(opts.repo);
@@ -119,7 +164,12 @@ export async function runJob(opts: RunOptions, deps: Deps): Promise<Run> {
     plan = prior.plan;
   } else {
     admitted = admitFile(factory, opts.specFile!, repo, repoProfile, onBase?.facts);
-    if (admitted.problems.length || !admitted.plan) throw refusal(opts.specFile!, admitted);
+    if (admitted.problems.length || !admitted.plan) {
+      const { spec: s } = admitted;
+      const error = refusal(opts.specFile!, admitted);
+      appendRun({ ...blankRun({ job: newJobId(s.title), repo, opts, spec: s, size: s.size, difficulty: s.difficulty, type: s.type, startedAt, factory }), outcome: 'failed', cause: 'admit', reason: error.message, ended: new Date().toISOString() });
+      throw error;
+    }
     ({ spec, plan } = { spec: admitted.spec, plan: admitted.plan });
   }
   const job = prior?.job ?? newJobId(spec.title);
@@ -136,19 +186,16 @@ export async function runJob(opts: RunOptions, deps: Deps): Promise<Run> {
   if (!prior) saveJobSkills(dir, opts.personal ?? []);
   const personal = loadJobSkills(dir);
 
-  const run: Run = {
-    job, repo, submitter: process.env.ANIMUS_USER ?? tryGit(repo, ['config', 'user.email']) ?? userInfo().username,
-    trigger: opts.trigger ?? (prior ? 'resume' : 'cli'), title: spec.title,
-    size: plan.size, difficulty: plan.difficulty, type: plan.type, labels_defaulted: spec.defaulted, escalations: [],
-    provider: factory.provider, factory_version: factoryVersion(), skills: [],
-    started: new Date(startedAt).toISOString(), ended: '',
-    ms: { queue: 0, setup: 0, plan: 0, implement: 0, gates: 0, review: 0, evidence: 0, pr: 0, total: 0 },
-    agents: [], cost_usd: 0, turns: 0, tokens: { input: 0, output: 0, cache_read: 0, cache_write: 0 },
-    gates: [], fix_rounds: 0, review: null, outcome: 'failed', branch: '', base: '', protected_touched: [], dir,
-  };
+  const run = blankRun({ job, repo, opts, spec, size: plan.size, difficulty: plan.difficulty, type: plan.type, startedAt, dir, factory });
+  live.run = run;
   const timed = async <T>(stage: keyof Run['ms'], fn: () => T | Promise<T>): Promise<T> => {
     const t = Date.now();
-    try { return await fn(); } finally { run.ms[stage] += Date.now() - t; }
+    try {
+      const out = await fn();
+      // A signal is handled between turns of the event loop, which a session running in the foreground blocks: let it through after each stage.
+      await new Promise((done) => setTimeout(done, 5));
+      return out;
+    } finally { run.ms[stage] += Date.now() - t; }
   };
 
   /** Says where the job is, in its folder: what Helix's display shows while it runs. */
@@ -184,7 +231,11 @@ export async function runJob(opts: RunOptions, deps: Deps): Promise<Run> {
     });
   } catch (err) {
     if (!(err instanceof AnimusError)) throw err;
-    throw new AnimusError(`job ${job} could not start: ${err.message}`);
+    const reason = `job ${job} could not start: ${err.message}`;
+    Object.assign(run, { outcome: 'failed', cause: 'setup', reason, ended: new Date().toISOString() });
+    run.ms.total = Date.now() - startedAt;
+    appendRun(run);
+    throw new AnimusError(reason);
   }
   const wt = ws.worktree;
   run.branch = ws.branch;
@@ -204,6 +255,7 @@ export async function runJob(opts: RunOptions, deps: Deps): Promise<Run> {
   let shots: { dir: string; files: string[]; urls?: Record<string, string>; branch?: string } | undefined;
   const found = new Map<string, Finding>();
   let actedOn = 0;
+  const findingLog: FindingLog[] = [];
   /** Gate fix rounds spent outside the current allowance: each slice has its own, and so have the finished branch and its catch-up. */
   let spentBefore = 0;
   /** The base commit the branch caught up to before the push, once it has. */
@@ -215,10 +267,17 @@ export async function runJob(opts: RunOptions, deps: Deps): Promise<Run> {
   let inSlice = '';
 
   const record = (stage: string, role: string, tier: Tier, effort: string, r: AgentResult) => {
+    const by_tool: Record<string, number> = {};
+    for (const t of r.tools ?? []) by_tool[t.tool] = (by_tool[t.tool] ?? 0) + 1;
     run.agents.push({
       stage, role, tier, effort, model: r.model, ok: r.ok, status: r.status, cost_usd: r.cost_usd, turns: r.turns, tokens: r.tokens, ms: r.ms,
       ...(r.session ? { session: r.session } : {}), ...(r.transcript ? { transcript: r.transcript } : {}), ...(r.context !== undefined ? { context: r.context } : {}),
+      ...(r.tools ? { tools: { calls: r.tools.length, errors: r.tools.filter((t) => !t.ok).length, by_tool } } : {}),
     });
+    if (r.tools?.length) {
+      mkdirSync(dir, { recursive: true });
+      appendFileSync(toolsLog(job), r.tools.map((t) => `${JSON.stringify({ ...t, stage, role, ...(r.session ? { session: r.session } : {}) })}\n`).join(''));
+    }
     if (r.context !== undefined) log(`  ${stage}: ${k(r.context)} tokens of context at the end${budget ? `, budget ${k(budget)}` : ''}`);
     run.cost_usd = Math.round((run.cost_usd + r.cost_usd) * 10_000) / 10_000;
     run.turns += r.turns;
@@ -272,7 +331,7 @@ export async function runJob(opts: RunOptions, deps: Deps): Promise<Run> {
     // The implementer commits at each working step; whatever it left is kept too, so a retry starts from it.
     commitAll(wt, `${spec.title}: work left uncommitted at the end of ${stage}`);
     const changed = git(wt, ['rev-parse', 'HEAD']) !== before;
-    if (!r.ok) throw new Stop('failed', `the implementer's session ended with ${r.status}${r.text ? `: ${r.text.slice(0, 300)}` : ''}`);
+    if (!r.ok) throw new Stop('failed', `the implementer's session ended with ${r.status}${r.text ? `: ${r.text.slice(0, 300)}` : ''}`, sessionCause(r.status));
     const report = asReport(r.output) ?? { status: 'done', summary: r.text.trim().split('\n')[0] ?? '' };
     if (report.escalate?.why) {
       const e = escalate(factory, plan, report.escalate);
@@ -315,19 +374,30 @@ export async function runJob(opts: RunOptions, deps: Deps): Promise<Run> {
       const t = Date.now();
       lastGates = await timed('gates', () => {
         const results = runChecks(wt, checks, job);
+        // A failed check runs once more on the same tree: passing then, it was flaky and counts as passed.
+        const failed = results.filter((r) => !r.ok);
+        if (failed.length) {
+          restore(wt);
+          const again = runChecks(wt, checks.filter((c) => failed.some((r) => r.name === c.name)), job);
+          for (const r of again) {
+            if (!r.ok) continue;
+            results[results.findIndex((x) => x.name === r.name)] = { ...r, flaky: true };
+            log(`flaky: ${r.name} failed, then passed on the same code`);
+          }
+        }
         // The proof that the tests fail without the change is for the whole job: it runs on the finished branch.
         if (!plan.prove || slice) return results;
         return [...results, failsOnBase({ repo, profile: repoProfile, spec, base: ws.base, head, files: touchedFiles(wt, ws.base, head), job, green: results.every((r) => r.ok) })];
       });
       restore(wt);
       const ok = lastGates.every((r) => r.ok);
-      run.gates.push({ attempt, ok, ms: Date.now() - t, checks: lastGates.map((r) => ({ name: r.name, ok: r.ok, skipped: r.skipped, ms: r.ms })) });
+      run.gates.push({ attempt, ok, ms: Date.now() - t, checks: lastGates.map((r) => ({ name: r.name, ok: r.ok, skipped: r.skipped, ms: r.ms, ...(r.flaky ? { flaky: true } : {}) })) });
       mkdirSync(join(dir, 'gates'), { recursive: true });
       writeFileSync(join(dir, 'gates', `run-${attempt}.txt`), gateReport(lastGates));
       for (const line of describe(lastGates).split('\n').slice(0, lastGates.length)) log(`  ${line}`);
       if (ok) return;
       const used = slice ? rounds : run.fix_rounds - spentBefore;
-      if (used >= factory.limits.gate_rounds) throw new Stop(exhausted, `the gates${of} still fail after ${used} fix round(s):\n${describe(lastGates.filter((r) => !r.ok))}`);
+      if (used >= factory.limits.gate_rounds) throw new Stop(exhausted, `the gates${of} still fail after ${used} fix round(s):\n${describe(lastGates.filter((r) => !r.ok))}`, 'gates', { failing_checks: lastGates.filter((r) => !r.ok).map((r) => r.name) });
       run.fix_rounds++;
       if (slice) { rounds++; spentBefore++; }
       // A failed gate round raises the model tier by one for the next.
@@ -418,8 +488,11 @@ export async function runJob(opts: RunOptions, deps: Deps): Promise<Run> {
 
   let outcome: Outcome = 'failed';
   let reason: string | undefined;
+  let stopped: Stop | undefined;
   try {
-    await timed('setup', () => ensureSetup(wt, repoProfile, log));
+    await timed('setup', () => {
+      try { ensureSetup(wt, repoProfile, log); } catch (err) { throw err instanceof AnimusError ? new Stop('failed', err.message, 'setup') : err; }
+    });
 
     // ------------------------------------------------------------ implement
     const profile = repoProfile;
@@ -439,7 +512,7 @@ export async function runJob(opts: RunOptions, deps: Deps): Promise<Run> {
         } catch (err) {
           if (!(err instanceof AnimusError)) throw err;
           // A large spec does not fit one session, so with no cut there is no way to run it.
-          if (spec.size === 'large') throw new Stop('failed', `a large spec runs only as slices, and no cut was taken: ${err.message}`);
+          if (spec.size === 'large') throw new Stop('failed', `a large spec runs only as slices, and no cut was taken: ${err.message}`, 'plan');
           // Smaller work a planner could not cut is done the way it was before there was a planner.
           planFallback = err.message;
           log(`no plan was taken, so the job runs as one slice: ${err.message.split('\n')[0]}`);
@@ -513,23 +586,28 @@ export async function runJob(opts: RunOptions, deps: Deps): Promise<Run> {
         at('review', `${role} · ${tier} tier${round > 1 ? ` · round ${round}` : ''}`);
         const prompt = reviewPrompt({ spec, ws, round, earlier: open, shots: seen, answers });
         let said: Review | undefined;
+        let ended = 'success';
         for (let tries = 0; tries < 2 && !said; tries++) {
           const r = await timed('review', () => deps.agent({ role, tier, effort, prompt, cwd: wt, ...instructions(role), schema: REVIEW_SCHEMA, readOnly: true, timeoutMs: REVIEW_TIMEOUT_MS, ...caps(tier) }));
           record(`review-${round}${tries ? '-retry' : ''}`, role, tier, effort, r);
           restore(wt);
           said = asReview(r.output);
+          ended = r.status;
         }
-        if (!said) throw new Stop('failed', 'the reviewer gave no review in two tries');
+        if (!said) throw new Stop('failed', 'the reviewer gave no review in two tries', sessionCause(ended));
         review = said;
         reviewRounds = round;
         writeJson(join(dir, `review-${round}.json`), said);
         for (const f of said.findings) found.set(`${f.file ?? ''}:${f.problem}`, f);
-        if (said.status === 'not-ready') throw new Stop('failed', `the reviewer says the work is not ready: ${said.summary}`);
         open = blockers(said.findings);
+        const mine = said.findings.map((f): FindingLog => ({ round, severity: f.severity, ...(f.file ? { file: f.file } : {}), ...(f.line !== undefined ? { line: f.line } : {}), fate: open.includes(f) ? 'open' : 'not-acted-on' }));
+        findingLog.push(...mine);
+        if (said.status === 'not-ready') throw new Stop('failed', `the reviewer says the work is not ready: ${said.summary}`, 'review', { blockers_left: open.length });
         log(`review ${round}: ${said.findings.length} finding(s), ${open.length} to fix`);
         if (!open.length) break;
-        if (round > factory.limits.review_rounds) throw new Stop('failed', `the review still found ${open.length} blocker(s) after its fix round`);
+        if (round > factory.limits.review_rounds) throw new Stop('failed', `the review still found ${open.length} blocker(s) after its fix round`, 'review', { blockers_left: open.length });
         actedOn += open.length;
+        for (const l of mine) if (l.fate === 'open') l.fate = 'fixed';
         await implementer(`review-fix-${round}`, reviewFixPrompt(open), plan.implement.tier);
         await gate();
       }
@@ -566,6 +644,7 @@ export async function runJob(opts: RunOptions, deps: Deps): Promise<Run> {
     if (!(err instanceof Stop) && !(err instanceof AnimusError)) throw err;
     outcome = err instanceof Stop ? err.outcome : 'failed';
     reason = err.message;
+    stopped = err instanceof Stop ? err : new Stop('failed', err.message);
     log(`${outcome === 'needs-input' ? 'needs input' : 'failed'}: ${reason.split('\n')[0]}`);
   }
 
@@ -584,7 +663,7 @@ export async function runJob(opts: RunOptions, deps: Deps): Promise<Run> {
   run.head = head;
   run.protected_touched = touchedFiles(wt, ws.base, head).filter((f) => matchesAny(f, repoProfile.protected));
   const all = [...found.values()];
-  if (reviewRounds) run.review = { rounds: reviewRounds, findings: all.length, blockers: all.filter((f) => f.severity === 'blocker').length, acted_on: actedOn, open: outcome === 'failed' ? open.length : 0 };
+  if (reviewRounds) run.review = { rounds: reviewRounds, findings: all.length, blockers: all.filter((f) => f.severity === 'blocker').length, acted_on: actedOn, open: outcome === 'failed' ? open.length : 0, log: findingLog };
   const failed = outcome === 'failed';
   const cut = state.slicing?.slices ?? [];
   if (cut.length) run.slices = { by: state.sliced_by ?? 'script', planned: cut.length, done: cut.length > 1 ? state.slices_done?.length ?? 0 : failed || outcome === 'needs-input' ? 0 : 1, ...(planFallback ? { fallback: planFallback } : {}) };
@@ -625,6 +704,8 @@ export async function runJob(opts: RunOptions, deps: Deps): Promise<Run> {
 
   // -------------------------------------------------------------- the log
   run.outcome = outcome;
+  // A draft pull request still ended on its failure; a pull request that could not be opened has no cause but the failure before it, if any.
+  if (outcome !== 'pr' && outcome !== 'dry-run') Object.assign(run, { cause: (stopped ?? new Stop('failed', '')).cause }, stopped?.detail);
   if (reason) run[outcome === 'needs-input' ? 'question' : 'reason'] = reason;
   Object.assign(state, { outcome, ...(outcome === 'needs-input' ? { question: reason } : {}), ...(open.length ? { findings: open } : {}) });
   saveState(state);

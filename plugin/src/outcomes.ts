@@ -24,6 +24,8 @@ export type PrOutcome = {
   ms_to_merge?: number;
   /** Commits on the pull request made after the job's last run ended. */
   human_commits: number;
+  /** Lines those commits added and removed; absent when the clone cannot read the pull request's head. */
+  human_lines?: { added: number; removed: number };
   /** Within 30 days of the merge; absent while not merged, or when the repository is not here to read. */
   reverted?: boolean;
   /** Lines the pull request added were changed or removed within 30 days of the merge. */
@@ -43,6 +45,21 @@ function settled(o: PrOutcome): boolean {
   return o.state === 'MERGED' && o.closed !== undefined && o.reverted !== undefined && Date.parse(o.checked) >= Date.parse(o.closed) + WATCH_MS;
 }
 
+/** Lines added and removed from one commit to another; binary files count for none. Undefined when either commit cannot be read. */
+function linesBetween(repo: string, from: string, to: string): { added: number; removed: number } | undefined {
+  // Commits a person pushed on GitHub are not in the clone until fetched.
+  if (tryGit(repo, ['cat-file', '-e', `${to}^{commit}`]) === undefined) tryGit(repo, ['fetch', '--quiet', 'origin', to]);
+  const diff = tryGit(repo, ['diff', '--numstat', from, to]);
+  if (diff === undefined) return undefined;
+  const total = { added: 0, removed: 0 };
+  for (const line of diff.split('\n')) {
+    const [a, r] = line.split('\t');
+    total.added += Number(a) || 0;
+    total.removed += Number(r) || 0;
+  }
+  return total;
+}
+
 /** Asks GitHub about every pull request in the run log whose outcome can still change, and saves what it says. */
 export function refreshOutcomes(facts: (url: string, cwd: string) => PrFacts | undefined, now = Date.now()): Outcomes {
   const outcomes = readOutcomes();
@@ -53,11 +70,13 @@ export function refreshOutcomes(facts: (url: string, cwd: string) => PrFacts | u
     const hasRepo = existsSync(join(run.repo, '.git'));
     const f = facts(pr, hasRepo ? run.repo : animusHome());
     if (!f) continue;
+    const human_commits = f.commits.filter((date) => Date.parse(date) > Date.parse(run.ended)).length;
     const o: PrOutcome = {
-      pr, job: run.job, state: f.state, opened: f.createdAt,
-      human_commits: f.commits.filter((date) => Date.parse(date) > Date.parse(run.ended)).length,
+      pr, job: run.job, state: f.state, opened: f.createdAt, human_commits,
       checked: new Date(now).toISOString(),
     };
+    const lines = human_commits ? (hasRepo && f.head && run.head ? linesBetween(run.repo, run.head, f.head) : undefined) : { added: 0, removed: 0 };
+    if (lines) o.human_lines = lines;
     const closed = f.state === 'MERGED' ? f.mergedAt : f.state === 'CLOSED' ? f.closedAt : undefined;
     if (closed) o.closed = closed;
     if (f.state === 'MERGED' && f.mergedAt) {
@@ -126,9 +145,11 @@ export type ClassNumbers = {
   cost_usd: number; ms: number;
   /** Merged pull requests whose 30 days could be read, and those reverted or reworked in them. */
   watched: number; reverted_or_reworked: number;
+  /** Jobs whose last run did not end as a pull request, by the cause it stopped for. */
+  causes: Record<string, number>;
 };
 
-const empty = (type: string): ClassNumbers => ({ type, jobs: 0, prs: 0, open: 0, merged: 0, closed: 0, untouched: 0, gated: 0, first_time: 0, cost_usd: 0, ms: 0, watched: 0, reverted_or_reworked: 0 });
+const empty = (type: string): ClassNumbers => ({ type, jobs: 0, prs: 0, open: 0, merged: 0, closed: 0, untouched: 0, gated: 0, first_time: 0, cost_usd: 0, ms: 0, watched: 0, reverted_or_reworked: 0, causes: {} });
 
 /** The numbers per task class, then for all jobs together. A job that ran more than once counts once, with all its cost. */
 export function numbers(runs: readonly Run[], outcomes: Outcomes): ClassNumbers[] {
@@ -145,6 +166,8 @@ export function numbers(runs: readonly Run[], outcomes: Outcomes): ClassNumbers[
     for (const n of [classes.get(type)!, all]) {
       n.jobs += 1;
       for (const r of ofJob) { n.cost_usd += r.cost_usd; n.ms += r.ms.total; }
+      const cause = ofJob.at(-1)!.cause;
+      if (cause) n.causes[cause] = (n.causes[cause] ?? 0) + 1;
       if (firstGates) { n.gated += 1; if (firstGates.ok) n.first_time += 1; }
       if (!pr) continue;
       n.prs += 1;
@@ -167,12 +190,13 @@ const minutes = (ms: number) => `${(ms / 60_000).toFixed(1)}m`;
 export function describeNumbers(rows: readonly ClassNumbers[]): string {
   if (!rows.some((r) => r.jobs)) return 'no runs yet';
   const table = [
-    ['class', 'jobs', 'PRs', 'merged', 'no human commit', 'gates first time', 'per merged PR', 'reverted or reworked in 30d'],
+    ['class', 'jobs', 'PRs', 'merged', 'no human commit', 'gates first time', 'per merged PR', 'reverted or reworked in 30d', 'stopped for'],
     ...rows.map((n) => [
       n.type, String(n.jobs), `${n.prs}${n.open ? ` (${n.open} open)` : ''}`,
       share(n.merged, n.merged + n.closed), share(n.untouched, n.merged), share(n.first_time, n.gated),
       n.merged ? `$${(n.cost_usd / n.merged).toFixed(2)}, ${minutes(n.ms / n.merged)}` : `- ($${n.cost_usd.toFixed(2)}, ${minutes(n.ms)} spent)`,
       share(n.reverted_or_reworked, n.watched),
+      Object.entries(n.causes).map(([c, count]) => `${c} ${count}`).join(', ') || '-',
     ]),
   ];
   const widths = table[0]!.map((_, i) => Math.max(...table.map((row) => row[i]!.length)));

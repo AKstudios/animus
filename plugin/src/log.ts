@@ -5,7 +5,7 @@
 import { appendFileSync, existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { homedir, hostname } from 'node:os';
 import { join } from 'node:path';
-import type { Tokens } from './agent.ts';
+import type { ToolCall, Tokens } from './agent.ts';
 import type { Plan } from './profiles.ts';
 import type { Finding, Review } from './review.ts';
 import type { Slicing } from './slices.ts';
@@ -20,11 +20,48 @@ export type AgentRun = {
   session?: string; ok: boolean; status: string; cost_usd: number; turns: number; tokens: Tokens; ms: number; transcript?: string;
   /** Tokens in the session's context when it ended. */
   context?: number;
+  /** What the session's tool calls came to; the calls are in the job's tools.jsonl. */
+  tools?: { calls: number; errors: number; by_tool: Record<string, number> };
 };
 
-export type GateRun = { attempt: number; ok: boolean; ms: number; checks: { name: string; ok: boolean; skipped: boolean; ms: number }[] };
+/** One line of a job's tools.jsonl. */
+export type ToolLine = ToolCall & { stage: string; role: string; session?: string };
+
+export const toolsLog = (job: string) => join(jobDir(job), 'tools.jsonl');
+
+export function readTools(job: string): ToolLine[] {
+  const file = toolsLog(job);
+  if (!existsSync(file)) return [];
+  return readFileSync(file, 'utf8').split('\n').filter(Boolean).flatMap((line) => {
+    try { return [JSON.parse(line) as ToolLine]; } catch { return []; }
+  });
+}
+
+/** `animus tools`: each agent session of the job with its calls counted, then every call in order. */
+export function describeTools(agents: readonly AgentRun[], lines: readonly ToolLine[]): string {
+  const out: string[] = [];
+  for (const a of agents) {
+    const t = a.tools ?? { calls: 0, errors: 0, by_tool: {} };
+    const by = Object.entries(t.by_tool).map(([name, n]) => `${name} ${n}`).join(', ');
+    out.push(`${a.stage}  ${a.role}  ${a.tier}  ${a.model}  ${t.calls} calls, ${t.errors} failed${by ? `: ${by}` : ''}`);
+  }
+  if (lines.length) out.push('', ...lines.map((l) => `${l.at}  ${l.stage}  ${l.tool}  ${l.target.replace(/\s+/g, ' ')}${l.ok ? '' : '  FAILED'}`));
+  return out.join('\n');
+}
+
+export type GateRun = { attempt: number; ok: boolean; ms: number; checks: { name: string; ok: boolean; skipped: boolean; ms: number; flaky?: boolean }[] };
 
 export type Outcome = 'pr' | 'draft-pr' | 'dry-run' | 'needs-input' | 'failed';
+
+/** Helix leaves this file beside a job's spec before it kills the job, so the job can tell a cancel from an interruption. */
+export const CANCELLED_MARKER = 'cancelled';
+
+/** Why a run that did not end as a pull request stopped, by where it stopped. Script-set, never by a model. */
+export const CAUSES = ['setup', 'admit', 'plan', 'needs-input', 'gates', 'review', 'budget', 'context', 'agent-error', 'cancelled', 'interrupted'] as const;
+export type Cause = (typeof CAUSES)[number];
+
+/** A review finding and what became of it: sent back and fixed, a blocker still open, or left for the person. */
+export type FindingLog = { round: number; severity: string; file?: string; line?: number; fate: 'fixed' | 'open' | 'not-acted-on' };
 
 /** One line of the run log. */
 export type Run = {
@@ -61,8 +98,14 @@ export type Run = {
   handoffs?: number;
   /** How the spec was cut: by the planner or by script, into how many slices, and how many passed their gates. */
   slices?: { by: 'planner' | 'script'; planned: number; done: number; fallback?: string };
-  review: { rounds: number; findings: number; blockers: number; acted_on: number; open: number } | null;
+  review: { rounds: number; findings: number; blockers: number; acted_on: number; open: number; log?: FindingLog[] } | null;
   outcome: Outcome;
+  /** Set on every run that did not end as a pull request. */
+  cause?: Cause;
+  /** With cause `gates`: the checks still failing. */
+  failing_checks?: string[];
+  /** With cause `review`: the blockers left. */
+  blockers_left?: number;
   reason?: string;
   question?: string;
   pr?: string;
