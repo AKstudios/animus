@@ -6,7 +6,7 @@
 import { forgetToken, jobNotice, jobsNotice, keepToken, peopleNotice, personNotice, readToken, route, takeToken } from './pages.ts';
 import { atEnd, jobView, type JobPageView } from './job-view.ts';
 import { keepOlder, peopleView, personView } from './people-view.ts';
-import { filterOf, jobListView, queryOf, RESULTS } from './job-list.ts';
+import { filterOf, jobListView, queryOf, RESULTS, type JobRow } from './job-list.ts';
 import type { Display, JobListPage, JobPage, PeoplePage, PersonPage } from './shape.ts';
 import { view, type Live, type Pr, type Project, type Need, type Recent, type View, type Waiting } from './view.ts';
 
@@ -305,9 +305,20 @@ function jobsMain(local: boolean): string {
     pick('project', 'Project', ['', ...new Set([...state.display!.repos.map((r) => r.name), f.project].filter(Boolean))], f.project),
     ...(local ? [] : [pick('person', 'Person', names, f.person)]),
   ].join('')}</div>`;
-  const rows = state.list ? jobListView({ ...state.list, jobs: [...state.list.jobs, ...state.listOlder] }, local).rows : [];
+  const now = (state.offline && state.heard ? state.heard.getTime() : Date.now()) + state.skew;
+  const lv = state.list ? jobListView({ ...state.list, jobs: [...state.list.jobs, ...state.listOlder] }, local, now) : undefined;
+  const t = lv?.totals;
+  const sum = t ? `<div class="sum"><div><b>${t.jobs}</b><span class="mute">jobs</span></div><div><b>${t.merged}</b><span class="mute">merged · ${t.mergedShare}</span></div><div><b>${t.failed}</b><span class="mute">failed</span></div><div><b class="mono">${t.spent}</b><span class="mute">spent</span></div><div><b class="mono">${t.perMerged}</b><span class="mute">per merged PR</span></div></div>` : '';
+  const tr = (r: JobRow) => `<div class="tr" data-key="j-${r.id}">
+    ${r.href ? `<a class="tag tone-${r.tone}" href="${esc(r.href)}" target="_blank" rel="noopener noreferrer">${esc(r.tag)}</a>` : `<span class="tag tone-${r.tone}">${esc(r.tag)}</span>`}
+    <span class="job"><a class="title" href="${esc(r.page)}">${esc(r.title)}</a>${r.why ? `<span class="why tone-${r.tone === 'fail' || r.tone === 'ask' ? r.tone : 'mute'}">${esc(r.why)}</span>` : ''}</span>
+    <span class="mute">${esc(r.repo)}</span>${local ? '' : `<span class="mute">${who(r)}</span>`}
+    <span class="n">${esc(r.took)}</span><span class="n cost">${esc(r.cost)}</span><span class="n">${esc(r.toMerge)}</span>
+  </div>`;
+  const table = lv ? `<div class="tbl${local ? ' local' : ''}"><div class="tr th"><span>Result</span><span>Job</span><span>Project</span>${local ? '' : '<span>Person</span>'}<span class="n">Took</span><span class="n cost">Cost</span><span class="n">To merge</span></div>${
+    lv.rows.map((r, i) => `${lv.days.filter((d) => d.at === i).map((d) => `<div class="day">${esc(d.heading)}</div>`).join('')}${tr(r)}`).join('')}</div>` : '';
   const body = notice ? `<div class="none boxed">${esc(notice)}</div>${local ? '' : signIn}` : state.list
-    ? `<div class="list">${rows.map(recent).join('') || none('No job matches.')}</div>${state.listMore ? '<button type="button" class="more" data-more>Show more</button>' : ''}` : '';
+    ? `${sum}${lv!.rows.length ? table : none('No job matches.')}${state.listMore ? '<button type="button" class="more" data-more>Show more</button>' : ''}` : '';
   return `<main class="main"><div class="scope"><div><h1>Jobs</h1></div></div>${bar}${body}</main>`;
 }
 

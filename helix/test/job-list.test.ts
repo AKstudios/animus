@@ -91,3 +91,35 @@ test('filters round-trip through the address, and /jobs is the Jobs page', () =>
   assert.deepEqual([queryOf(filterOf('')), filterOf('?result=bogus').result], ['', 'all']);
   assert.deepEqual([route('/jobs').page, route('/jobs/7').page], ['jobs', 'job']);
 });
+
+// Protects: criterion 4, totals and table words. Fails when: totals count only the rows sent or ignore the filter, a day heading, "why" line, or To merge is wrong.
+test('/job-list totals cover the whole filter, and the table says each row\'s day, why and time to merge', async () => {
+  const h = await helix();
+  const all = await h.list();
+  const site = await h.list('?project=site');
+  h.stop();
+  assert.deepEqual(all.totals, { jobs: 40, merged: 1, failed: 33, cost_usd: 6 });
+  assert.deepEqual(site.totals, { jobs: 2, merged: 0, failed: 0, cost_usd: 0 });
+  const v = jobListView(all, false, Date.parse('2026-11-17T12:00:00Z'));
+  const why = Object.fromEntries(v.rows.map((r) => [r.title, r.why]));
+  assert.deepEqual([why['Asks'], why['PR job 41'], why['PR job 61'], why['PR job 51']], ['It stopped to ask, and did not say what.', 'Waiting for review', 'Closed without merging', undefined]);
+  assert.deepEqual(v.totals, { jobs: '40', merged: '1', mergedShare: '3%', failed: '33', spent: '$6.00', perMerged: '$6.00' });
+  assert.equal(v.days[0]!.at, 0);
+});
+
+// Protects: criterion 4, day headings. Fails when: today, yesterday or an older day is headed wrongly, or a heading repeats within a day.
+test('day headings say Today, Yesterday, then the weekday and date', () => {
+  const now = new Date(2026, 10, 18, 15).getTime();
+  const at = (d: number, h: number) => new Date(2026, 10, d, h).toISOString();
+  const row = (id: number, submitted: string) => ({ id, state: 'ended', person: 'a', repo: 'r', title: `J${id}`, submitted, outcome: 'failed' }) as const;
+  const page: JobListPage = { at: new Date(now).toISOString(), more: false, totals: { jobs: 4, merged: 0, failed: 4, cost_usd: 0 }, jobs: [row(4, at(18, 9)), row(3, at(18, 8)), row(2, at(17, 20)), row(1, at(16, 10))] };
+  assert.deepEqual(jobListView(page, true, now).days, [{ at: 0, heading: 'Today' }, { at: 2, heading: 'Yesterday' }, { at: 3, heading: 'Mon 16 Nov' }]);
+});
+
+// Protects: criterion 4, To merge. Fails when: it is not the merge time less the job's end, or is not — when unknown.
+test('To merge is the PR\'s merge time less the job\'s end, and — when unknown', () => {
+  const base = { id: 1, state: 'ended', person: 'a', repo: 'r', title: 'T', submitted: '2026-11-17T10:00:00Z', started: '2026-11-17T10:00:00Z', ended: '2026-11-17T10:30:00Z', outcome: 'pr', pr: pull(9), cost_usd: 2 } as const;
+  const page = (jobs: JobListPage['jobs']): JobListPage => ({ at: '2026-11-17T20:00:00Z', more: false, totals: { jobs: 2, merged: 1, failed: 0, cost_usd: 4 }, jobs });
+  const rows = jobListView(page([{ ...base, pr_state: 'merged', pr_merged: '2026-11-17T13:40:00Z' }, { ...base, id: 2, pr_state: 'open' }]), false).rows;
+  assert.deepEqual(rows.map((r) => [r.took, r.cost, r.toMerge]), [['30m', '$2.00', '3h 10m'], ['30m', '$2.00', '—']]);
+});

@@ -229,4 +229,6 @@ test('the local /job-list tags merged and closed PRs from outcomes.json and filt
   assert.deepEqual([tags['pr-merged'], tags['pr-closed'], tags['pr-unknown']], ['Merged #1', 'Closed #2', 'PR #3']);
   assert.deepEqual([merged.jobs.map((j) => j.id), wiki.jobs.map((j) => j.id), bad], [['pr-merged'], ['pr-unknown'], 400]);
   assert.equal(jobListView(all, true).rows.every((r) => r.personPage === undefined), true);
+  // Totals cover the whole filter, not the page: the project filter changes them.
+  assert.deepEqual([all.totals.merged, wiki.totals.jobs, wiki.totals.merged], [1, 1, 0]);
 });

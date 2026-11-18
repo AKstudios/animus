@@ -12,7 +12,7 @@ import type { AddressInfo } from 'node:net';
 import { hostname } from 'node:os';
 import { basename, join } from 'node:path';
 import { listJobs, RESULTS, type JobFilter, type Result } from '../display/job-list.ts';
-import type { Display, DisplayJob, JobListPage, JobPage, PrState } from '../display/shape.ts';
+import type { Display, DisplayJob, JobListPage, JobPage, ListJob, PrState } from '../display/shape.ts';
 import { asset, CSP } from './assets.ts';
 import { folderParts, read, shotFile } from './job-folder.ts';
 import { readOutcomes, type Outcomes } from './outcomes.ts';
@@ -91,9 +91,9 @@ export function localDisplay(): Display {
 export function localJobList(f: Partial<JobFilter>, before?: string): JobListPage {
   let outcomes: Outcomes = {};
   try { outcomes = readOutcomes(); } catch { /* unreadable: no PR is known */ }
-  const jobs = localJobs().map((j) => {
-    const state = j.pr ? outcomes[j.pr]?.state : undefined;
-    return state ? { ...j, pr_state: state.toLowerCase() as PrState } : j;
+  const jobs = localJobs().map((j): ListJob => {
+    const o = j.pr ? outcomes[j.pr] : undefined;
+    return o ? { ...j, pr_state: o.state.toLowerCase() as PrState, ...(o.state === 'MERGED' ? { pr_merged: o.closed ?? o.checked } : {}) } : j;
   });
   return { at: new Date().toISOString(), ...listJobs(jobs, { ...f, person: '' }, before) };
 }

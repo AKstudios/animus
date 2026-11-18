@@ -143,4 +143,10 @@ export const JOB_LIST = 30;
  * from the local display without one. `jobs` are newest first, at most
  * JOB_LIST, those submitted before `?before=`; `more` says older ones remain.
  */
-export type JobListPage = { at: string; jobs: (DisplayJob & { pr_state?: PrState })[]; more: boolean };
+export type JobListPage = { at: string; jobs: ListJob[]; more: boolean; totals: JobTotals };
+
+/** A job on the Jobs page: with what GitHub (locally, outcomes.json) said of its PR, and when it merged. */
+export type ListJob = DisplayJob & { pr_state?: PrState; pr_merged?: string };
+
+/** Everything the filters match, not only the rows sent. */
+export type JobTotals = { jobs: number; merged: number; failed: number; cost_usd: number };
