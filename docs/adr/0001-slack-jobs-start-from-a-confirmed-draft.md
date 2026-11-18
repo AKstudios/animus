@@ -13,3 +13,10 @@ earlier "the message is the spec, with tags".
   back as "needs input".
 - A full interview in the Slack thread: a chat agent living in Slack, far
   larger to build.
+
+## Since: GitHub comments too
+
+A `/animus` comment on a GitHub issue starts a draft the same way, posted
+back on the issue, and runs nothing until its person submits it. This
+replaces factory.md's "the issue is the spec": most issues lack acceptance
+criteria with a check for each, and an issue carries text other people wrote.

@@ -6,6 +6,12 @@ shared machine.
 
 ## People and access
 
+**Helix**:
+The supervisor on a shared machine that takes in jobs from several people
+and runs Animus for each of them. What people type to start or follow work,
+in Slack or on GitHub, is named Animus, never Helix.
+_Avoid_: Animus server, the bot
+
 **Person**:
 Someone who has joined a Helix, with their own Claude and GitHub tokens on it.
 _Avoid_: User, member, account
@@ -44,8 +50,8 @@ branch, just before its pull request opens.
 _Avoid_: Sync, rebase, update branch
 
 **Draft**:
-A spec written from a Slack message and its references, waiting for its
-person to submit, edit or discard it.
+A spec written from a Slack message or a GitHub comment and its references,
+waiting for its person to submit, revise or discard it.
 _Avoid_: Proposal, pending spec
 
 **Reference**:
