@@ -64,9 +64,21 @@ export function fixAlone(repo: string, run: Run, state: JobState | undefined, lo
   if (!found) throw new AnimusError(`the earlier job's ${state ? 'worktree' : 'folder'} is gone and GitHub would not give the description of ${run.pr}, so the fix has nothing to go on`);
   const spec = new RegExp(`<details><summary>${SPEC_SUMMARY}</summary>\\n\\n(\`{3,})md\\n([\\s\\S]*?)\\n\\1\\n\\n</details>`).exec(found.body)?.[2];
   if (!spec) throw new AnimusError(`the earlier job's ${state ? 'worktree' : 'folder'} is gone and the description of ${run.pr} holds no spec (one too long for GitHub's limit is left out), so the fix cannot run`);
-  const closes = /^(?:Closes|Refs) #(\d+)$/m.exec(found.body)?.[1];
-  const fixes = [...found.body.matchAll(/^\| \d+ \| (.*) \| `([^`]+)` \| \$([\d.]+) \|$/gm)].map((m) => ({ ask: m[1]!.replaceAll('\\|', '|'), job: m[2]!, cost_usd: Number(m[3]) }));
-  return { spec, branch: found.head, baseBranch: found.base, ...(closes ? { closes: Number(closes) } : {}), ...(fixes.length ? { fixes } : {}) };
+  const { closes, fixes } = readBody(found.body);
+  return { spec, branch: found.head, baseBranch: found.base, ...(closes ? { closes } : {}), ...(fixes.length ? { fixes } : {}) };
+}
+
+/** What a pull request's description says a fix must keep: the issue it closes and its list of fixes. */
+export function readBody(body: string): { closes?: number; fixes: FixEntry[] } {
+  const closes = /^(?:Closes|Refs) #(\d+)$/m.exec(body)?.[1];
+  const fixes = [...body.matchAll(/^\| \d+ \| (.*) \| `([^`]+)` \| \$([\d.]+) \|$/gm)].map((m) => ({ ask: m[1]!.replaceAll('\\|', '|'), job: m[2]!, cost_usd: Number(m[3]) }));
+  return { ...(closes ? { closes: Number(closes) } : {}), fixes };
+}
+
+/** The same, from the pull request's current description: a job from before the state held them has only the pull request to say; none when GitHub will not. */
+export function keptFromBody(pr: string, repo: string, lookup: PrSourceLookup = prSource): { closes?: number; fixes: FixEntry[] } | undefined {
+  const found = lookup(pr, repo);
+  return found && readBody(found.body);
 }
 
 /**

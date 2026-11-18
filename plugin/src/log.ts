@@ -147,6 +147,8 @@ export type JobState = {
   /** On a fix: the pull request it updates, as its URL. */
   pr?: string;
   fixes?: { ask: string; job: string; cost_usd: number }[];
+  /** On a fix: the commit it started from (the branch as GitHub had it), so a fix picked up again can tell whether the implementer changed anything. */
+  fix_start?: string;
   /** The issue the pull request closes, so a fix keeps the line. */
   closes?: number;
   /** The questions this job stopped to ask, each with the person's answer: the reviewer reads them beside the spec. */

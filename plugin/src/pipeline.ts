@@ -66,7 +66,7 @@ export type RunOptions = {
   /** Pick a job up again, with the person's answer if it asked a question. */
   resume?: { state: JobState; answer?: string };
   /** Start a fix (fix.ts): a new job on the pull request's branch, in the worktree of `from`, the job it continues. */
-  fix?: { of: string; from?: JobState; alone?: FromPr; ask: string; pr: string };
+  fix?: { of: string; from?: JobState; alone?: FromPr; ask: string; pr: string; /** What the pull request's description keeps (fix.ts, keptFromBody); it wins over the earlier job's state, which may predate it. */ kept?: { closes?: number; fixes: FromPr['fixes'] } };
 };
 
 /** Ends the job where it is thrown, with an outcome that is not a pull request. */
@@ -242,7 +242,7 @@ async function runJobWith(opts: RunOptions, deps: Deps, live: { run?: Run; start
   let ws: Workspace;
   /** For a new fix: the one-line log of the commits GitHub's branch has that the worktree lacked, and the commit the fix starts from. */
   let foreign = '';
-  let fixStart: string | undefined;
+  let fixStart = prior?.fix_start;
   at('setup', 'setup · worktree and dependencies');
   try {
     ws = await timed('setup', () => {
@@ -267,13 +267,14 @@ async function runJobWith(opts: RunOptions, deps: Deps, live: { run?: Run; start
   const wt = ws.worktree;
   run.branch = ws.branch;
   run.base = ws.base;
-  const inherited: { fixes?: FromPr['fixes']; closes?: number } | undefined = before ?? alone;
+  const kept = opts.fix?.kept;
+  const inherited: { fixes?: FromPr['fixes']; closes?: number } | undefined = { fixes: kept?.fixes ?? (before ?? alone)?.fixes, closes: kept?.closes ?? (before ?? alone)?.closes };
   const answers = [...(before?.answers ?? []), ...(prior?.question && opts.resume?.answer ? [{ question: prior.question, answer: opts.resume.answer }] : [])];
   // A fix carries on from the session of the job it continues, and from that job's list of fixes.
   const state: JobState = {
     job, repo, spec: specCopy, ...(source ? { source } : {}), workspace: ws, plan, ...(before?.session ? { session: before.session } : {}), ...(before?.context !== undefined ? { context: before.context } : {}), ...(answers.length ? { answers } : {}),
     ...(prior?.slicing ? { slicing: prior.slicing, sliced_by: prior.sliced_by ?? 'script', slices_done: prior.slices_done ?? [] } : {}),
-    ...(fix ? { fix_of: fix.of, ask: fix.ask, ...(fix.pr ? { pr: fix.pr } : {}) } : {}), ...(inherited?.fixes ? { fixes: inherited.fixes } : {}), ...(inherited?.closes ? { closes: inherited.closes } : {}),
+    ...(fix ? { fix_of: fix.of, ask: fix.ask, ...(fix.pr ? { pr: fix.pr } : {}), ...(fixStart ? { fix_start: fixStart } : {}) } : {}), ...(inherited?.fixes ? { fixes: inherited.fixes } : {}), ...(inherited?.closes ? { closes: inherited.closes } : {}),
   };
   saveState(state);
 
@@ -573,7 +574,8 @@ async function runJobWith(opts: RunOptions, deps: Deps, live: { run?: Run; start
       for (const f of review?.findings ?? []) found.set(`${f.file ?? ''}:${f.problem}`, f);
     } else if (slices.length === 1) {
       brief = whole;
-      if (opts.fix) await implementer('fix', resumeFixPrompt({ ask: opts.fix!.ask, foreign }), plan.implement.tier, false, () => handoffFixPrompt({ brief, base: ws.base, cwd: wt, answers, ask: opts.fix!.ask, foreign }));
+      // A fix picked up again (after a question or an interruption) still has its ask, and the commit it started from.
+      if (fix) await implementer(prior ? 'resume' : 'fix', `${prior ? `${resumePrompt(prior, opts.resume?.answer)}\n\n` : ''}${resumeFixPrompt({ ask: fix.ask, foreign })}`, plan.implement.tier, false, () => handoffFixPrompt({ brief, base: ws.base, cwd: wt, answers, ask: fix.ask, foreign }));
       else await implementer(prior ? 'resume' : 'implement', prior ? resumePrompt(prior, opts.resume?.answer) : brief, plan.implement.tier, !prior);
     } else {
       if (!prior) log(`${slices.length} slices: ${slices.map((s) => s.title).join('; ')}`);

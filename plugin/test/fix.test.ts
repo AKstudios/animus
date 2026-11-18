@@ -239,3 +239,51 @@ test('a fix that passes is published ready, which marks a draft pull request rea
   assert.equal(run.outcome, 'pr');
   assert.equal(d.published[0]!.draft, false);
 });
+
+const asksFirst = (context: number): Step => () => ({ output: { status: 'needs-input', summary: '', question: 'Which word?' }, session: 'session-fix-asked', context });
+
+// Protects: criterion 2 when a fix is picked up again. Fails when: a resumed fix loses its ask or the pull request's diff in the fresh session it starts over the budget.
+test('a fix that asked a question and is resumed over the context budget gets a handoff with the ask and the diff', async () => {
+  const repo = makeRepo();
+  await opened(repo, 'session-job');
+  const asked = await fixOf(repo, 'Say it twice', fakeAgent([asksFirst(130_000)]).agent);
+  assert.equal(asked.run.outcome, 'needs-input');
+
+  const a = fakeAgent([say('done, twice'), () => clean()]);
+  const again = await runJob({ repo, resume: { state: loadState(asked.run.job)!, answer: 'Twice.' } }, deps(a.agent));
+
+  assert.equal(again.outcome, 'pr');
+  assert.equal(a.calls[0]!.resume, undefined);
+  assert.match(a.calls[0]!.prompt, /\+done[\s\S]*Which word\?[\s\S]*Twice\.[\s\S]*Say it twice/);
+  assert.match(a.calls[1]!.prompt, /Say it twice/);
+});
+
+// Protects: criterion 2 and the "changed nothing" check when a fix is picked up again. Fails when: a resumed fix with its session under the budget is not told the ask, or an implementer that changes nothing after the resume goes on to the gates.
+test('a resumed fix is told its ask, and stops when the implementer changes nothing', async () => {
+  const repo = makeRepo();
+  await opened(repo, 'session-job');
+  const asked = await fixOf(repo, 'Say it twice', fakeAgent([asksFirst(1_000)]).agent);
+
+  const a = fakeAgent([() => done()]);
+  const again = await runJob({ repo, resume: { state: loadState(asked.run.job)!, answer: 'Twice.' } }, deps(a.agent));
+
+  assert.equal(a.calls[0]!.resume, 'session-fix-asked');
+  assert.match(a.calls[0]!.prompt, /Twice\.[\s\S]*Say it twice/);
+  assert.equal(again.outcome, 'failed');
+  assert.match(again.reason ?? '', /changed nothing/);
+});
+
+// Protects: criterion 1 for a pull request opened before the job state held the issue. Fails when: a fix rebuilds the body without Closes #N, or drops the Fixes list the pull request already shows.
+test('a fix keeps the Closes line and the Fixes list from the pull request body when the earlier job state lacks them', async () => {
+  const repo = makeRepo();
+  const first = await opened(repo, 'session-job');
+  const { state } = fixTarget(repo, '1', () => 'OPEN');
+  assert.equal(state!.closes, undefined);
+
+  const d = deps(fakeAgent([say('done, again'), () => clean()]).agent);
+  const kept = { closes: 7, fixes: [{ ask: 'An earlier ask', job: 'earlier-job', cost_usd: 0.5 }] };
+  await runJob({ repo, fix: { of: first.job, from: state!, ask: 'Say it twice', pr: first.pr!, kept } }, d);
+
+  assert.match(d.published[0]!.body, /^Closes #7$/m);
+  assert.match(d.published[0]!.body, /\| 1 \| An earlier ask \| `earlier-job` \| \$0\.50 \|[\s\S]*\| 2 \| Say it twice \|/);
+});

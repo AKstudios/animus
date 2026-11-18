@@ -12,7 +12,7 @@ import { initProfile } from './init.ts';
 import { githubLogin, joinHelix, leaveHelix, openPage } from './join.ts';
 import { addProject } from './project.ts';
 import { describe, failsOnBase, jobChecks, runChecks } from './gates.ts';
-import { fixAlone, fixTarget, openedHere } from './fix.ts';
+import { fixAlone, fixTarget, keptFromBody, openedHere } from './fix.ts';
 import { githubUrl, mainCheckout, touchedFiles } from './git.ts';
 import { describeRuns, describeTools, jobDir, loadState, readRuns, readTools, type Run } from './log.ts';
 import { jobOf, onPath, runJob, uiJobOf } from './pipeline.ts';
@@ -373,7 +373,9 @@ async function main(argv: string[]): Promise<number> {
       const repo = mainCheckout(resolve(values.repo ?? cwd));
       const { run, state } = fixTarget(repo, pr);
       const alone = fixAlone(repo, run, state);
-      return finish(await runJob({ repo, fix: { of: run.job, ...(alone ? { alone } : { from: state! }), ask: text.join(' '), pr: run.pr! }, personal: localSkills(repo, values.skills), ...flags }, deps()));
+      // The description is what the pull request shows now: its Closes line and Fixes list are kept, however old the earlier job's state.
+      const kept = alone ? undefined : keptFromBody(run.pr!, repo);
+      return finish(await runJob({ repo, fix: { of: run.job, ...(alone ? { alone } : { from: state!, ...(kept ? { kept } : {}) }), ask: text.join(' '), pr: run.pr! }, personal: localSkills(repo, values.skills), ...flags }, deps()));
     }
     case 'resume': {
       const state = positionals[0] ? loadState(positionals[0]) : undefined;
