@@ -33,12 +33,21 @@ export async function waitForMerged(p: { repo: string; files: readonly string[];
     // Read only once the run log has nothing, so a spec edited since its run still lets a logged merge through.
     let title: string | undefined;
     let read = false;
+    let unreadable: string | undefined;
     for (;;) {
       let pr = readRuns().findLast((r) => r.repo === p.repo && r.spec_file === file && r.pr)?.pr;
       let state = pr ? p.lookup(pr, p.repo) : undefined;
       if (!pr && !read) {
+        // A file that cannot be read is read again next check, so fixing it lets the wait find its pull request.
         read = true;
-        title = existsSync(file) ? loadSpec(file).title : undefined;
+        unreadable = undefined;
+        try {
+          title = existsSync(file) ? loadSpec(file).title : undefined;
+        } catch (e) {
+          if (!(e instanceof AnimusError)) throw e;
+          read = false;
+          unreadable = e.message;
+        }
       }
       if (!pr && title) {
         const found = p.find(title, p.repo);
@@ -50,7 +59,8 @@ export async function waitForMerged(p: { repo: string; files: readonly string[];
         break;
       }
       if (state === 'CLOSED') throw new AnimusError(`this spec runs after ${file}, whose pull request ${pr} was closed without merging`);
-      const now = !pr ? `the run log has no pull request for it and GitHub has none titled "${title ?? 'unknown: the spec file is missing'}". Remove the \`after:\` line or cancel the job to stop waiting` : state ? `${pr} is open` : `the state of ${pr} could not be read`;
+      const none = unreadable ? `${file} could not be read, so there is no title to look for on GitHub (${unreadable})` : `GitHub has none titled "${title ?? 'unknown: the spec file is missing'}"`;
+      const now = !pr ? `the run log has no pull request for it and ${none}. Remove the \`after:\` line or cancel the job to stop waiting` : state ? `${pr} is open` : `the state of ${pr} could not be read`;
       if (now !== said) p.log(`waiting: this spec runs after ${file}, and ${now}. The job starts once that is merged; checked every minute.`);
       said = now;
       await sleep(POLL_MS);
