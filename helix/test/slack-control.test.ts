@@ -166,6 +166,27 @@ test('/helix job shows the title, project, person, state and links, and what is 
   assert.match(a!, /Outcome: needs-input\nQuestion: which one\?/);
 });
 
+// Protects: criterion 1, a running job. Fails when: the stage and who is working are missing, or shown from before the job started.
+test('/helix job shows a running job\'s stage and who is working, only from progress written since it started', async () => {
+  const h = helix();
+  const home = h.supervisor.animusHome('ana');
+  const running = (animus_job: string, at: string) => {
+    mkdirSync(join(home, 'jobs', animus_job), { recursive: true });
+    writeFileSync(join(home, 'jobs', animus_job, 'progress.json'), JSON.stringify({ stage: 'review', who: 'the reviewer', at }));
+    return add(h, { state: 'running', animus_job, started: '2026-01-01T00:00:10.000Z' });
+  };
+  const fresh = running('fresh', '2026-01-01T00:00:20.000Z');
+  const stale = running('stale', '2026-01-01T00:00:05.000Z');
+
+  await h.slack.deliver(command('U0ANA', `job ${fresh.id}`));
+  await h.slack.deliver(command('U0ANA', `job ${stale.id}`));
+  h.stop();
+
+  const [shown, hidden] = h.respondedTo();
+  assert.match(shown!, /State: running\nStage review, the reviewer working/);
+  assert.doesNotMatch(hidden!, /Stage/);
+});
+
 // Protects: criterion 2. Fails when: another person's or a missing job is shown to someone not the owner.
 test('/helix job says there is no such job for a missing one or another person\'s, and shows the owner any', async () => {
   const h = helix();
@@ -201,6 +222,7 @@ test('/helix cancel cancels like the button, and refuses others, ended, missing 
   assert.equal(h.store.get(mine.id)?.state, 'cancelled');
   assert.equal(h.store.get(bens.id)?.state, 'cancelled');
   assert.equal(h.store.get(ended.id)?.state, 'ended');
+  assert.deepEqual(h.slack.sent[0], { method: 'post', channel: 'D0ANA', thread: '9.1', text: `Job ${mine.id} was cancelled by <@U0ANA>.` });
   assert.deepEqual(h.slack.sent.map((s) => 'text' in s ? s.text : ''), [
     `Job ${mine.id} was cancelled by <@U0ANA>.`,
     `Job ${mine.id} was cancelled.`,
