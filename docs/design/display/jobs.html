@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Display jobs page: design reference</title>
+<link rel="stylesheet" href="display.css">
+</head>
+<body>
+<header class="top">
+  <span class="brand">abstergo</span>
+  <nav class="tabs"><a href="overview.html">Overview</a><a class="on" href="#">Jobs</a><a href="#">People</a></nav>
+  <div class="stats"><span>slots <b>3/4</b></span><b>14:21:40</b></div>
+</header>
+<div class="wrap">
+  <main class="main">
+    <h1>Jobs</h1>
+    <div class="filters">
+      <nav class="seg" aria-label="Result"><a class="on" href="#">All</a><a href="#">Merged</a><a href="#">Open</a><a href="#">Failed</a><a href="#">Needs input</a></nav>
+      <label class="mute">Project <select><option>all</option></select></label>
+      <label class="mute">Person <select><option>all</option></select></label>
+    </div>
+    <div>
+      <div class="row"><span class="tag" style="color:var(--accent)">RUNNING</span><span class="t">Swap a meal for another with the same ingredients</span><span class="by">#24 · meal-planner · ajmal</span></div>
+      <div class="row"><span class="tag asks">NEEDS INPUT</span><span class="t">/animus fix on a PR continues its branch</span><span class="by">#23 · animus · ajmal · 12m · $1.84</span></div>
+      <div class="row"><span class="tag merged">MERGED #19</span><span class="t">Slack's command is /animus and its bot is Animus</span><span class="by">#21 · animus · ajmal · 2m · $0.46</span></div>
+      <div class="row"><span class="tag open">OPEN PR #20</span><span class="t">Jobs start from the machine's free memory and load</span><span class="by">#18 · animus · ajmal · 28m · $3.90</span></div>
+      <div class="row"><span class="tag merged">MERGED #16</span><span class="t">Drafts from Slack</span><span class="by">#16 · animus · ajmal · 41m · $6.02</span></div>
+      <div class="row"><span class="tag fail">FAILED</span><span class="t">Join Helix with GitHub's sign-in</span><span class="by">#14 · animus · ajmal · 6m · $0.80</span><span class="why">The gates still failed after 2 fix rounds: test</span></div>
+      <div class="row"><span class="tag plain">CLOSED #21</span><span class="t">A Facebook link is named Facebook</span><span class="by">#12 · meal-planner · ajmal · 9m · $0.06</span></div>
+    </div>
+  </main>
+</div>
+</body>
+</html>

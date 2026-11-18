@@ -4,8 +4,8 @@
 import { jobPage, personPage } from './pages.ts';
 import type { Display, DisplayClosed, DisplayJob, DisplayPr } from './shape.ts';
 
-export type Tone = 'ink' | 'mute' | 'ask' | 'fail';
-export type Tick = 'running' | 'ask' | 'failed' | 'queued' | 'ended';
+export type Tone = 'ink' | 'mute' | 'ask' | 'fail' | 'merged' | 'open';
+export type Tick = 'running' | 'ask' | 'failed' | 'queued' | 'ended' | 'merged';
 
 export type Project = { id: string; summary: string; on: boolean; busy: boolean; ticks: Tick[] };
 
@@ -18,7 +18,17 @@ export type Live = {
   stage: number; stageText: string; stepText: string; stepShort: string; who: string; now: string;
 };
 
-export type Waiting = { id: number | string; page: string; ask: boolean; tag: string; title: string; repo: string; person: string; personPage?: string; note: string };
+/** A job waiting for an answer: its question, how long it has waited, and the command that answers it. */
+export type Need = { id: number | string; page: string; question: string; title: string; repo: string; person: string; personPage?: string; waited: string; command: string };
+
+/** A job in line for a slot. */
+export type Waiting = { id: number | string; page: string; tag: string; title: string; repo: string; person: string; personPage?: string; note: string };
+
+/** The sentence the overview opens with: `needs` in the ask colour, `rest` in ink, then when the last job finished and its tag. */
+export type Headline = { needs: string; rest: string; last?: { when: string; tag: string; tone: Tone } };
+
+/** The last 7 days, as strings ready to draw. */
+export type Week = { merged: string; finished: string; spent: string; median: string };
 
 /** meta: how long it took and what it cost; the project and person are drawn from repo and person. */
 export type Recent = { id: number | string; page: string; tag: string; /** Local display: the pull request the tag names, on GitHub. */ href?: string; tone: Tone; title: string; repo: string; person: string; personPage?: string; meta: string; reason?: string };
@@ -45,7 +55,12 @@ export type View = {
   /** Local display: every job of the shown projects, newest first, grouped by project in the order of their newest job. */
   byProject: { project: string; jobs: Recent[] }[];
   live: Live[]; noLive: string;
-  waiting: Waiting[];
+  headline: Headline;
+  week: Week;
+  /** Jobs waiting for an answer, longest wait first. */
+  needs: Need[];
+  /** The first of the queue, in order; `queued` counts all of it. */
+  line: Waiting[];
   /** The newest open PRs the jobs opened. */
   prs: Pr[];
   /** The newest jobs that ended or were cancelled, apart from those waiting for an answer or with an open PR. */
@@ -56,6 +71,8 @@ export type View = {
 const TICKS = 10;
 const FINISHED = 30;
 const PRS = 10;
+const LINE = 5;
+const WEEK = 7 * 24 * 3600_000;
 
 const pad = (n: number) => String(n).padStart(2, '0');
 
@@ -74,8 +91,9 @@ const usd = (n: number) => `$${n.toFixed(2)}`;
 const isAsk = (j: DisplayJob) => j.state === 'ended' && j.outcome === 'needs-input';
 const firstLine = (s: string) => { const line = s.trim().split('\n')[0] ?? ''; return line.length > 240 ? `${line.slice(0, 239)}…` : line; };
 
-function tick(j: DisplayJob): Tick {
+function tick(j: DisplayJob, closed?: Map<number | string, DisplayClosed>): Tick {
   if (j.state === 'running') return 'running';
+  if (closed?.get(j.id)?.merged) return 'merged';
   if (j.state === 'stopped') return 'failed';
   if (isAsk(j)) return 'ask';
   if (j.state === 'queued' || j.state === 'cancelled') return 'queued';
@@ -104,10 +122,10 @@ export function recent(j: DisplayJob, local = false, closed?: DisplayClosed): Re
     meta: [took, j.cost_usd !== undefined ? usd(j.cost_usd) : ''].filter(Boolean).join(' · '),
     ...(j.resume ? { reason: `It stopped before it ended. To carry on: ${j.resume}` } : j.reason ? { reason: firstLine(j.reason) } : {}),
   };
-  // A PR GitHub has not answered about stays `PR #n`, never guessed.
-  const n = !local && j.pr && (j.outcome === 'pr' || j.outcome === 'draft-pr') ? /(\d+)\/?$/.exec(j.pr)?.[1] : undefined;
-  if (!n) return made;
-  return closed ? { ...made, tag: `${closed.merged ? 'MERGED' : 'CLOSED'} #${n}`, tone: closed.merged ? 'ink' : 'mute' } : { ...made, tag: `PR #${n}` };
+  // A PR GitHub (or, locally, outcomes.json) has not answered about stays `PR #n`, never guessed.
+  const n = j.pr && (j.outcome === 'pr' || j.outcome === 'draft-pr') ? /(\d+)\/?$/.exec(j.pr)?.[1] : undefined;
+  if (!n || (local && !closed)) return made;
+  return closed ? { ...made, tag: `${closed.merged ? 'MERGED' : 'CLOSED'} #${n}`, tone: closed.merged ? 'merged' : 'mute' } : { ...made, tag: `PR #${n}` };
 }
 
 function pr(p: DisplayPr): Pr {
@@ -137,21 +155,45 @@ export function view(d: Display, picked: string | null, now: number): View {
     };
   });
 
-  const waiting = [
-    ...shown.filter(isAsk).map((j): Waiting => ({ id: j.id, page: jobPage(j.id), ask: true, tag: 'NEEDS INPUT', title: j.title, repo: j.repo, person: j.person, ...people(j.person, d.local === true), note: j.question ?? 'It stopped to ask, and did not say what.' })),
-    ...shown.filter((j) => j.state === 'queued').map((j): Waiting => {
-      const waited = now - Date.parse(j.queued ?? j.submitted);
-      const why = j.resumed === 'answer' ? 'Has its answer and carries on from where it stopped. '
-        : j.resumed === 'restart' ? 'Helix stopped while it ran, so it carries on from where it stopped. ' : '';
-      return {
-        id: j.id, page: jobPage(j.id), ask: false, tag: j.resumed ? 'QUEUED AGAIN' : 'QUEUED', title: j.title, repo: j.repo, person: j.person, ...people(j.person, d.local === true),
-        note: `${why}Position ${line.indexOf(j) + 1} in the queue, waiting ${waited < 60_000 ? 'less than a minute' : span(waited)}.`,
-      };
-    }),
-  ];
+  const asking = shown.filter(isAsk);
+  const needs = asking.map((j): Need => ({
+    id: j.id, page: jobPage(j.id), question: j.question ?? 'It stopped to ask, and did not say what.', title: j.title, repo: j.repo, person: j.person, ...people(j.person, d.local === true),
+    waited: span(now - Date.parse(j.ended ?? j.submitted)),
+    command: d.local ? `animus resume ${j.id} --answer "…"` : `animus answer ${j.id} "…"`,
+  })).reverse();
+  const queue = shown.filter((j) => j.state === 'queued').map((j): Waiting => {
+    const waited = now - Date.parse(j.queued ?? j.submitted);
+    const why = j.resumed === 'answer' ? 'Has its answer and carries on from where it stopped. '
+      : j.resumed === 'restart' ? 'Helix stopped while it ran, so it carries on from where it stopped. ' : '';
+    return {
+      id: j.id, page: jobPage(j.id), tag: j.resumed ? 'QUEUED AGAIN' : 'QUEUED', title: j.title, repo: j.repo, person: j.person, ...people(j.person, d.local === true),
+      note: `${why}Position ${line.indexOf(j) + 1} in the queue, waiting ${waited < 60_000 ? 'less than a minute' : span(waited)}.`,
+    };
+  });
 
   const open = new Set((d.prs ?? []).map((p) => p.job));
-  const closed = new Map((d.closed ?? []).map((c) => [c.job, c]));
+  const closed = new Map<number | string, DisplayClosed>((d.closed ?? []).map((c) => [c.job, c]));
+  const runningNow = shown.filter((j) => j.state === 'running').length;
+  const news = asking.length ? `${asking.length} ${asking.length === 1 ? 'job needs' : 'jobs need'} you.` : '';
+  const work = runningNow ? `${runningNow} ${runningNow === 1 ? 'agent' : 'agents'} at work.` : '';
+  const lastJob = shown.filter((j) => j.state === 'ended' && !isAsk(j) && j.ended).sort((a, b) => Date.parse(b.ended!) - Date.parse(a.ended!))[0];
+  const last = lastJob && recent(lastJob, d.local === true, closed.get(lastJob.id));
+  const headline: Headline = {
+    needs: news, rest: news || work ? work : 'All quiet. Nothing needs you.',
+    ...(lastJob && last ? { last: { when: `Last finished ${span(now - Date.parse(lastJob.ended!))} ago`, tag: last.tag, tone: last.tone } } : {}),
+  };
+
+  // Merged is a closed PR the display's clock saw close in the last 7 days; the other numbers read the jobs.
+  const since = now - WEEK;
+  const week = (() => {
+    const mine = new Set(shown.map((j) => j.id));
+    const merged = (d.closed ?? []).filter((c) => c.merged && mine.has(c.job) && Date.parse(c.at) >= since).length;
+    const done = shown.filter((j) => isOver(j) && Date.parse(j.ended ?? j.submitted) >= since);
+    const took = done.filter((j) => j.started && j.ended).map((j) => Date.parse(j.ended!) - Date.parse(j.started!)).sort((a, b) => a - b);
+    const mid = took.length ? (took[(took.length - 1) >> 1]! + took[took.length >> 1]!) / 2 : undefined;
+    const spent = shown.filter((j) => Date.parse(j.ended ?? j.started ?? j.submitted) >= since).reduce((sum, j) => sum + (j.cost_usd ?? 0), 0);
+    return { merged: String(merged), finished: String(done.length), spent: usd(spent), median: mid === undefined ? '–' : span(mid) };
+  })();
   const ended = shown.filter((j) => isOver(j) && !open.has(j.id as number)).reverse();
   const prs = (d.prs ?? []).filter((p) => !sel || p.repo === sel.name).sort((a, b) => Date.parse(b.created) - Date.parse(a.created)).slice(0, PRS).map(pr);
 
@@ -162,7 +204,7 @@ export function view(d: Display, picked: string | null, now: number): View {
       const mine = d.jobs.filter((j) => j.repo === r.name);
       const [run, q, a] = [count(mine, 'running'), count(mine, 'queued'), count(mine, 'ask')];
       const parts = [run ? `${run} running` : '', q ? `${q} queued` : '', a ? `${a} ${a === 1 ? 'ask' : 'asks'}` : ''].filter(Boolean);
-      return { id: r.name, summary: parts.join(' · ') || 'idle', on: r.name === sel?.name, busy: run > 0, ticks: mine.slice(-TICKS).map(tick) };
+      return { id: r.name, summary: parts.join(' · ') || 'idle', on: r.name === sel?.name, busy: run > 0, ticks: mine.slice(-TICKS).map((j) => tick(j, closed)) };
     }),
     ...(sel ? { sel: {
       id: sel.name, base: sel.base ?? '', gates: sel.gates?.join(', ') ?? '',
@@ -181,11 +223,11 @@ export function view(d: Display, picked: string | null, now: number): View {
     } }),
     live,
     noLive: sel ? 'No agent is working on this project.' : d.local ? 'No agent is working right now.' : `No agent is working right now. ${d.slots === 1 ? 'The one slot is' : `All ${d.slots} slots are`} free.`,
-    waiting,
+    headline, week, needs, line: queue.slice(0, LINE),
     prs,
-    finished: ended.slice(0, FINISHED).map((j) => recent(j, d.local === true, closed.get(j.id as number))),
+    finished: ended.slice(0, FINISHED).map((j) => recent(j, d.local === true, closed.get(j.id))),
     local: d.local === true,
     people: d.local !== true,
-    byProject: d.local ? [...Map.groupBy(shown, (j) => j.repo)].map(([project, jobs]) => ({ project, jobs: jobs.map((j) => recent(j, d.local === true)) })) : [],
+    byProject: d.local ? [...Map.groupBy(shown, (j) => j.repo)].map(([project, jobs]) => ({ project, jobs: jobs.map((j) => recent(j, d.local === true, closed.get(j.id))) })) : [],
   };
 }

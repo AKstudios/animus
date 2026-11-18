@@ -1,0 +1,56 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Display job page: design reference</title>
+<link rel="stylesheet" href="display.css">
+</head>
+<body>
+<header class="top">
+  <span class="brand">abstergo</span>
+  <nav class="tabs"><a href="overview.html">Overview</a><a class="on" href="jobs.html">Jobs</a><a href="#">People</a></nav>
+  <div class="stats"><span>slots <b>3/4</b></span><b>14:21:40</b></div>
+</header>
+<div class="wrap">
+  <main class="main">
+    <div>
+      <a class="mute" href="jobs.html">&larr; Jobs</a>
+      <h1 style="margin-top:12px">Drafts from Slack</h1>
+      <p class="last"><span class="tag merged">MERGED #16</span> &nbsp;#16 · animus · ajmal · started 2026-11-17 21:04 UTC · merged after 9h</p>
+    </div>
+    <div class="numbers">
+      <div><b>41m</b><span class="mute">time taken</span></div>
+      <div><b>$6.02</b><span class="mute">cost</span></div>
+      <div><b>2</b><span class="mute">gate runs</span></div>
+      <div><b>3 of 3</b><span class="mute">slices passed</span></div>
+    </div>
+    <section>
+      <div class="sh"><h2>Where the time went</h2></div>
+      <div class="bar"><i style="flex:1"></i><i style="flex:4;opacity:.8"></i><i style="flex:24;opacity:.62"></i><i style="flex:6;opacity:.48"></i><i style="flex:6;opacity:.36"></i><i style="flex:1;opacity:.24"></i><i style="flex:1;opacity:.16"></i></div>
+      <div class="key"><span>setup <code>20s</code></span><span>plan <code>1m</code></span><span>implement <code>24m</code></span><span>gates <code>6m</code></span><span>review <code>6m</code></span><span>evidence <code>30s</code></span><span>pr <code>12s</code></span></div>
+    </section>
+    <section>
+      <div class="sh"><h2>Acceptance criteria</h2><span class="n">3 of 3 proven</span></div>
+      <div class="crit"><span class="tag plain">ok</span><div><p>/animus draft in a DM starts a draft and posts it as a file</p><code>node --test test/c1.test.ts</code></div></div>
+      <div class="crit"><span class="tag plain">ok</span><div><p>Submit on a draft queues it as a job under the sender</p><code>node --test test/c2.test.ts</code></div></div>
+      <div class="crit"><span class="tag plain">ok</span><div><p>The manifest asks for files:read and files:write</p><code>node --test test/c3.test.ts</code></div></div>
+    </section>
+    <section>
+      <div class="sh"><h2>Checks</h2></div>
+      <div class="pills"><span class="tag plain">typecheck ok</span><span class="tag plain">test ok</span></div>
+    </section>
+    <section>
+      <div class="sh"><h2>Review</h2></div>
+      <p class="mute">Review 1</p>
+      <p>One blocker, fixed in the next round.</p>
+      <div class="crit" style="grid-template-columns:96px 1fr"><span class="tag fail">BLOCKER</span><div><code>helix/src/drafts.ts:88</code><p>A draft's file upload is retried forever when Slack answers 429.</p></div></div>
+    </section>
+    <div class="fold">Slices <span class="mute" style="font-weight:400">3 of 3</span></div>
+    <div class="fold">Questions</div>
+    <div class="fold">Spec</div>
+    <div class="fold">Log</div>
+  </main>
+</div>
+</body>
+</html>

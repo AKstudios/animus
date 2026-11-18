@@ -73,7 +73,9 @@ export function folderParts(dir: string, runs: readonly Run[], answer?: string):
   const state = readJson<JobState>(join(dir, 'state.json'));
   const cut = state?.slicing?.slices ?? [];
   if (cut.length > 1) page.slices = cut.map((s, i) => ({ title: s.title, delivers: s.delivers, done: i < (state?.slices_done?.length ?? 0) }));
-  const gates = written(join(dir, 'gates'), /^run-\d+\.txt$/).at(-1);
+  const gateFiles = written(join(dir, 'gates'), /^run-\d+\.txt$/);
+  const gates = gateFiles.at(-1);
+  if (gateFiles.length) page.gate_runs = gateFiles.length;
   const checks = gates ? parseGates(read(gates) ?? '') : [];
   if (checks.length) page.checks = checks;
   const reviews = written(dir, /^review-\d+\.json$/).flatMap((f) => readJson<Review>(f) ?? []).filter((r) => Array.isArray(r.findings));
