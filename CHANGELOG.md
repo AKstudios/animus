@@ -8,6 +8,9 @@ clients with how to update.
 
 ## Unreleased
 
+- `npm run changelog` fails a branch that changes a shipped file without adding a
+  line under Unreleased; this repo's profile runs it as a gate.
+
 ## 0.4.5 (2026-11-18)
 
 - `after:` finds the earlier spec's pull request on GitHub, by the spec's
