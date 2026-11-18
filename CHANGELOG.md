@@ -14,6 +14,11 @@ clients with how to update.
   job held for room says why in `animus status <id>` and on the display, and
   Helix checks again every 30 seconds. With nothing running, the first queued
   job starts regardless.
+- `after:` keeps waiting on an earlier spec that is not a valid spec, instead
+  of failing the job. The waiting line names the file and why it could not be
+  read, and the file is read again on every check.
+- `npm run changelog` fails a branch that changes a shipped file without adding a
+  line under Unreleased; this repo's profile runs it as a gate.
 
 ## 0.4.5 (2026-11-18)
 
