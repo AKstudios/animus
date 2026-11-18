@@ -35,6 +35,14 @@ planner:
   sizes: [medium, large]
   max_slices: 8
 
+# The drafter: a session that writes a spec from a Slack message and the
+# references a script fetched for it (src/draft.ts). It reads files and
+# nothing else, and stops at max_usd dollars.
+drafter:
+  tier: fast
+  effort: low
+  max_usd: 0.5
+
 sizes:
   trivial:
     looks_like: Typo, copy, config value, one or two files
