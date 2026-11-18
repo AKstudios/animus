@@ -8,6 +8,8 @@ clients with how to update.
 
 ## Unreleased
 
+## 0.4.7 (2026-11-18)
+
 - `/helix job <id>` shows one job in Slack: its state, stage and who is working,
   why it waits, or how it ended, with links to its thread and pull request.
   `/helix cancel <id>` cancels a queued or running job as the thread's Cancel

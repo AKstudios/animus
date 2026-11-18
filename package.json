@@ -1,6 +1,6 @@
 {
   "name": "animus",
-  "version": "0.4.6",
+  "version": "0.4.7",
   "private": true,
   "description": "A software factory on Claude Code: a spec goes in, a pull request with proof comes out.",
   "type": "module",
