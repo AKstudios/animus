@@ -4,7 +4,7 @@
 import { jobPage, personPage } from './pages.ts';
 import type { Display, DisplayClosed, DisplayJob, DisplayPr } from './shape.ts';
 
-export type Tone = 'ink' | 'mute' | 'ask' | 'fail' | 'merged';
+export type Tone = 'ink' | 'mute' | 'ask' | 'fail' | 'merged' | 'open';
 export type Tick = 'running' | 'ask' | 'failed' | 'queued' | 'ended' | 'merged';
 
 export type Project = { id: string; summary: string; on: boolean; busy: boolean; ticks: Tick[] };
@@ -122,9 +122,9 @@ export function recent(j: DisplayJob, local = false, closed?: DisplayClosed): Re
     meta: [took, j.cost_usd !== undefined ? usd(j.cost_usd) : ''].filter(Boolean).join(' · '),
     ...(j.resume ? { reason: `It stopped before it ended. To carry on: ${j.resume}` } : j.reason ? { reason: firstLine(j.reason) } : {}),
   };
-  // A PR GitHub has not answered about stays `PR #n`, never guessed.
-  const n = !local && j.pr && (j.outcome === 'pr' || j.outcome === 'draft-pr') ? /(\d+)\/?$/.exec(j.pr)?.[1] : undefined;
-  if (!n) return made;
+  // A PR GitHub (or, locally, outcomes.json) has not answered about stays `PR #n`, never guessed.
+  const n = j.pr && (j.outcome === 'pr' || j.outcome === 'draft-pr') ? /(\d+)\/?$/.exec(j.pr)?.[1] : undefined;
+  if (!n || (local && !closed)) return made;
   return closed ? { ...made, tag: `${closed.merged ? 'MERGED' : 'CLOSED'} #${n}`, tone: closed.merged ? 'merged' : 'mute' } : { ...made, tag: `PR #${n}` };
 }
 
@@ -177,7 +177,7 @@ export function view(d: Display, picked: string | null, now: number): View {
   const news = asking.length ? `${asking.length} ${asking.length === 1 ? 'job needs' : 'jobs need'} you.` : '';
   const work = runningNow ? `${runningNow} ${runningNow === 1 ? 'agent' : 'agents'} at work.` : '';
   const lastJob = shown.filter((j) => j.state === 'ended' && !isAsk(j) && j.ended).sort((a, b) => Date.parse(b.ended!) - Date.parse(a.ended!))[0];
-  const last = lastJob && recent(lastJob, d.local === true, closed.get(lastJob.id as number));
+  const last = lastJob && recent(lastJob, d.local === true, closed.get(lastJob.id));
   const headline: Headline = {
     needs: news, rest: news || work ? work : 'All quiet. Nothing needs you.',
     ...(lastJob && last ? { last: { when: `Last finished ${span(now - Date.parse(lastJob.ended!))} ago`, tag: last.tag, tone: last.tone } } : {}),
@@ -225,9 +225,9 @@ export function view(d: Display, picked: string | null, now: number): View {
     noLive: sel ? 'No agent is working on this project.' : d.local ? 'No agent is working right now.' : `No agent is working right now. ${d.slots === 1 ? 'The one slot is' : `All ${d.slots} slots are`} free.`,
     headline, week, needs, line: queue.slice(0, LINE),
     prs,
-    finished: ended.slice(0, FINISHED).map((j) => recent(j, d.local === true, closed.get(j.id as number))),
+    finished: ended.slice(0, FINISHED).map((j) => recent(j, d.local === true, closed.get(j.id))),
     local: d.local === true,
     people: d.local !== true,
-    byProject: d.local ? [...Map.groupBy(shown, (j) => j.repo)].map(([project, jobs]) => ({ project, jobs: jobs.map((j) => recent(j, d.local === true)) })) : [],
+    byProject: d.local ? [...Map.groupBy(shown, (j) => j.repo)].map(([project, jobs]) => ({ project, jobs: jobs.map((j) => recent(j, d.local === true, closed.get(j.id))) })) : [],
   };
 }

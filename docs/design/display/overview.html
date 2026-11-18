@@ -1,0 +1,62 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Display overview: design reference</title>
+<link rel="stylesheet" href="display.css">
+</head>
+<body>
+<header class="top">
+  <span class="brand">abstergo</span>
+  <nav class="tabs"><a class="on" href="#">Overview</a><a href="jobs.html">Jobs</a><a href="#">People</a></nav>
+  <div class="stats"><span>slots <b>3/4</b></span><b>14:21:40</b></div>
+</header>
+<div class="wrap">
+  <main class="main">
+    <div>
+      <h1><em>1 job needs you.</em> 2 agents at work.</h1>
+      <p class="last">Last finished 2h ago · <span class="tag merged">MERGED #19</span></p>
+    </div>
+    <section>
+      <div class="sh"><h2>Needs you</h2><span class="n">1</span></div>
+      <div class="ask">
+        <p class="q">Should a /animus comment on a closed issue start a draft, or be ignored with a reply saying the issue is closed?</p>
+        <p class="mute"><span class="mono">#23</span> animus · /animus fix on a PR continues its branch · waiting <span class="mono">28m</span></p>
+        <div class="act"><code>animus answer 23 "…"</code><a class="btn" href="job.html">Open job</a></div>
+      </div>
+    </section>
+    <section>
+      <div class="sh"><h2>Working now</h2><span class="n">2</span></div>
+      <div class="cards">
+        <a class="card" href="job.html"><span class="mute mono">#24 meal-planner · ajmal</span><span class="t">Swap a meal for another with the same ingredients</span><div class="track"><i class="d"></i><i class="d"></i><i class="d"></i><i class="c"></i><i></i><i></i><i></i></div><div class="step"><span><b>Gates</b> · attempt 1</span><span class="mono">07:15</span></div></a>
+        <a class="card" href="job.html"><span class="mute mono">#22 animus · ajmal</span><span class="t">Start and follow work with /animus comments on GitHub</span><div class="track"><i class="d"></i><i class="d"></i><i class="c"></i><i></i><i></i><i></i><i></i></div><div class="step"><span><b>Implement</b> · slice 2 of 3</span><span class="mono">18:42</span></div></a>
+      </div>
+    </section>
+    <section>
+      <div class="sh"><h2>Open PRs</h2><span class="n">1</span></div>
+      <div class="row"><span class="tag open">OPEN PR #20</span><span class="t">Jobs start from the machine's free memory and load</span><span class="by">#18 · animus · ajmal</span></div>
+    </section>
+    <section>
+      <div class="sh"><h2>Finished</h2><span class="n">5</span></div>
+      <div class="row"><span class="tag merged">MERGED #19</span><span class="t">Slack's command is /animus and its bot is Animus</span><span class="by">#21 · animus · ajmal · 2m · $0.46</span></div>
+      <div class="row"><span class="tag merged">MERGED #24</span><span class="t">Clear ticks on the Shop tab</span><span class="by">#20 · meal-planner · ajmal · 2m · $0.17</span></div>
+      <div class="row"><span class="tag merged">MERGED #16</span><span class="t">Drafts from Slack</span><span class="by">#16 · animus · ajmal · 41m · $6.02</span></div>
+      <div class="row"><span class="tag fail">FAILED</span><span class="t">Join Helix with GitHub's sign-in</span><span class="by">#14 · animus · ajmal · 6m · $0.80</span><span class="why">The gates still failed after 2 fix rounds: test</span></div>
+      <div class="row"><span class="tag plain">CLOSED #21</span><span class="t">A Facebook link is named Facebook</span><span class="by">#12 · meal-planner · ajmal · 9m · $0.06</span></div>
+    </section>
+  </main>
+  <aside class="side">
+    <section class="panel">
+      <h2 style="font-size:15px">This week</h2>
+      <dl class="week"><div><dt>PRs merged</dt><dd>3</dd></div><div><dt>Jobs finished</dt><dd>6</dd></div><div><dt>Spent</dt><dd>$13.25</dd></div><div><dt>Median job</dt><dd>7m</dd></div></dl>
+    </section>
+    <nav class="panel" aria-label="Projects">
+      <h2 style="font-size:15px">Projects <span class="mute" style="font-weight:400">2</span></h2>
+      <div class="proj"><div class="h"><b>animus</b><span class="mute">1 running · 1 ask</span></div><div class="ticks"><i class="m"></i><i class="m"></i><i class="f"></i><i class="m"></i><i class="a"></i><i class="r"></i></div></div>
+      <div class="proj"><div class="h"><b>meal-planner</b><span class="mute">1 running</span></div><div class="ticks"><i class="m"></i><i></i><i class="r"></i></div></div>
+    </nav>
+  </aside>
+</div>
+</body>
+</html>

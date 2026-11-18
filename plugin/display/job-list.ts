@@ -48,6 +48,6 @@ export function jobListView(p: JobListPage, local: boolean): { rows: JobRow[]; m
     const { personPage: link, ...row } = recent(j, false);
     const n = j.pr && /(\d+)\/?$/.exec(j.pr)?.[1];
     const tag = n && j.pr_state ? `${j.pr_state === 'open' ? 'OPEN PR' : j.pr_state === 'merged' ? 'MERGED' : 'CLOSED'} #${n}` : row.tag;
-    return { ...row, tag, tone: j.pr_state === 'closed' ? 'mute' : row.tone, submitted: j.submitted, ...(local || !link ? {} : { personPage: link }) };
+    return { ...row, tag, tone: j.pr_state === 'closed' ? 'mute' : j.pr_state === 'merged' ? 'merged' : j.pr_state === 'open' ? 'open' : row.tone, submitted: j.submitted, ...(local || !link ? {} : { personPage: link }) };
   }) };
 }
