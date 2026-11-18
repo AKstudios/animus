@@ -28,12 +28,13 @@ complete.
    $ sh scripts/with-tmp.sh node --disable-warning=ExperimentalWarning --test helix/test/slack-draft.test.ts
 2. A GitHub issue or pull request link, a Slack file, or a public URL in the
    message is fetched before the session starts and saved beside the draft
-   as a reference. The session reads those files and has no GitHub token and
-   no network beyond Claude.
+   as a reference. The session reads those files, gets no GitHub token (no
+   `ANIMUS_GH_TOKEN_FILE` in its container) and no network beyond Claude.
    $ sh scripts/with-tmp.sh node --disable-warning=ExperimentalWarning --test plugin/test/draft.test.ts
 3. The draft's project is the linked issue's repository, else the channel's
    default set with `/helix project <name>`, else the one the person picks
-   from a list of projects their GitHub token can push to.
+   from a list of the projects Helix has that the GitHub App lets them push
+   to.
    $ sh scripts/with-tmp.sh node --disable-warning=ExperimentalWarning --test helix/test/slack-draft.test.ts
 4. A reply in the draft's thread from its person (any reply in a DM, a reply
    mentioning @Helix in a channel) runs the draft session again with that
@@ -51,6 +52,12 @@ complete.
    $ sh scripts/with-tmp.sh node --disable-warning=ExperimentalWarning --test helix/test/slack-draft.test.ts plugin/test/draft.test.ts
 7. docs/factory.md and docs/workflow.md describe drafts where they now say
    "the message is the spec".
+8. `helix/deploy/slack/manifest.yaml` asks for the scopes drafts need
+   (`files:read` for Slack files, `files:write` for the draft's `.md`), the
+   `/helix` usage line names `draft` and `project`, and CHANGELOG.md says under
+   Unreleased that the Slack app must be updated from the manifest and
+   reinstalled.
+   $ grep -q "files:write" helix/deploy/slack/manifest.yaml && grep -q "files:read" helix/deploy/slack/manifest.yaml
 
 ## Decisions
 
@@ -70,6 +77,9 @@ complete.
 - Tests: Slack behaviour through the bot core's fake transport; the draft
   session through the fake agent in plugin/test/helpers.ts.
 - Terms are in GLOSSARY.md: draft, reference.
+- GitHub is reached through the person's GitHub App sign-in, as jobs are
+  (docs/adr/0005); fetching a reference uses it in Helix, outside the
+  draft session.
 
 ## Out of scope
 
