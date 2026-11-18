@@ -23,6 +23,8 @@ export type DisplayJob = {
   /** How the run ended: Animus's outcome (pr, draft-pr, needs-input, failed). */
   outcome?: string;
   pr?: string;
+  /** A fix: the job it continues (Helix's number, or a local job's id). */
+  fix_of?: number | string;
   reason?: string;
   question?: string;
   cost_usd?: number;

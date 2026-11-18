@@ -286,6 +286,23 @@ out the tag and runs the tests, goes back if they fail, then stops `helix
 serve` for its service manager to start again. `npm run deploy -- <ssh-host>`
 moves it to the release `stable` points at ([releases.md](releases.md)).
 
+## Fixes
+
+`animus fix <pr> "<what to change>"` from a laptop with a Helix set up
+submits a **fix** (described in [cli.md](cli.md)) to `POST /jobs/fix` when a job on this Helix opened the pull request, and
+prints where to watch it, as `animus submit` does. Helix checks the pull
+request: a job here must have opened it and a fix must not be queued, running
+or waiting for an answer on it (409, naming that fix). Only the person of the
+job that opened it, or the owner, may ask; anyone else gets a one-line 403.
+
+The fix is a job of its own, queued like any other, that runs as the opener's
+job (their folder holds the worktree and the session it continues). Helix
+starts it only as an `animus fix` process, in a new container where
+containers are on; a container is never kept, and the session lives in the
+person's Claude config, so it resumes across containers. A fix is not
+admitted again: the process reads the spec of the job it continues. Its job
+page names and links the job it fixes.
+
 ## Lessons
 
 `helix serve` looks hourly (first, fifteen minutes after it starts) for a
@@ -410,6 +427,7 @@ the display's own request for a job page's data sends none.
 | `POST /lessons/<id>` | `action`: `accept` or `dismiss` (404 for an unknown id, 409 for one that cannot change that way); the lesson |
 | `GET /jobs` | The slots and your jobs; `?all`, every person's, for the owner only |
 | `POST /jobs` | Submit: `repo`, `spec`, and optionally `name`, `draft`, `skills`, `profile` (the checkout's profile text, to warn when it differs from the base branch's). The spec is admitted first: 400 with the list of problems when it is refused; the answer's `warnings` when it is admitted with any |
+| `POST /jobs/fix` | Submit a fix (`animus fix`): `repo`, `pr` (a number, `#number` or URL) and `ask`, and optionally `skills`. 404 when no job here opened the pull request, 403 for anyone but that job's person or the owner, 409 when a fix is queued, running or waiting for an answer; the answer is the job, as submit's |
 | `GET /jobs/<id>` | One job, with the end of its log |
 | `POST /jobs/<id>/answer` | Answer its question (`answer`); it is queued again |
 | `POST /jobs/<id>/cancel` | Cancel your job, or anyone's for the owner |

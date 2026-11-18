@@ -2,7 +2,7 @@
 // facts, stages, slices, checks, review and questions, each as it is shown.
 // No DOM here, so the wording is tested without a browser
 // (helix/test/job-page.test.ts), as view.ts is.
-import { personPage } from './pages.ts';
+import { jobPage, personPage } from './pages.ts';
 import type { DisplayClosed, JobPage } from './shape.ts';
 import { clock, recent, span, type Tone } from './view.ts';
 
@@ -89,6 +89,7 @@ export function jobView(p: JobPage, now: number, local = false, closed?: Display
     ...(j.outcome ? [{ k: 'outcome', v: OUTCOMES[j.outcome] ?? j.outcome }] : []),
     ...(j.resume ? [{ k: 'carry on', v: j.resume }] : []),
     ...(j.pr ? [{ k: 'PR', v: pr ? `#${pr}` : j.pr, ...(/^https?:\/\//.test(j.pr) ? { href: j.pr } : {}) }] : []),
+    ...(j.fix_of !== undefined ? [{ k: 'fixes', v: `job #${j.fix_of}`, page: jobPage(j.fix_of) }] : []),
     ...(j.cost_usd !== undefined ? [{ k: 'cost', v: `$${j.cost_usd.toFixed(2)}` }] : []),
     { k: 'submitted', v: when(j.submitted) },
     ...(j.started ? [{ k: 'started', v: when(j.started) }] : []),

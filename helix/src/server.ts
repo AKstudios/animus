@@ -1,4 +1,4 @@
-// Helix's HTTP API: five actions on jobs (submit, status, result, cancel,
+// Helix's HTTP API: six actions on jobs (submit, fix, status, result, cancel,
 // answer) and three on projects (add, list, remove), over JSON, for the
 // private network only. Each of those carries a person's token; the queue
 // lists a person's own jobs, a job can be answered only by whoever submitted
@@ -245,6 +245,13 @@ export function serve(opts: {
           const submitted = supervisor.submit(person, s);
           return send(201, { ...submitted, skills: skills.map((k) => k.name), links: jobLinks(config, submitted.id), ...(warnings.length ? { warnings } : {}) });
         }
+      } else if (id === 'fix' && !action && req.method === 'POST') {
+        const b = await body(req);
+        if (typeof b.repo !== 'string' || typeof b.pr !== 'string' || !b.pr.trim() || typeof b.ask !== 'string' || !b.ask.trim()) throw new Refused(400, 'a fix needs repo (its name here), pr (a number or its address) and ask (what to change)');
+        let skills: PersonalSkill[];
+        try { skills = parseSkills(b.skills, 'the fix'); } catch (err) { throw new Refused(400, (err as Error).message); }
+        const queued = supervisor.fix(person, { repo: b.repo, pr: b.pr, ask: b.ask, ...(skills.length ? { skills } : {}) });
+        return send(201, { ...queued, skills: skills.map((k) => k.name), links: jobLinks(config, queued.id) });
       } else if (/^\d+$/.test(id)) {
         const n = Number(id);
         if (req.method === 'GET' && !action) {
