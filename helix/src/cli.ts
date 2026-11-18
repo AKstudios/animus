@@ -13,6 +13,7 @@ import { checkEnv, checkPerson, describeFindings, failing, githubPush, githubTok
 import { animusVersion } from '../../plugin/src/version.ts';
 import { containerLaunch, containerProblem, draftLaunch, imageName, personDirs, removeContainer } from './container.ts';
 import { draftRunner } from './drafts.ts';
+import { startAdmit, submissionAdmit } from './admit.ts';
 import { freshBase } from './fresh.ts';
 import { checkComments, commentWatcher, githubNotifier } from './github-comments.ts';
 import { addPerson, addRepo, configFile, envFileVars, helixHome, identityEnv, importRegistry, loadConfig, readyRepos, removeRepo } from './config.ts';
@@ -193,7 +194,7 @@ function main(argv: string[]): number | undefined | Promise<number> {
       // A job's progress goes to its Slack DM thread, when there is a bot, and its milestones to the issue it came from.
       const notifiers = [...(slack ? [slackNotifier(slack, store, say, config)] : []), githubNotifier({ store, config, say })];
       // Without containers the job runs in Helix's clone of the project, which is brought up to date here; a container does it inside, before animus starts.
-      const supervisor = supervise({ store, config, home, preflight, prepare: beforeJob(store, config), say, ...(config.container ? {} : { fresh: freshBase }), ...isolation, notify: (job) => { for (const tell of notifiers) tell(job); } });
+      const supervisor = supervise({ store, config, home, preflight, prepare: beforeJob(store, config), admit: startAdmit, say, ...(config.container ? {} : { fresh: freshBase }), ...isolation, notify: (job) => { for (const tell of notifiers) tell(job); } });
       // Drafts start from Slack, when it runs, and from /animus comments on GitHub.
       // With containers, a draft runs in one of its own on a clone of the project's, with only the person's Claude sign-in.
       const contained = config.container && draftLaunch({ home, animusRoot: ROOT, image: imageName(animusVersion()), limits: config.container, uid: uid(), gid: gid() });
@@ -209,7 +210,7 @@ function main(argv: string[]): number | undefined | Promise<number> {
       const readComments = () => { comments.poll().catch((err: unknown) => say(`github comments: ${(err as Error).message}`)); };
       readComments();
       setInterval(readComments, 60 * 1000).unref();
-      const server = serve({ config, store, supervisor, home, startCheck: checkInChild(store, home, say, (person) => freshToken(store, config, person)),...(config.container ? { reap: removeContainer } : {}), ...(slack ? { slack } : {}) });
+      const server = serve({ config, store, supervisor, home, admit: submissionAdmit(store, config), startCheck: checkInChild(store, home, say, (person) => freshToken(store, config, person)),...(config.container ? { reap: removeContainer } : {}), ...(slack ? { slack } : {}) });
       server.listen(config.port, config.host, () => console.error(`helix ${animusVersion()}: listening on http://${config.host}:${config.port}, ${config.slots} job(s) at once${config.container ? ', each in a container' : ''}, projects: ${Object.keys(readyRepos(store)).join(', ') || 'none yet'}`));
       // A running job reads its person's GitHub token from their live token file; renewing it when due lets a long job still push.
       setInterval(() => { void renewForRunningJobs(store, config, say); }, 10 * 60 * 1000).unref();

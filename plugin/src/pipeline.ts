@@ -604,7 +604,7 @@ export async function runJob(opts: RunOptions, deps: Deps): Promise<Run> {
       protectedTouched: run.protected_touched, escalations: run.escalations, models, cost_usd: run.cost_usd,
       ...(notes ? { notes } : {}), ...(review ? { review } : {}), ...(shots ? { shots } : {}), ...(caughtUp ? { caughtUp: { branch: ws.baseBranch, commit: caughtUp, resolved } } : {}), ...(failed && reason ? { failure: reason } : {}),
       // Helix sets it for a job submitted from an issue; a failure report is a draft, which should not close the issue when merged.
-      ...(!failed && /^\d+$/.test(process.env.ANIMUS_CLOSES ?? '') ? { closes: Number(process.env.ANIMUS_CLOSES) } : {}),
+      ...(!failed && /^\d+$/.test(process.env.ANIMUS_CLOSES ?? '') ? { closes: Number(process.env.ANIMUS_CLOSES), issueLink: repoProfile.issue_link } : {}),
     });
     writeFileSync(join(dir, 'pr-body.md'), `${body}\n`);
     if (!opts.dryRun) {

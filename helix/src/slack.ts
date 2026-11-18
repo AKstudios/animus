@@ -255,7 +255,7 @@ function progress(job: HelixJob, links: string[] = []): string | undefined {
   if (job.state !== 'ended') return undefined;
   if (job.outcome === 'needs-input') return `Job ${job.id} needs input: ${job.question}\nReply in this thread to answer it, or run animus answer ${job.id} "<your answer>"`;
   if (job.pr) return `Job ${job.id} opened a pull request: ${job.pr}`;
-  return `Job ${job.id} failed: ${job.reason ?? job.outcome}`;
+  return `Job ${job.id} ${job.outcome === 'refused' ? 'was refused' : 'failed'}: ${job.reason ?? job.outcome}`;
 }
 
 /**

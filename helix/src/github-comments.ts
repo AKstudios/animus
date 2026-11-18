@@ -131,7 +131,7 @@ function milestone(job: HelixJob): string | undefined {
   if (job.outcome === 'needs-input') return `Job ${job.id} needs input: ${job.question}\nReply with a comment: \`/animus answer <your answer>\``;
   if (job.outcome === 'pr' && job.pr) return `Job ${job.id} opened a pull request: ${job.pr}`;
   // A job that failed after its fix rounds still publishes its report as a draft PR (outcome draft-pr): that is a failure, with the link.
-  return `Job ${job.id} failed: ${job.reason ?? job.outcome}${job.pr ? `. The failure report: ${job.pr}` : ''}`;
+  return `Job ${job.id} ${job.outcome === 'refused' ? 'was refused' : 'failed'}: ${job.reason ?? job.outcome}${job.pr ? `. The failure report: ${job.pr}` : ''}`;
 }
 
 /**

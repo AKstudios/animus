@@ -51,6 +51,21 @@ test('the pull request body says Closes #<issue> when Helix set the issue, for a
   } finally { delete process.env.ANIMUS_CLOSES; }
 });
 
+// Protects: criterion 9 of the admit spec. Fails when: issue_link: refs in the profile is ignored and the PR still closes the issue on merge.
+test('the pull request body says Refs #<issue> when the profile asks for issue_link: refs', async () => {
+  process.env.ANIMUS_CLOSES = '7';
+  try {
+    const repo = makeRepo();
+    write(repo, '.animus/animus.yaml', 'commands:\n  test: grep -q done src/feature.txt\nissue_link: refs\n');
+    git(repo, ['commit', '-qam', 'refs, not closes']);
+    const d = deps(fakeAgent([say('done'), () => clean()]).agent);
+    await runJob({ repo, specFile: writeSpec(SMALL) }, d);
+
+    assert.match(d.published[0]!.body, /^Refs #7$/m);
+    assert.doesNotMatch(d.published[0]!.body, /Closes #/);
+  } finally { delete process.env.ANIMUS_CLOSES; }
+});
+
 test('every run writes one line to the run log', async () => {
   const repo = makeRepo();
   const { agent } = fakeAgent([say('done'), () => clean()]);

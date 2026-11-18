@@ -62,6 +62,8 @@ export type Profile = {
   protected: string[];
   /** The branch jobs start from and their PR targets. */
   base: string;
+  /** How a PR says which issue it is for: `Closes #N` (default) or `Refs #N`, for a project whose issues stay open until a person closes them. A spec cannot override it. */
+  issue_link: 'closes' | 'refs';
   /** Where job worktrees go; default ../.worktrees/<repo name>. */
   worktrees?: string;
   ui: UiProfile;
@@ -76,6 +78,7 @@ const DEFAULTS: Profile = {
   tests: ['**/*.test.*', '**/*.spec.*', '**/test_*.py', '**/*_test.py', '**/*_test.go', 'test/**', 'tests/**', '__tests__/**'],
   protected: ['.github/**', '.animus/**', '.claude/**', 'infrastructure/**'],
   base: 'main',
+  issue_link: 'closes',
   ui: { targets: [], human_review: true },
 };
 
@@ -134,6 +137,10 @@ export function parseProfile(text: string, file = PROFILE_PATH): Profile {
     if (raw[key] === undefined) continue;
     if (typeof raw[key] !== 'string') throw bad(`${key} must be text`);
     profile[key] = raw[key];
+  }
+  if (raw.issue_link !== undefined) {
+    if (raw.issue_link !== 'closes' && raw.issue_link !== 'refs') throw bad('issue_link must be closes or refs');
+    profile.issue_link = raw.issue_link;
   }
   if (raw.installs !== undefined) {
     if (!Array.isArray(raw.installs)) throw bad('installs must be a list of { path, key, run, version }');

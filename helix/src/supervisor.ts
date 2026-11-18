@@ -110,6 +110,8 @@ export function supervise(opts: {
   prepare?: (person: string, repo: string) => Promise<void>;
   /** Brings the clone the job runs in up to date with its base branch on GitHub, with the job's environment; throws why it cannot. Left out with containers, which do it inside (container.ts jobCommand). */
   fresh?: (repoDir: string, env: Record<string, string>) => unknown;
+  /** Admits a queued job's spec against its project on GitHub as it starts, with the job's environment: the list of problems when it no longer passes, nothing when it does. Throws why it cannot be read, which fails the job. */
+  admit?: (job: HelixJob, repoDir: string, env: Record<string, string>) => string | undefined;
   /** Ends what a job leaves running outside its process tree (its container). */
   reap?: (id: number) => void;
   /** The Animus home a person's jobs write their state to, when it is not Helix's own. */
@@ -159,6 +161,13 @@ export function supervise(opts: {
       const jobEnv = { ...looked.env, ...theirs, ...credentialEnv(theirs), ANIMUS_USER: job.person, ANIMUS_TRIGGER: 'helix', ...(job.github ? { ANIMUS_CLOSES: String(job.github.issue) } : {}), ANIMUS_BIN: join(PLUGIN, 'bin', 'animus') };
       // The profile is read from the base branch as GitHub has it now, with the person's token as their pushes use.
       opts.fresh?.(repoDir, jobEnv);
+      // A queued job is admitted again: the profile may have changed since it was submitted. A resumed one was admitted when it first started.
+      const refused = job.animus_job ? undefined : opts.admit?.(job, repoDir, jobEnv);
+      if (refused) {
+        saveAndTell({ ...job, state: 'ended', ended: now(), outcome: 'refused', reason: refused });
+        say(`job ${job.id} was refused before it started: ${refused.split('\n')[0]}`);
+        return;
+      }
       launched = launch(job, repoDir, jobEnv);
       env = { ...process.env, ...jobEnv, ...launched.env };
     } catch (err) {

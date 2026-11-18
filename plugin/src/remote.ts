@@ -19,6 +19,8 @@ export type RemoteJob = {
   skills?: string[];
   /** The job's page at each address Helix has set, as `Tailscale: <url>` lines; never with a token. A Helix that predates them leaves this out. */
   links?: string[];
+  /** On a submission's answer: what Helix admitted the spec with, as a warning (admit.ts). */
+  warnings?: string[];
 };
 
 /** Where to watch a job on Helix: one indented line per address. */
@@ -76,7 +78,8 @@ export async function helixVersion(url: string): Promise<string> {
 }
 
 export type SentSkill = { name: string; roles: string[]; types?: string[]; text: string };
-export const submit = (s: { repo: string; spec: string; name: string; draft?: boolean; skills?: SentSkill[] }) => call<RemoteJob>('POST', '/jobs', s);
+/** profile: the checkout's profile text, so Helix can warn when it is not the base branch's. */
+export const submit = (s: { repo: string; spec: string; name: string; draft?: boolean; skills?: SentSkill[]; profile?: string }) => call<RemoteJob>('POST', '/jobs', s);
 /** The person's own jobs; with all, every person's, which only the owner may see. */
 export const jobs = (all = false) => call<{ slots: number; jobs: RemoteJob[] }>('GET', all ? '/jobs?all' : '/jobs');
 export const job = (id: string) => call<RemoteJob>('GET', `/jobs/${encodeURIComponent(id)}`);

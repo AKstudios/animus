@@ -158,3 +158,10 @@ test('a job whose spec is refused ends with the whole list, before any worktree,
   assert.equal(git(repo, ['worktree', 'list']).split('\n').length, 1);
   assert.ok(existsSync(repo));
 });
+
+// Protects: issue_link is a closed choice. Fails when: a misspelt value is read as closes and the PR closes an issue the project wanted left open.
+test('issue_link takes closes or refs and defaults to closes', () => {
+  assert.equal(parseProfile('base: main').issue_link, 'closes');
+  assert.equal(parseProfile('issue_link: refs').issue_link, 'refs');
+  assert.throws(() => parseProfile('issue_link: ref'), /issue_link must be closes or refs/);
+});
