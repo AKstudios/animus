@@ -39,9 +39,17 @@ async function helix(links: Pick<Config, 'url' | 'lan_url'>, project = 'app') {
   const supervisor = supervise({ store, config, home, launch: () => ({ command: process.execPath, args: ['-e', 'setTimeout(()=>{},60000)'] }) });
   const server = serve({ config, store, supervisor });
   await new Promise<void>((r) => { server.listen(0, '127.0.0.1', r); });
+  // Put back what the environment had, so a later test in this process does not reach a Helix that is gone.
+  const before = { HELIX_URL: process.env.HELIX_URL, HELIX_TOKEN: process.env.HELIX_TOKEN };
   process.env.HELIX_URL = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
   process.env.HELIX_TOKEN = 'ana-token';
-  return { stop: () => { supervisor.stop(); server.close(); store.close(); } };
+  const restore = () => {
+    for (const [key, value] of Object.entries(before)) {
+      if (value === undefined) delete process.env[key];
+      else process.env[key] = value;
+    }
+  };
+  return { stop: () => { supervisor.stop(); server.close(); store.close(); restore(); } };
 }
 
 // Protects: submit and status both name the job's page at each address Helix has, without a token. Fails when: a link is missing, mislabelled, doubles a trailing slash, or carries the token.
