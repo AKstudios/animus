@@ -11,3 +11,11 @@ references, so a person has read everything a job acts on.
 
 A draft cannot follow a link the script did not fetch. A reference type is
 added by adding a fetcher to the script, never by giving the session a tool.
+
+## Since: project facts
+
+The draft session is also given what a script read from the project's
+profile: its UI targets with their pages, its gates, its base branch and the
+spec types that run. The script fetches and renders them; the session still
+reaches nothing itself. Admit's problems with a draft go back to the same
+session once, inside the draft's spending cap.

@@ -39,6 +39,27 @@ The description of one piece of work, with acceptance criteria and a check
 for each.
 _Avoid_: Ticket, task, request
 
+**Admit**:
+To decide, before a job is queued and again when it starts, whether a spec
+can run on a project, against both the factory and the project's profile,
+listing every problem at once.
+_Avoid_: Preflight, validate, lint
+
+**Profile**:
+A project's own description of how its work is set up, checked and shown,
+kept in the project; on Helix, read as the base branch has it on GitHub.
+_Avoid_: Config, settings, task profile
+
+**UI target**:
+One app a project's profile says a UI job can run and screenshot; a UI spec
+names one when the profile has several.
+_Avoid_: App, frontend, surface
+
+**Page**:
+One place in a UI target that a UI job screenshots, named in the profile or
+given as a path in the spec.
+_Avoid_: Route, screen, view
+
 **Job**:
 One run of the factory on one spec, ending in a pull request, a question, or
 a failure.
