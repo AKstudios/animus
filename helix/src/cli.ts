@@ -221,7 +221,9 @@ function main(argv: string[]): number | undefined | Promise<number> {
       };
       const first = setTimeout(clean, CLEANUP_FIRST_MS);
       const daily = setInterval(clean, CLEANUP_EVERY_MS);
-      const stop = () => { clearTimeout(first); clearInterval(daily); unwatchFile(configFile()); slack?.close(); supervisor.stop(); server.close(); store.close(); rmSync(pidFile(), { force: true }); process.exit(0); };
+      // Free memory and load change without a job ending: look at the queue again.
+      const recheck = setInterval(() => supervisor.wake(), 30 * 1000);
+      const stop = () => { clearInterval(recheck); clearTimeout(first); clearInterval(daily); unwatchFile(configFile()); slack?.close(); supervisor.stop(); server.close(); store.close(); rmSync(pidFile(), { force: true }); process.exit(0); };
       process.on('SIGINT', stop);
       process.on('SIGTERM', stop);
       return undefined;

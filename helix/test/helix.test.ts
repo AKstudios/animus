@@ -193,6 +193,26 @@ test('the display is told every job, where a running one is, and why a queued on
   h.stop();
 });
 
+test('a queued job held for room says why in status and the display, and the reason clears when it starts', async () => {
+  const h = await helix();
+  h.config.slots = 2;
+  h.config.reserve_memory = '999t';
+  const read = async () => (await (await fetch(new URL('/display', process.env.HELIX_URL), { headers: { authorization: 'Bearer ben-token' } })).json()) as Display;
+  const first = await h.submit('hold first');
+  await until(() => client.job(String(first.id)), (j) => j.state === 'running');
+  const second = await h.submit('second');
+  h.supervisor.wake();
+  const why = /^waiting for memory: [\d.]+ GB free, needs 4 GB plus \d+ GB kept free$/;
+  assert.match((await client.job(String(second.id))).waiting ?? '', why);
+  assert.match(client.describeJob(await client.job(String(second.id))), /\n {2}waiting for memory: /);
+  assert.match((await read()).jobs.find((j) => j.id === second.id)!.waiting ?? '', why);
+  h.config.reserve_memory = '1g';
+  writeFileSync(h.release, '');
+  const done = await h.ended(second.id);
+  assert.equal(done.waiting, undefined);
+  h.stop();
+});
+
 test('a job that was running when Helix died is queued again and runs when Helix is back', async () => {
   const h = await helix();
   const j = await h.submit('hold over a restart');

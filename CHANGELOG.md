@@ -8,6 +8,12 @@ clients with how to update.
 
 ## Unreleased
 
+- Helix starts a queued job only when the machine and Claude have room.
+  `config.yaml` takes `reserve_memory` (`2g`), `job_memory` (`4g`) and
+  `tier_limits` (such as `deep: 1`); `slots` is now the most jobs at once. A
+  job held for room says why in `animus status <id>` and on the display, and
+  Helix checks again every 30 seconds. With nothing running, the first queued
+  job starts regardless.
 - `after:` keeps waiting on an earlier spec that is not a valid spec, instead
   of failing the job. The waiting line names the file and why it could not be
   read, and the file is read again on every check.

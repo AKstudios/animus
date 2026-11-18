@@ -8,6 +8,7 @@ import { homedir } from 'node:os';
 import { isAbsolute, join, relative, resolve } from 'node:path';
 import { parse, stringify } from 'yaml';
 import { isRecord } from '../../plugin/src/profile.ts';
+import { TIERS, type Tier } from '../../plugin/src/profiles.ts';
 import { AnimusError, tryGit } from '../../plugin/src/proc.ts';
 import type { Person, Store } from './store.ts';
 
@@ -33,6 +34,12 @@ export type Config = {
    * Left out, jobs run on the machine as Helix's account, sharing it.
    */
   container?: { memory?: string; cpus?: number };
+  /** Memory kept free for the machine beyond what a new job needs (`2g`), before Helix starts it. */
+  reserve_memory?: string;
+  /** What a job is counted to need when container.memory is not set (`4g`). */
+  job_memory?: string;
+  /** The most jobs at once whose implementer runs on a tier, such as `deep: 1`; a tier left out has no limit. */
+  tier_limits?: Partial<Record<Tier, number>>;
   /** The person who may invite and remove people and act on any project or job; set by helix owner (owner.ts). */
   owner?: string;
   /** The Slack bot, set by helix slack setup; its tokens are in credentials/slack.env. Its owner is the Slack user linked to owner. */
@@ -41,7 +48,15 @@ export type Config = {
   github?: { client_id: string };
 };
 
-const DEFAULTS: Config = { host: '127.0.0.1', port: 7420, slots: 2 };
+const DEFAULTS: Config = { host: '127.0.0.1', port: 7420, slots: 2, reserve_memory: '2g', job_memory: '4g', tier_limits: {} };
+
+const UNITS: Record<string, number> = { '': 1, b: 1, k: 1024, m: 1024 ** 2, g: 1024 ** 3, t: 1024 ** 4 };
+
+/** A memory size as container memory is written (`6g`, `512m`), in bytes; undefined when it is not one. */
+export function parseMemory(text: unknown): number | undefined {
+  const m = /^(\d+(?:\.\d+)?)([bkmgt]?)b?$/i.exec(String(text).trim());
+  return m && Number(m[1]) > 0 ? Number(m[1]) * UNITS[m[2]!.toLowerCase()]! : undefined;
+}
 
 /** What config.yaml held before people and projects moved to helix.db. */
 type Old = { repos?: Record<string, string>; people?: Record<string, Person> };
@@ -61,6 +76,16 @@ export function loadConfig(file = configFile()): Config {
   const { repos: _r, people: _p, ...raw } = readRaw(file) as Record<string, unknown> & Old;
   const config = { ...structuredClone(DEFAULTS), ...raw } as Config;
   if (!Number.isInteger(config.slots) || config.slots < 1) throw new AnimusError(`${file}: slots must be a whole number, 1 or more`);
+  for (const key of ['reserve_memory', 'job_memory'] as const) {
+    if (parseMemory(config[key]) === undefined) throw new AnimusError(`${file}: ${key} must be a memory size such as 2g or 512m`);
+  }
+  if (config.container?.memory !== undefined && parseMemory(config.container.memory) === undefined) throw new AnimusError(`${file}: container.memory must be a memory size such as 6g or 512m`);
+  const limits = config.tier_limits as unknown;
+  if (!isRecord(limits)) throw new AnimusError(`${file}: tier_limits must be a mapping of tier to a number`);
+  for (const [tier, n] of Object.entries(limits)) {
+    if (!(TIERS as readonly string[]).includes(tier)) throw new AnimusError(`${file}: tier_limits has ${tier}, which is not one of ${TIERS.join(', ')}`);
+    if (!Number.isInteger(n) || (n as number) < 1) throw new AnimusError(`${file}: tier_limits.${tier} must be a whole number, 1 or more`);
+  }
   return config;
 }
 

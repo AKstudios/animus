@@ -41,7 +41,7 @@ test('people and repositories in a config.yaml from before are moved into the ta
   assert.equal(store.personByToken('abc'), 'ana');
   assert.deepEqual(store.project('app'), { ...store.project('app')!, url: 'https://github.com/acme/app.git', dir: repo, state: 'ready' });
   assert.equal(store.project('app')!.added_by, undefined);
-  assert.deepEqual(loadConfig(file), { host: '127.0.0.1', port: 7421, slots: 3, url: 'https://helix.example' });
+  assert.deepEqual(loadConfig(file), { host: '127.0.0.1', port: 7421, slots: 3, reserve_memory: '2g', job_memory: '4g', tier_limits: {}, url: 'https://helix.example' });
   assert.ok(!readFileSync(file, 'utf8').includes('people') && !readFileSync(file, 'utf8').includes('repos'));
   assert.deepEqual(importRegistry(store, file), { people: [], repos: [] });
   assert.deepEqual(store.person('ben'), { token_sha256: 'kept' });

@@ -11,7 +11,9 @@ import { fileURLToPath } from 'node:url';
 import { AnimusError } from '../../plugin/src/proc.ts';
 import { animusHome, loadProgress, type Progress } from '../../plugin/src/log.ts';
 import type { PersonalSkill } from '../../plugin/src/personal.ts';
+import { loadFactory, resolvePlan, type Tier } from '../../plugin/src/profiles.ts';
 import { parseSpec } from '../../plugin/src/spec.ts';
+import { readMachine, waitReason, type Reading } from './room.ts';
 import { credentialEnv, personEnv, readyRepos, type Config } from './config.ts';
 import { liveTokenFile } from './github-app.ts';
 import type { HelixJob, Store } from './store.ts';
@@ -108,6 +110,8 @@ export function supervise(opts: {
   animusHomeOf?: (person: string) => string;
   /** Told each job as it starts and as it ends, however it was submitted: the Slack bot posts it. */
   notify?: (job: HelixJob) => void;
+  /** Reads the machine's free memory and load before each start; the machine's own by default, fixed ones in tests. */
+  machine?: () => Reading;
 }): Supervisor {
   const { store, config, home } = opts;
   const launch = opts.launch ?? animus;
@@ -222,9 +226,17 @@ export function supervise(opts: {
 
   function tick(): void {
     if (stopped || existsSync(pauseFile(home))) return;
-    const queued = store.inState('queued').filter((j) => !preparing.has(j.id));
-    while (children.size + preparing.size < config.slots && queued.length) {
-      const job = queued.shift()!;
+    const machine = (opts.machine ?? readMachine)();
+    for (let job of store.inState('queued').filter((j) => !preparing.has(j.id))) {
+      const used = children.size + preparing.size;
+      if (used >= config.slots) break;
+      // With nothing running the first job starts whatever the machine reports, so the queue never sits empty.
+      const why = used === 0 ? undefined : waitReason(config, [...children.keys(), ...preparing].map((id) => store.get(id)?.tier), job.tier, machine, config.container?.memory);
+      if (why !== undefined) {
+        if (job.waiting !== why) store.save({ ...job, waiting: why });
+        continue;
+      }
+      if (job.waiting !== undefined) { const { waiting: _w, ...rest } = job; job = rest; store.save(job); }
       if (opts.prepare) prepareThenStart(job, opts.prepare);
       else start(job);
     }
@@ -254,8 +266,14 @@ export function supervise(opts: {
       if (project?.state === 'checking') throw new Refused(409, `Helix is still checking the project ${s.repo}: animus project list says when it is ready`);
       if (project?.state !== 'ready') throw new Refused(400, `Helix has no project named ${s.repo}; it has ${Object.keys(readyRepos(store)).join(', ') || 'none'}. Add it from a checkout of it: animus project add`);
       let title: string;
-      try { title = parseSpec(s.spec, s.name ?? 'spec.md').title; } catch (err) { throw new Refused(400, (err as Error).message); }
-      const job = store.add({ state: 'queued', person, repo: s.repo, spec: '', title, draft: Boolean(s.draft), submitted: now() });
+      let tier: Tier | undefined;
+      try {
+        const spec = parseSpec(s.spec, s.name ?? 'spec.md');
+        title = spec.title;
+        // A spec the factory will not run fails in its own time; here it only goes uncounted.
+        try { tier = resolvePlan(loadFactory(), spec).implement.tier; } catch { /* no tier */ }
+      } catch (err) { throw new Refused(400, (err as Error).message); }
+      const job = store.add({ state: 'queued', person, repo: s.repo, spec: '', title, ...(tier ? { tier } : {}), draft: Boolean(s.draft), submitted: now() });
       job.spec = join(home, 'jobs', String(job.id), basename(s.name ?? 'spec.md'));
       mkdirSync(dirname(job.spec), { recursive: true });
       writeFileSync(job.spec, s.spec);
