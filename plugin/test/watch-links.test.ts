@@ -14,6 +14,15 @@ test('a job on this machine prints watch it: animus ui with its page path right 
   assert.equal(d.lines[at + 1], `watch it: animus ui, then open /jobs/${run.job}`);
 });
 
+// Protects: animus start puts the watch line right after the where-it-runs line. Fails when: it lands after the job line or apart from the runs line.
+test('with a where-it-runs line, the watch line follows it and comes before the job line', async () => {
+  const { agent } = fakeAgent([() => done(), () => clean()]);
+  const d = deps(agent);
+  const run = await runJob({ repo: makeRepo(), specFile: writeSpec('size: small\ndifficulty: routine\ntype: feature'), dryRun: true, runsLine: 'this job runs on this machine: because' }, d);
+
+  assert.deepEqual(d.lines.slice(0, 3), ['this job runs on this machine: because', `watch it: animus ui, then open /jobs/${run.job}`, `job ${run.job}: Say done`]);
+});
+
 // Protects: a Helix that predates links still prints status. Fails when: describeJob requires links.
 test('describeJob shows links only when Helix sent them', () => {
   const j = { id: 4, state: 'running', person: 'ana', repo: 'app', title: 'T', submitted: '2026-01-01T00:00:00Z' };

@@ -212,14 +212,15 @@ async function main(argv: string[]): Promise<number> {
       const asked: Where | undefined = values.local ? 'local' : values.helix ? 'helix' : undefined;
       const mine = personalFor(repo);
       const choice = await whereToRun({ ...(asked ? { asked } : {}), ...(mine.run ? { config: mine.run } : {}), checkout: repo });
-      say(`this job runs ${choice.where === 'helix' ? 'on Helix' : 'on this machine'}: ${choice.why}`);
+      const runsLine = `this job runs ${choice.where === 'helix' ? 'on Helix' : 'on this machine'}: ${choice.why}`;
       if (choice.where === 'helix') {
+        say(runsLine);
         if (values['dry-run']) throw new AnimusError('--dry-run is for a job on this machine: animus start --local --dry-run');
         await submitSpec(specFile, repo, Boolean(values.draft), choice.project);
         return 0;
       }
       if (!values['dry-run'] && !onPath('gh')) throw new AnimusError('gh is not installed, so no pull request can be opened; install it or use --dry-run');
-      return finish(await runJob({ repo, specFile, personal: snapshotSkills(mine.skills), ...flags }, deps()));
+      return finish(await runJob({ repo, specFile, personal: snapshotSkills(mine.skills), runsLine, ...flags }, deps()));
     }
     case 'plan': {
       if (!positionals[0]) throw new AnimusError('usage: animus plan <spec.md>');
