@@ -203,7 +203,7 @@ function main(v: View): string {
     : v.live.length > DENSE ? `<div class="rows">${v.live.map((j) => row(v, j)).join('')}</div>`
     : `<div class="cards${v.live.length > MANY ? ' many' : ''}">${v.live.map((j) => card(v, j)).join('')}</div>`;
   const lists = `${v.prs.length ? section('prs', `Open pull requests <span class="count">${v.prs.length}</span>`, v.prs.map(openPr).join('')) : ''}
-    ${v.finished.length ? section('recent', `Finished <span class="count">${v.finished.length}</span>`, v.finished.map(recent).join(''), false, '<a class="more" href="/jobs">All jobs →</a>') : ''}`;
+    ${v.finished.length ? section('recent', `Finished <span class="count">${v.finished.length}</span>`, v.finished.map(recent).join(''), false, '<a class="all-jobs" href="/jobs">All jobs →</a>') : ''}`;
   return `<main class="main">${scope}
     ${v.needs.length ? section('needs', `Needs you <span class="count">${v.needs.length}</span>`, v.needs.map(need).join('')) : ''}
     ${section('live', `Working now <span class="count">${v.live.length}</span>`, live, true)}

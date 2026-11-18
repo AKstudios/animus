@@ -327,4 +327,4 @@ a.tag:hover { opacity: 1; background: color-mix(in srgb, currentColor 22%, trans
 .key { display: flex; flex-wrap: wrap; gap: 6px 14px; margin-top: 14px; font-size: 12px; color: var(--mute); }
 .key i { display: inline-block; width: 8px; height: 8px; border-radius: 2px; margin-right: 6px; }
 .key .running { background: var(--fill); } .key .ask { background: var(--ask); } .key .failed { background: var(--fail-ink); } .key .merged { background: var(--merged); }
-.section-head .more { margin-left: auto; font-size: 13px; color: var(--mute); }
+.section-head .all-jobs { margin-left: auto; font-size: 13px; color: var(--mute); }
