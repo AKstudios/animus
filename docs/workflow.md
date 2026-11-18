@@ -18,7 +18,7 @@ You Agent Script
 | --- | --- | --- |
 | Start it with | `animus run spec.md` from a Claude Code session | `animus submit spec.md`, a Slack message, or a comment on a GitHub issue |
 | Your laptop | Stays on and awake until the PR opens | Free as soon as the job is submitted, or never needed |
-| Spec | Shaped with you in conversation | Shaped in conversation, or the message or issue is the spec |
+| Spec | Shaped with you in conversation | Shaped in conversation; from Slack, a draft written from your message, revised by your replies in its thread and queued when you press Submit; or the issue is the spec |
 | Jobs at once | One or two, limited by the laptop | Two to four full jobs, each in its own container; trivial and small jobs run beside them |
 | Pipeline | Identical for the same job size: set up, implement, gates, review, catch up with the base, evidence, open the PR. You merge. |  |
 | Good for | Trying the factory, small changes, working offline from the office | Bigger jobs, overnight work, starting work from your phone, teammates |

@@ -21,8 +21,18 @@ clients with how to update.
   The project is the linked issue's repository, else the channel's default
   set with `/helix project <name>`, else the one the person picks from those
   the GitHub App lets them push to. `draft_slots` in config.yaml (1 when
-  unset) is how many drafts run at once, apart from jobs. Submitting,
-  revising in the thread and the limits on drafts come next.
+  unset) is how many drafts run at once, apart from jobs.
+- A draft's person revises it by replying in its thread (any reply in a DM,
+  one mentioning @Helix in a channel), and the revision replaces the draft's
+  post and file. Submit runs the check `animus plan` does and wants a
+  `$ command` under every criterion; it says what is missing in the thread,
+  or queues the draft as the person's job, whose progress then posts in that
+  thread. Discard closes a draft, a person has at most 3 open, a waiting draft
+  says how many are ahead of it, and a draft untouched for 7 days is
+  discarded.
+- The Slack app needs the `files:read` and `files:write` scopes and the new
+  `/helix` usage line: update it from
+  `helix/deploy/slack/manifest.yaml` and reinstall it to the workspace.
 
 ## 0.4.5 (2026-11-18)
 
