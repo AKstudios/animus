@@ -3,10 +3,11 @@
 // (pages.ts). The overview needs no sign-in; a job page needs the person's
 // token, sent with each request for its data.
 // It only reads. Sent to the browser with its types stripped (helix/src/ui.ts).
-import { forgetToken, jobNotice, keepToken, peopleNotice, personNotice, readToken, route, takeToken } from './pages.ts';
+import { forgetToken, jobNotice, jobsNotice, keepToken, peopleNotice, personNotice, readToken, route, takeToken } from './pages.ts';
 import { atEnd, jobView, type JobPageView } from './job-view.ts';
 import { keepOlder, peopleView, personView } from './people-view.ts';
-import type { Display, JobPage, PeoplePage, PersonPage } from './shape.ts';
+import { filterOf, jobListView, queryOf, RESULTS } from './job-list.ts';
+import type { Display, JobListPage, JobPage, PeoplePage, PersonPage } from './shape.ts';
 import { view, type Live, type Pr, type Project, type Recent, type View, type Waiting } from './view.ts';
 
 const POLL_MS = 2000;
@@ -34,13 +35,18 @@ const state: {
   /** On a person's page: its data (the newest jobs), the older jobs read since with "more", and how Helix last answered. */
   person?: PersonPage;
   older: { jobs: PersonPage['jobList']; more: boolean };
+  /** On the Jobs page: the newest thirty matching the address, the older ones read since with SHOW MORE, and how Helix last answered. */
+  list?: JobListPage;
+  listOlder: JobListPage['jobs'];
+  listMore: boolean;
+  listStatus?: number;
   personStatus?: number;
   /** Helix's clock minus this browser's, in ms. */
   skew: number;
   offline: boolean;
   /** When Helix last answered, by this browser's clock. */
   heard?: Date;
-} = { skew: 0, offline: false, older: { jobs: [], more: false } };
+} = { skew: 0, offline: false, older: { jobs: [], more: false }, listOlder: [], listMore: false };
 
 /** A job's screenshots as this browser holds them, by where Helix serves each and when they were taken: retaken ones are read again. */
 const shotUrls = new Map<string, string>();
@@ -100,6 +106,7 @@ function header(v: View | undefined): string {
         : `<div class="stat-slots"><span class="k">SLOTS</span>${squares}<span class="b">${slots}</span></div>
       <div><span class="k">QUEUED</span> <span class="b">${v?.queued ?? 0}</span></div>`}
       <div><span class="k">NEEDS INPUT</span> <span class="asks">${v?.asks ?? 0}</span></div>
+      <a class="k" href="/jobs">JOBS</a>
       ${v?.people === false ? '' : '<a class="k" href="/people">PEOPLE</a>'}
       <div class="time">${wall(new Date())}</div>
       ${readToken(storage) && !v?.local ? '<button type="button" class="sign-out" data-sign-out>SIGN OUT</button>' : ''}
@@ -276,12 +283,31 @@ const peopleMain = (local: boolean, name?: string) => `<main class="main">${back
   ${name ? personSections(name, local) : peopleList(local)}
 </main>`;
 
+/** A select that reloads the page with its filter in the address. */
+const pick = (name: 'result' | 'project' | 'person', label: string, values: readonly string[], on: string) => `<label class="mute">${label} <select data-filter="${name}">${values.map((v) => `<option value="${esc(v === 'all' || v === '' ? '' : v)}"${v === on || (v === 'all' && !on) ? ' selected' : ''}>${esc(v || 'all')}</option>`).join('')}</select></label>`;
+
+function jobsMain(local: boolean): string {
+  const notice = jobsNotice(readToken(storage) !== null, state.listStatus, local);
+  const f = filterOf(location.search);
+  // The people it offers are those on the overview's newest jobs, and the one in the address.
+  const names = ['', ...new Set([...state.display!.jobs.map((j) => j.person), f.person].filter(Boolean))].sort();
+  const bar = notice ? '' : `<div class="facts">${[
+    pick('result', 'RESULT', RESULTS, f.result),
+    pick('project', 'PROJECT', ['', ...new Set([...state.display!.repos.map((r) => r.name), f.project].filter(Boolean))], f.project),
+    ...(local ? [] : [pick('person', 'PERSON', names, f.person)]),
+  ].join('')}</div>`;
+  const rows = state.list ? jobListView({ ...state.list, jobs: [...state.list.jobs, ...state.listOlder] }, local).rows : [];
+  const body = notice ? `<div class="none boxed">${esc(notice)}</div>${local ? '' : signIn}` : state.list
+    ? section('jobs', 'JOBS', (rows.map(recent).join('') || none('No job matches.')) + (state.listMore ? '<button type="button" class="more" data-more>SHOW MORE</button>' : '')) : '';
+  return `<main class="main">${back}<div class="scope"><div><div class="label">JOBS</div><h1>Jobs</h1></div></div>${bar}${body}</main>`;
+}
+
 function page(): string {
   // While Helix is out of reach the clock it was last read at stands still, and so does every count of time.
   const now = (state.offline && state.heard ? state.heard.getTime() : Date.now()) + state.skew;
   const v = state.display ? view(state.display, picked(), now) : undefined;
   // A job page waits for the display: whether it needs a sign-in depends on the source it answers.
-  const body = at.page === 'job' ? (state.display ? jobMain(at.id, now, state.display.local === true) : '') : at.page === 'people' ? (state.display ? peopleMain(state.display.local === true, at.name) : '') : v ? `${nav(v)}${main(v)}` : '';
+  const body = at.page === 'job' ? (state.display ? jobMain(at.id, now, state.display.local === true) : '') : at.page === 'jobs' ? (state.display ? jobsMain(state.display.local === true) : '') : at.page === 'people' ? (state.display ? peopleMain(state.display.local === true, at.name) : '') : v ? `${nav(v)}${main(v)}` : '';
   return [
     header(v),
     state.offline ? offline() : '',
@@ -377,6 +403,28 @@ async function readPerson(name: string, before?: number): Promise<void> {
   else state.older = { jobs: [...state.older.jobs, ...data.jobList], more: data.more };
 }
 
+/** The Jobs page's data for the address's filters: the newest thirty, or with `before` the thirty older than that `submitted` time. A token Helix refuses is forgotten. */
+async function readJobs(before?: string): Promise<void> {
+  const token = readToken(storage);
+  const f = filterOf(location.search);
+  const query = new URLSearchParams({ ...(f.result !== 'all' ? { result: f.result } : {}), ...(f.project ? { project: f.project } : {}), ...(f.person ? { person: f.person } : {}), ...(before ? { before } : {}) });
+  const res = await fetch(`/job-list?${query}`, { cache: 'no-store', headers: auth(token) });
+  if (before === undefined) state.listStatus = res.status === 401 && !token ? undefined : res.status;
+  if (res.status === 401 && token) forgetToken(storage);
+  if (!res.ok) return;
+  const data = (await res.json()) as JobListPage;
+  if (before === undefined) {
+    // Once older jobs were read, a refresh must not leave a job between the two lists.
+    const oldest = data.jobs.at(-1)?.submitted ?? '';
+    if (state.list && state.listOlder.length) state.listOlder = [...state.list.jobs, ...state.listOlder].filter((j) => j.submitted < oldest);
+    else state.listMore = data.more;
+    state.list = data;
+  } else {
+    state.listOlder = [...state.listOlder, ...data.jobs];
+    state.listMore = data.more;
+  }
+}
+
 /** Fetches with the token (if there is one) each screenshot this browser does not hold yet, and lets go of the ones the job no longer has. */
 async function readShots(page: JobPage, token: string | null): Promise<void> {
   const srcs = jobView(page, 0).shots.map((s) => s.src);
@@ -397,7 +445,7 @@ function forgetShots(): void {
 async function poll(): Promise<void> {
   window.clearTimeout(timer);
   try {
-    const [res] = await Promise.all([fetch('/display', { cache: 'no-store' }), at.page === 'job' ? readJob(at.id) : at.page === 'people' ? (at.name ? readPerson(at.name) : readPeople()) : undefined]);
+    const [res] = await Promise.all([fetch('/display', { cache: 'no-store' }), at.page === 'job' ? readJob(at.id) : at.page === 'jobs' ? readJobs() : at.page === 'people' ? (at.name ? readPerson(at.name) : readPeople()) : undefined]);
     if (!res.ok) throw new Error(`Helix answered ${res.status}`);
     const display = (await res.json()) as Display;
     Object.assign(state, { display, skew: Date.parse(display.at) - Date.now(), offline: false, heard: new Date() });
@@ -413,16 +461,28 @@ root.addEventListener('submit', (event) => {
   if (!form) return;
   event.preventDefault();
   keepToken(storage, (form.querySelector('input') as HTMLInputElement).value);
-  Object.assign(state, { jobStatus: undefined, peopleStatus: undefined, personStatus: undefined });
+  Object.assign(state, { jobStatus: undefined, listStatus: undefined, peopleStatus: undefined, personStatus: undefined });
   void poll();
+});
+
+// A filter chosen goes into the address and the page is read again, so the filtered list can be reloaded or shared.
+root.addEventListener('change', (event) => {
+  const select = (event.target as Element).closest('[data-filter]') as HTMLSelectElement | null;
+  if (!select) return;
+  const f = { ...filterOf(location.search), [select.dataset.filter!]: select.value || (select.dataset.filter === 'result' ? 'all' : '') };
+  location.assign(`/jobs${queryOf(f)}`);
 });
 
 root.addEventListener('click', (event) => {
   if ((event.target as Element).closest('[data-sign-out]')) {
     forgetToken(storage);
     forgetShots();
-    Object.assign(state, { job: undefined, jobStatus: undefined, people: undefined, peopleStatus: undefined, person: undefined, personStatus: undefined, older: { jobs: [], more: false } });
+    Object.assign(state, { job: undefined, jobStatus: undefined, list: undefined, listStatus: undefined, listOlder: [], listMore: false, people: undefined, peopleStatus: undefined, person: undefined, personStatus: undefined, older: { jobs: [], more: false } });
     draw();
+    return;
+  }
+  if ((event.target as Element).closest('[data-more]') && at.page === 'jobs' && state.list) {
+    void readJobs([...state.list.jobs, ...state.listOlder].at(-1)?.submitted).then(draw);
     return;
   }
   if ((event.target as Element).closest('[data-more]') && at.page === 'people' && at.name && state.person) {

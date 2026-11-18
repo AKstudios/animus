@@ -129,3 +129,16 @@ export type PersonPage = PersonRow & {
   /** Everything they did that Helix kept, newest first. */
   activity: { at: string; kind: string; detail?: Record<string, string | number> }[];
 };
+
+/** What a job's pull request became, as the Jobs page knows it: left out when GitHub has not said. */
+export type PrState = 'open' | 'merged' | 'closed';
+
+/** The most jobs the Jobs page is sent at a time. */
+export const JOB_LIST = 30;
+
+/**
+ * The Jobs page's data: from Helix, GET /job-list, with a person's token, and
+ * from the local display without one. `jobs` are newest first, at most
+ * JOB_LIST, those submitted before `?before=`; `more` says older ones remain.
+ */
+export type JobListPage = { at: string; jobs: (DisplayJob & { pr_state?: PrState })[]; more: boolean };

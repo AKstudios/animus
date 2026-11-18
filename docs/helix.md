@@ -284,6 +284,7 @@ the display's own request for a job page's data sends none.
 | `GET /jobs/<id>/page-data` | What a job page shows, for any person |
 | `GET /people/page-data` | What the people list shows, for any person |
 | `GET /people/<name>/page-data[?before=<job id>]` | What a person's page shows: their numbers, thirty jobs older than that one, and all their activity; 404 for a name Helix never heard of |
+| `GET /job-list[?result=&project=&person=&before=<submitted>]` | What the Jobs page (`/jobs`) shows, for any person: `{ at, jobs, more }`, thirty jobs newest first from the whole table, filtered by result (`all`, `merged`, `open`, `failed`, `needs input`), project and person, each with `pr_state` (`open`, `merged`, `closed`) where GitHub has said; 400 for an unknown result |
 | `GET /jobs/<id>/shots/<name>` | One of a job's screenshots, by its name in `shots/manifest.json`; nothing outside its shots folder |
 | `GET /display` | What the display shows, as JSON, with the open PRs of the jobs (`prs`) |
 | `GET /version` | Helix's version |

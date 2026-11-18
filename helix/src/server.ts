@@ -18,7 +18,8 @@ import { VERSION_HEADER, type MadeInvite, type RemovedPerson } from '../../plugi
 import { animusVersion, compatible } from '../../plugin/src/version.ts';
 import { parseSkills, type PersonalSkill } from '../../plugin/src/personal.ts';
 import { hashToken, helixHome, type Config } from './config.ts';
-import { display, jobPage, jobShot, peoplePage, personPage } from './display.ts';
+import { RESULTS, type Result } from '../../plugin/display/job-list.ts';
+import { display, jobList, jobPage, jobShot, peoplePage, personPage } from './display.ts';
 import { freshToken } from './github-app.ts';
 import { invite, inviteDetails, joinHelix, loginDevice, relogin, startDevice, StillWaiting, takeOff, verifyInChild, type JoinGitHub, type Verify } from './join.ts';
 import { openPrs, type ListPrs } from './open-prs.ts';
@@ -134,6 +135,13 @@ export function serve(opts: {
       if (pageData) {
         const page = jobPage(opts, Number(pageData));
         return page ? send(200, page) : send(404, { error: `no job ${pageData}` });
+      }
+      // The Jobs page's data: every job in the table, filtered, thirty older than ?before=<submitted> at a time. A separate path, so it is not read as a job id.
+      if (req.method === 'GET' && url.pathname === '/job-list') {
+        const q = url.searchParams;
+        const result = q.get('result') ?? 'all';
+        if (!RESULTS.includes(result as Result)) throw new Refused(400, `result is one of ${RESULTS.join(', ')}`);
+        return send(200, jobList(opts, { result: result as Result, project: q.get('project') ?? '', person: q.get('person') ?? '' }, q.get('before') ?? undefined, { prs: await prs(), closed: await prs.closed() }));
       }
       // The people list's data, for any person on this Helix.
       if (req.method === 'GET' && url.pathname === '/people/page-data') return send(200, peoplePage(opts));

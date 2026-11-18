@@ -14,6 +14,12 @@ clients with how to update.
   per project for its 10 latest closed PRs, and `/display` gains an optional
   `closed` list beside `prs`. WAITING, OPEN PRS and FINISHED are not drawn when
   empty.
+- A Jobs page at `/jobs`, linked from the display's header, lists every job
+  newest first, 30 at a time with SHOW MORE, tagged RUNNING, QUEUED, NEEDS INPUT,
+  OPEN PR #n, MERGED #n, CLOSED #n, FAILED and so on. Its result, project and
+  person filters are in the address. Helix serves it from `GET /job-list`, to a
+  person's token; `animus ui` has it too, without the person filter, with
+  merged and closed read from `outcomes.json`.
 - **Breaking:** Slack's command is `/animus` and its bot is Animus, not
   `/helix` and Helix: every subcommand and `@Animus <text>` work as before, and
   `/helix` is no longer answered. Update the Slack app from

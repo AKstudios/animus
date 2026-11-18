@@ -94,7 +94,7 @@ const LISTED: Record<string, [string, Tone]> = {
 /** A person's page to link to: Helix has them, the local display does not. */
 const people = (person: string, local: boolean) => (local ? {} : { personPage: personPage(person) });
 
-function recent(j: DisplayJob, local = false, closed?: DisplayClosed): Recent {
+export function recent(j: DisplayJob, local = false, closed?: DisplayClosed): Recent {
   const [tag, tone] = LISTED[j.state === 'ended' ? j.outcome ?? 'failed' : j.state] ?? ['ENDED', 'mute'];
   const took = j.started && j.ended ? span(Date.parse(j.ended) - Date.parse(j.started)) : '';
   // Helix lists open PRs apart; only the local display tags a job with its pull request.

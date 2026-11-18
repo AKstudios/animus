@@ -11,9 +11,11 @@ import { readdirSync, readFileSync, statSync } from 'node:fs';
 import type { AddressInfo } from 'node:net';
 import { hostname } from 'node:os';
 import { basename, join } from 'node:path';
-import type { Display, DisplayJob, JobPage } from '../display/shape.ts';
+import { listJobs, RESULTS, type JobFilter, type Result } from '../display/job-list.ts';
+import type { Display, DisplayJob, JobListPage, JobPage, PrState } from '../display/shape.ts';
 import { asset, CSP } from './assets.ts';
 import { folderParts, read, shotFile } from './job-folder.ts';
+import { readOutcomes, type Outcomes } from './outcomes.ts';
 import { animusHome, jobDir, loadProgress, loadState, readRuns, STAGES, type Run } from './log.ts';
 
 /** True for a live process; EPERM means it exists under another user. */
@@ -70,6 +72,17 @@ export function localDisplay(): Display {
   };
 }
 
+/** The Jobs page's data: this machine's jobs, filtered; a PR is merged or closed where `outcomes.json` knows it, and open only when it says so. */
+export function localJobList(f: Partial<JobFilter>, before?: string): JobListPage {
+  let outcomes: Outcomes = {};
+  try { outcomes = readOutcomes(); } catch { /* unreadable: no PR is known */ }
+  const jobs = localJobs().map((j) => {
+    const state = j.pr ? outcomes[j.pr]?.state : undefined;
+    return state ? { ...j, pr_state: state.toLowerCase() as PrState } : j;
+  });
+  return { at: new Date().toISOString(), ...listJobs(jobs, { ...f, person: '' }, before) };
+}
+
 /** One job's page, or nothing when this machine has no such job. Its log is empty: `animus run` prints to its own terminal and keeps none. */
 export function localJobPage(id: string): JobPage | undefined {
   const runs = readRuns();
@@ -103,6 +116,11 @@ export function localServer(): Server {
       return res.end(file.body);
     }
     if (url.pathname === '/display') return send(200, localDisplay());
+    if (url.pathname === '/job-list') {
+      const result = url.searchParams.get('result') ?? 'all';
+      if (!RESULTS.includes(result as Result)) return send(400, { error: `result is one of ${RESULTS.join(', ')}` });
+      return send(200, localJobList({ result: result as Result, project: url.searchParams.get('project') ?? '' }, url.searchParams.get('before') ?? undefined));
+    }
     const [, root, id, action, ...rest] = url.pathname.split('/');
     let name = '';
     try { name = decodeURIComponent(id ?? ''); } catch { /* does not decode: no such job */ }

@@ -8,10 +8,12 @@ import { join } from 'node:path';
 import { setTimeout as sleep } from 'node:timers/promises';
 import { test } from 'node:test';
 import { jobView } from '../display/job-view.ts';
+import { jobListView } from '../display/job-list.ts';
 import { jobNotice, peopleNotice, personNotice, route } from '../display/pages.ts';
-import type { Display, DisplayJob, JobPage } from '../display/shape.ts';
+import type { Display, DisplayJob, JobListPage, JobPage } from '../display/shape.ts';
 import { view } from '../display/view.ts';
 import { listenLocal, localJobs, localServer } from '../src/local-display.ts';
+import { outcomesFile } from '../src/outcomes.ts';
 import { appendRun, jobDir, loadProgress, saveProgress, saveState, writeJson, type JobState, type Run } from '../src/log.ts';
 import { runJob } from '../src/pipeline.ts';
 import { git } from '../src/proc.ts';
@@ -197,4 +199,27 @@ test('animus ui opens the display on 127.0.0.1 and stops on Ctrl-C', async () =>
   const d = (await (await fetch(`${url}/display`)).json()) as Display;
   child.kill('SIGINT');
   assert.deepEqual([d.local, await opener.opened(), await exited], [true, url, 0]);
+});
+
+// Protects: criterion 5. Fails when: the local Jobs page lists a job another machine ran, ignores outcomes.json for merged and closed, or filters by person.
+test('the local /job-list tags merged and closed PRs from outcomes.json and filters by result and project, with no person filter', async () => {
+  for (const [job, repo, n] of [['pr-merged', 'shop', 1], ['pr-closed', 'shop', 2], ['pr-unknown', 'wiki', 3]] as const) {
+    saveState({ job, repo: `/work/${repo}`, spec: '', workspace: {} as JobState['workspace'], plan: {} as JobState['plan'], outcome: 'pr' });
+    appendRun({ job, repo: `/work/${repo}`, submitter: 'me@example.com', title: job, started: `2026-01-01T00:0${n}:00.000Z`, ended: `2026-01-01T00:0${n}:30.000Z`, outcome: 'pr', pr: `https://github.com/o/shop/pull/${n}`, cost_usd: 1 } as Run);
+  }
+  writeJson(outcomesFile(), {
+    'https://github.com/o/shop/pull/1': { pr: 'https://github.com/o/shop/pull/1', job: 'pr-merged', state: 'MERGED' },
+    'https://github.com/o/shop/pull/2': { pr: 'https://github.com/o/shop/pull/2', job: 'pr-closed', state: 'CLOSED' },
+  });
+  const s = await served();
+  const list = async (q: string) => (await (await s.get(`/job-list${q}`)).json()) as JobListPage;
+  const all = await list('');
+  const merged = await list('?result=merged');
+  const wiki = await list('?project=wiki&person=somebody');
+  const bad = (await s.get('/job-list?result=bogus')).status;
+  s.stop();
+  const tags = Object.fromEntries(jobListView(all, true).rows.map((r) => [r.title, r.tag]));
+  assert.deepEqual([tags['pr-merged'], tags['pr-closed'], tags['pr-unknown']], ['MERGED #1', 'CLOSED #2', 'PR #3']);
+  assert.deepEqual([merged.jobs.map((j) => j.id), wiki.jobs.map((j) => j.id), bad], [['pr-merged'], ['pr-unknown'], 400]);
+  assert.equal(jobListView(all, true).rows.every((r) => r.personPage === undefined), true);
 });
