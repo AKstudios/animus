@@ -12,6 +12,7 @@ import { initProfile } from './init.ts';
 import { githubLogin, joinHelix, leaveHelix, openPage } from './join.ts';
 import { addProject } from './project.ts';
 import { describe, failsOnBase, jobChecks, runChecks } from './gates.ts';
+import { fixTarget } from './fix.ts';
 import { githubUrl, mainCheckout, touchedFiles } from './git.ts';
 import { describeRuns, describeTools, jobDir, loadState, readRuns, readTools, type Run } from './log.ts';
 import { jobOf, onPath, runJob, uiJobOf } from './pipeline.ts';
@@ -60,6 +61,11 @@ const USAGE = `animus: a spec goes in, a pull request with proof comes out
         go.mod or Cargo.toml. Runs nothing; --force replaces a profile.
   animus resume <job> [--answer <text>] [--dry-run] [--keep]
         Pick up a job that asked a question or was interrupted.
+  animus fix <pr> "<what to change>" [--repo <dir>] [--dry-run] [--keep]
+        Change an open pull request a job opened: a new job on its branch, in
+        that job's worktree, which carries on from its implementer session,
+        proves every criterion again and pushes to the same pull request.
+        <pr> is its number or URL.
   animus runs [-n <count>] [--json]
         The run log, newest last.
   animus tools <job> [--json]
@@ -337,6 +343,14 @@ async function main(argv: string[]): Promise<number> {
       say('Read it and correct it before the first job: its commands are the gates.');
       console.log(r.text);
       return 0;
+    }
+    case 'fix': {
+      const [pr, ...text] = positionals;
+      if (!pr || !text.length) throw new AnimusError('usage: animus fix <pr> "<what to change>"');
+      if (!values['dry-run'] && !onPath('gh')) throw new AnimusError('gh is not installed, so the pull request cannot be updated; install it or use --dry-run');
+      const repo = mainCheckout(resolve(values.repo ?? cwd));
+      const { state } = fixTarget(repo, pr);
+      return finish(await runJob({ repo, fix: { from: state, ask: text.join(' ') }, personal: localSkills(repo, values.skills), ...flags }, deps()));
     }
     case 'resume': {
       const state = positionals[0] ? loadState(positionals[0]) : undefined;

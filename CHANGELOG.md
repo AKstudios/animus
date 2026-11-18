@@ -8,6 +8,14 @@ clients with how to update.
 
 ## Unreleased
 
+- `animus fix <pr> "<text>"` changes an open pull request a job opened: a new
+  job in that job's worktree, reset to the branch as GitHub has it, that
+  carries on from its implementer session (or a handoff when the session is
+  over the context budget), proves every criterion again and pushes to the
+  same pull request, whose body keeps `Closes #N` and gains a Fixes list. The
+  run log's `fix_of` names the job it continues; `trigger` is `fix`. Every
+  pull request body now carries the spec in a collapsed block, left out with
+  a note past GitHub's 65,536 characters.
 - A spec refused at admission, and a job ended by SIGINT, SIGTERM or a Helix
   cancel, now leave a run line with cause `admit`, `interrupted` or
   `cancelled`. Helix writes a `cancelled` file beside the job's spec before it

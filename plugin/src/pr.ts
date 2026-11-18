@@ -40,6 +40,8 @@ export type PrInput = {
   closes?: number;
   /** How the pull request names that issue (the profile's issue_link); `Closes` when absent. */
   issueLink?: 'closes' | 'refs';
+  /** Every fix on the pull request so far, oldest first, the one that built this body last. */
+  fixes?: readonly { ask: string; job: string; cost_usd: number }[];
   models: string;
   cost_usd: number;
 };
@@ -77,6 +79,8 @@ export function prBody(p: PrInput): string {
   if (p.notes) here.push(`- From the implementer: ${cell(p.notes)}`);
   out.push('## Review here', '', ...(here.length ? here : ['Nothing flagged: the gates passed, and the review found nothing to fix.']), '');
 
+  if (p.fixes?.length) out.push('## Fixes', '', '| # | Ask | Job | Cost |', '| --- | --- | --- | --- |', ...p.fixes.map((f, i) => `| ${i + 1} | ${cell(f.ask)} | \`${f.job}\` | $${f.cost_usd.toFixed(2)} |`), '');
+
   out.push('## Acceptance criteria', '', '| # | Criterion | Check | Reviewer |', '| --- | --- | --- | --- |');
   p.spec.criteria.forEach((c, i) => {
     const ran = p.gates.filter((g) => g.criterion === i + 1);
@@ -112,8 +116,17 @@ export function prBody(p: PrInput): string {
 
   const review = !p.review ? 'no review' : `${p.reviewRounds} review round(s): ${p.review.summary}`;
   out.push('## Run', '', `- Profile: ${p.plan.size}, ${p.plan.difficulty}, ${p.plan.type}`, `- Models: ${p.models}`, `- Gates: ${p.gateAttempts} run(s), sent back ${p.fixRounds} time(s)`, `- Review: ${cell(review)}`, ...(p.caughtUp ? [`- Caught up with ${p.caughtUp.branch} at ${p.caughtUp.commit}, merged in before the push`] : []), `- Cost: $${p.cost_usd.toFixed(2)} (API-equivalent)`, '', `Built by Animus, job \`${p.job}\`.`);
-  return out.join('\n');
+  const body = out.join('\n');
+  // The spec rides along, so a fix can run from the pull request alone; fenced longer than any fence it holds.
+  const fence = '`'.repeat(Math.max(3, ...[...p.spec.text.matchAll(/`+/g)].map((m) => m[0].length + 1)));
+  const spec = `\n\n<details><summary>${SPEC_SUMMARY}</summary>\n\n${fence}md\n${p.spec.text.trim()}\n${fence}\n\n</details>`;
+  return body.length + spec.length <= BODY_LIMIT ? body + spec : `${body}\n\nThe spec is not in this description: with it, the description would pass GitHub's limit of ${BODY_LIMIT.toLocaleString('en-US')} characters.`;
 }
+
+/** The summary of the collapsed block that holds the job's spec. */
+export const SPEC_SUMMARY = 'The spec this job ran from';
+/** The most characters GitHub takes in a pull request's description. */
+export const BODY_LIMIT = 65_536;
 
 export type Publish = (p: { cwd: string; branch: string; baseBranch: string; title: string; body: string; draft: boolean }) => string;
 

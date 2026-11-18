@@ -69,6 +69,8 @@ export type Run = {
   repo: string;
   submitter: string;
   trigger: string;
+  /** The job this one is a fix of: the one before it on the same pull request. */
+  fix_of?: string;
   title: string;
   /** The spec file the job was started from, as a path on the machine that ran it. */
   spec_file?: string;
@@ -137,6 +139,12 @@ export type JobState = {
   slices_done?: string[];
   outcome?: Outcome;
   question?: string;
+  /** Set on a fix: the job it continues, what was asked, and every fix on the pull request so far (this one last, once its body is built). */
+  fix_of?: string;
+  ask?: string;
+  fixes?: { ask: string; job: string; cost_usd: number }[];
+  /** The issue the pull request closes, so a fix keeps the line. */
+  closes?: number;
   /** The questions this job stopped to ask, each with the person's answer: the reviewer reads them beside the spec. */
   answers?: { question: string; answer: string }[];
   findings?: Finding[];
