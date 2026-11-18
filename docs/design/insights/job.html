@@ -1,0 +1,121 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Display job page with run insights: design reference</title>
+<style>
+.agent { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 2px 8px; font-size: 13px; padding: 6px 0; }
+.agent .bar { grid-column: 1 / -1; height: 4px; border-radius: 2px; background: var(--raise); overflow: hidden; }
+.agent .bar i { display: block; height: 100%; }
+.agent .calls { grid-column: 1 / -1; font: 12px var(--mono); color: var(--faint); }
+.learn { background: var(--run-bg); border-color: color-mix(in srgb, var(--run) 30%, var(--line)); }
+.learn h3 { color: var(--run); }
+.learn ul { margin: 0; padding-left: 18px; } .learn li { margin: 0 0 8px; font-size: 13px; }
+</style>
+<link rel="stylesheet" href="../display/display.css">
+</head>
+<body>
+<header class="top">
+  <div class="brand"><svg width="18" height="18" viewBox="0 0 18 18" fill="none" stroke-width="1.6" aria-hidden="true"><path d="M3 2c6 4 6 10 12 14M15 2C9 6 9 12 3 16M5 5h8M5 13h8"></path></svg>abstergo</div>
+  <nav class="nav"><a href="../display/overview.html">Overview</a><a class="on" href="../display/jobs.html">Jobs</a><a href="insights.html">Insights</a><a href="#">People</a></nav>
+  <div class="meta"><span><span class="dot"></span>2 of 4 slots</span><span>14:21</span></div>
+</header>
+
+<div class="wrap job" style="padding-top:28px">
+  <main class="main" style="gap:36px">
+    <div>
+      <div class="crumb"><a href="../display/jobs.html">Jobs</a> / animus / <span class="mono">drafts-from-slack</span></div>
+      <h1>Drafts from Slack</h1>
+      <div class="heads"><span class="pill p-merged">Merged #16</span><span class="sub">ajmal · started Wed 18 Nov 06:15 · merged 7h after opening</span></div>
+    </div>
+
+    <div class="stats">
+      <div><b>41m</b><span class="sub">time taken</span></div>
+      <div><b>$6.02</b><span class="sub">cost</span></div>
+      <div><b>1</b><span class="sub">fix round · 2 gate runs</span></div>
+      <div><b>3 of 3</b><span class="sub">slices passed</span></div>
+    </div>
+
+    <section>
+      <div class="sh"><h2>Where the time went</h2></div>
+      <div class="tl" role="img" aria-label="Time per stage">
+        <span class="s-setup" style="flex:1"></span>
+        <span class="s-plan" style="flex:3">plan</span>
+        <span class="s-implement" style="flex:24">implement · 3 slices</span>
+        <span class="s-gates" style="flex:6">gates ×2</span>
+        <span class="s-review" style="flex:6">review</span>
+        <span class="s-evidence" style="flex:1"></span>
+        <span class="s-pr" style="flex:1"></span>
+      </div>
+      <div class="legend"><span><i class="s-setup"></i>setup 20s</span><span><i class="s-plan"></i>plan 1m</span><span><i class="s-implement"></i>implement 24m</span><span><i class="s-gates"></i>gates 6m</span><span><i class="s-review"></i>review 6m</span><span><i class="s-evidence"></i>evidence 30s</span><span><i class="s-pr"></i>pr 12s</span></div>
+    </section>
+
+    <section>
+      <div class="sh"><h2>Acceptance criteria</h2><span class="n">3 of 3 proven</span></div>
+      <div class="ac">
+        <div><span class="ok" aria-label="passed">✓</span><span>/animus draft in a DM starts a draft and posts it as a file<span class="proof">node --test test/c1.test.ts</span></span><a class="sub" href="#">output</a></div>
+        <div><span class="ok" aria-label="passed">✓</span><span>Submit on a draft queues it as a job under the sender<span class="proof">node --test test/c2.test.ts</span></span><a class="sub" href="#">output</a></div>
+        <div><span class="ok" aria-label="passed">✓</span><span>The manifest asks for files:read and files:write<span class="proof">node --test test/c3.test.ts</span></span><a class="sub" href="#">output</a></div>
+      </div>
+    </section>
+
+    <section>
+      <div class="sh"><h2>Checks</h2><span class="n">all passed on the last run</span></div>
+      <div class="chips"><span class="chip"><span class="ok">✓</span>typecheck</span><span class="chip"><span class="ok">✓</span>test</span><span class="chip mute">test was flaky once</span></div>
+    </section>
+
+    <section>
+      <div class="sh"><h2>Review</h2><span class="n">1 round · 2 findings</span></div>
+      <p class="sub" style="margin-bottom:10px">One blocker, fixed in the next round.</p>
+      <div class="finds">
+        <div class="find"><span class="sev" style="color:var(--fail)">Blocker · fixed in round 2</span><span>A draft's file upload is retried forever when Slack answers 429.</span><span class="sub">Give up after three tries and say so in the DM.</span><span class="sub mono">helix/src/drafts.ts:88</span></div>
+        <div class="find"><span class="sev" style="color:var(--ask)">Should fix · fixed</span><span>The DM reply names the spec path on Helix, which the sender cannot open.</span><span class="sub mono">helix/src/slack.ts:212</span></div>
+      </div>
+    </section>
+
+    <div class="folds">
+      <details><summary>Slices <span class="sub" style="font-weight:400">3 of 3 passed</span></summary></details>
+      <details><summary>Spec</summary></details>
+      <details><summary>Log</summary></details>
+      <details><summary>Tool calls <span class="sub" style="font-weight:400">612 · 9 errors</span></summary></details>
+      <details><summary>Questions <span class="sub" style="font-weight:400">none asked</span></summary></details>
+    </div>
+  </main>
+
+  <aside class="side">
+    <div class="box">
+      <h3>Pull request</h3>
+      <div class="kvr"><span>#16</span><a href="#" style="color:var(--merged)">merged ↗</a></div>
+      <div class="kvr"><span>branch</span><span class="mono" style="font-size:12px">animus/drafts-from-slack</span></div>
+      <div class="kvr"><span>opened</span><span>Wed 18 Nov 06:56</span></div>
+      <div class="kvr"><span>merged</span><span>Wed 18 Nov 14:35</span></div>
+      <div class="kvr"><span>after the job</span><span>1 commit · 6 lines</span></div>
+      <div class="kvr"><span>30-day watch</span><span>not reverted</span></div>
+    </div>
+    <div class="box">
+      <h3>Agents</h3>
+      <div class="agent"><span>implementer · standard</span><span class="mono sub">$3.70</span><div class="bar"><i style="width:62%;background:var(--run)"></i></div><span class="calls">3 sessions · 488 tool calls · 7 errors</span></div>
+      <div class="agent"><span>reviewer · deep</span><span class="mono sub">$1.48</span><div class="bar"><i style="width:25%;background:#b79cff"></i></div><span class="calls">1 session · 64 tool calls · 1 error</span></div>
+      <div class="agent"><span>planner · standard</span><span class="mono sub">$0.62</span><div class="bar"><i style="width:10%;background:#7fa7b3"></i></div><span class="calls">1 session · 22 tool calls</span></div>
+      <div class="agent"><span>catch-up · standard</span><span class="mono sub">$0.22</span><div class="bar"><i style="width:3%;background:#3a4450"></i></div><span class="calls">1 session · 38 tool calls · 1 error</span></div>
+    </div>
+    <div class="box learn">
+      <h3>What this run taught</h3>
+      <ul>
+        <li>Tests that start a server must close it before they end. <span class="sub">Proposed · animus lessons accept 4</span></li>
+      </ul>
+      <span class="sub" style="font-size:12px">Lessons from the retro that cite this job. One is kept only when you accept it.</span>
+    </div>
+    <div class="box">
+      <h3>Labels</h3>
+      <div class="kvr"><span>size</span><span>medium</span></div>
+      <div class="kvr"><span>difficulty</span><span>routine</span></div>
+      <div class="kvr"><span>type</span><span>feature</span></div>
+    </div>
+  </aside>
+</div>
+
+<nav class="tabbar"><a href="../display/overview.html">Overview</a><a class="on" href="../display/jobs.html">Jobs</a><a href="#">People</a></nav>
+</body>
+</html>
