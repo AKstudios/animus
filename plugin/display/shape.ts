@@ -154,3 +154,31 @@ export type ListJob = DisplayJob & { pr_state?: PrState; pr_merged?: string };
 
 /** Everything the filters match, not only the rows sent. */
 export type JobTotals = { jobs: number; merged: number; failed: number; cost_usd: number };
+
+/** One run-log line as the Insights page needs it: the task class, how it ended, what it cost, its gates, agents and review. */
+export type InsightsRun = {
+  job: string; repo: string; size: string; difficulty: string; type: string; ended: string;
+  outcome: string; cause?: string; cost_usd: number;
+  /** Wall time of the whole run, in ms. */
+  ms: number;
+  pr?: string; fix_rounds: number;
+  /** Each gate run: whether it passed (a flaky check counts as passed) and the checks that were flaky. */
+  gates: { ok: boolean; flaky: string[] }[];
+  /** Each agent session, with its tool calls from the run log's `tools` summary. */
+  agents: { role: string; tier: string; cost_usd: number; calls: number; errors: number }[];
+  review: { findings: number; acted_on: number } | null;
+};
+
+/** What became of a pull request, as outcomes.json says. */
+export type InsightsOutcome = { state: 'OPEN' | 'MERGED' | 'CLOSED'; human_commits: number; reverted?: boolean; reworked?: boolean };
+
+/** A lesson that is waiting for a yes or kept; `expires` is when a kept one runs out (lessons.ts expiresAt). */
+export type InsightsLesson = { id: number; text: string; scope: 'project' | 'factory'; project: string; cites: string[]; status: 'proposed' | 'kept'; uses: number; expires: string };
+
+/**
+ * The Insights page's data: from Helix, GET /insights-data?scope=, with a
+ * person's token, and from the local display without one. `scope` is
+ * `factory` or a project's name; `runs` are those of the last 60 days that
+ * ended in it, `outcomes` those of their PRs, `lessons` the ones in scope.
+ */
+export type InsightsPage = { at: string; scope: string; projects: string[]; runs: InsightsRun[]; outcomes: Record<string, InsightsOutcome>; lessons: InsightsLesson[] };

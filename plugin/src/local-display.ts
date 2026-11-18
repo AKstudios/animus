@@ -14,6 +14,7 @@ import { basename, join } from 'node:path';
 import { listJobs, RESULTS, type JobFilter, type Result } from '../display/job-list.ts';
 import type { Display, DisplayJob, JobListPage, JobPage, ListJob, PrState } from '../display/shape.ts';
 import { asset, CSP } from './assets.ts';
+import { insightsData } from './insights-data.ts';
 import { folderParts, read, shotFile } from './job-folder.ts';
 import { readOutcomes, type Outcomes } from './outcomes.ts';
 import { animusHome, jobDir, loadProgress, loadState, readRuns, STAGES, type Run } from './log.ts';
@@ -135,6 +136,7 @@ export function localServer(): Server {
       return res.end(file.body);
     }
     if (url.pathname === '/display') return send(200, localDisplay());
+    if (url.pathname === '/insights-data') return send(200, insightsData(url.searchParams.get('scope') || 'factory', [animusHome()], Date.now()));
     if (url.pathname === '/job-list') {
       const result = url.searchParams.get('result') ?? 'all';
       if (!RESULTS.includes(result as Result)) return send(400, { error: `result is one of ${RESULTS.join(', ')}` });

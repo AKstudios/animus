@@ -13,7 +13,8 @@
 // It also serves the display: its pages at / and /jobs/<id> (ui.ts), what the
 // overview shows at /display, and a job page's data and screenshots, with a
 // token, at /jobs/<id>/page-data and /jobs/<id>/shots/<name>, and the people
-// list's at /people/page-data and a person's at /people/<name>/page-data.
+// list's at /people/page-data and a person's at /people/<name>/page-data, and
+// the Insights page's at /insights-data.
 import { createServer, type IncomingMessage, type Server } from 'node:http';
 import { AnimusError } from '../../plugin/src/proc.ts';
 import { accept, dismiss, inScope, readLessons } from '../../plugin/src/lessons.ts';
@@ -22,7 +23,7 @@ import { animusVersion, compatible } from '../../plugin/src/version.ts';
 import { parseSkills, type PersonalSkill } from '../../plugin/src/personal.ts';
 import { hashToken, helixHome, type Config } from './config.ts';
 import { RESULTS, type Result } from '../../plugin/display/job-list.ts';
-import { display, jobList, jobPage, jobShot, peoplePage, personPage } from './display.ts';
+import { display, insights, jobList, jobPage, jobShot, peoplePage, personPage } from './display.ts';
 import { refusedWith, type AdmitSubmission } from './admit.ts';
 import { freshToken } from './github-app.ts';
 import { invite, inviteDetails, joinHelix, loginDevice, relogin, startDevice, StillWaiting, takeOff, verifyInChild, type JoinGitHub, type Verify } from './join.ts';
@@ -149,6 +150,8 @@ export function serve(opts: {
         if (!RESULTS.includes(result as Result)) throw new Refused(400, `result is one of ${RESULTS.join(', ')}`);
         return send(200, jobList(opts, { result: result as Result, project: q.get('project') ?? '', person: q.get('person') ?? '' }, q.get('before') ?? undefined, { prs: await prs(), closed: await prs.closed() }));
       }
+      // The Insights page's data for the factory or one project: ?scope=factory (the default) or a project's name.
+      if (req.method === 'GET' && url.pathname === '/insights-data') return send(200, insights(opts, url.searchParams.get('scope') || 'factory'));
       // The people list's data, for any person on this Helix.
       if (req.method === 'GET' && url.pathname === '/people/page-data') return send(200, peoplePage(opts));
       // One person's page, with the jobs older than ?before=<job id>: thirty at a time.

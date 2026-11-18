@@ -6,9 +6,10 @@ import { statSync } from 'node:fs';
 import { hostname } from 'node:os';
 import { join } from 'node:path';
 import { listJobs, type JobFilter } from '../../plugin/display/job-list.ts';
-import { PERSON_JOBS, type Display, type DisplayClosed, type DisplayPr, type JobListPage, type ListJob, type DisplayJob, type DisplayRepo, type JobPage, type PeoplePage, type PersonPage, type PersonRow } from '../../plugin/display/shape.ts';
+import { PERSON_JOBS, type InsightsPage, type Display, type DisplayClosed, type DisplayPr, type JobListPage, type ListJob, type DisplayJob, type DisplayRepo, type JobPage, type PeoplePage, type PersonPage, type PersonRow } from '../../plugin/display/shape.ts';
 import { folderParts, read, shotFile } from '../../plugin/src/job-folder.ts';
-import { readRuns, STAGES } from '../../plugin/src/log.ts';
+import { insightsData } from '../../plugin/src/insights-data.ts';
+import { animusHome, readRuns, STAGES } from '../../plugin/src/log.ts';
 import { loadProfile, PROFILE_PATH } from '../../plugin/src/profile.ts';
 import { readyRepos, type Config } from './config.ts';
 import type { HelixJob, Person, Store } from './store.ts';
@@ -121,6 +122,11 @@ export function jobShot(opts: { store: Store; supervisor: Supervisor }, id: numb
   const job = opts.store.get(id);
   const dir = job && folderOf(opts.supervisor, job);
   return dir ? shotFile(dir, name) : undefined;
+}
+
+/** The Insights page's data: the run logs and outcomes of Helix's own Animus home and of each person's, and Helix's lessons. */
+export function insights(opts: { store: Store; supervisor: Supervisor }, scope: string): InsightsPage {
+  return insightsData(scope, [animusHome(), ...Object.keys(opts.store.people()).map((p) => opts.supervisor.animusHome(p))], Date.now());
 }
 
 export function display(opts: { config: Config; store: Store; supervisor: Supervisor }): Display {

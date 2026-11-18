@@ -6,13 +6,14 @@
 // guarded: without it the person is signed out. No DOM here, so it is tested
 // without a browser (helix/test/display-pages.test.ts).
 
-export type Route = { page: 'overview' } | { page: 'jobs' } | { page: 'job'; id: number | string } | { page: 'people'; name?: string };
+export type Route = { page: 'overview' } | { page: 'jobs' } | { page: 'insights' } | { page: 'job'; id: number | string } | { page: 'people'; name?: string };
 
 /** A job's own page: Helix's job numbers, or a local job's own id. */
 export const jobPage = (id: number | string) => `/jobs/${encodeURIComponent(id)}`;
 
 export function route(pathname: string): Route {
   if (pathname === '/jobs') return { page: 'jobs' };
+  if (pathname === '/insights') return { page: 'insights' };
   const job = /^\/jobs\/([^/]+)$/.exec(pathname);
   const people = /^\/people(?:\/([^/]+))?$/.exec(pathname);
   try {
@@ -87,4 +88,10 @@ export function personNotice(name: string, signedIn: boolean, status?: number, l
 export function jobsNotice(signedIn: boolean, status?: number, local = false): string | undefined {
   if (local || signedIn) return undefined;
   return status === 401 ? 'Helix did not take that token, so this browser forgot it. Sign in again to see every job.' : 'Sign in to see every job. Paste your Helix token: animus join kept it in ~/.animus/helix.json.';
+}
+
+/** What the Insights page says in place of its numbers, or nothing when it has them. `status` is how Helix answered for its data. */
+export function insightsNotice(signedIn: boolean, status?: number, local = false): string | undefined {
+  if (local || signedIn) return undefined;
+  return status === 401 ? 'Helix did not take that token, so this browser forgot it. Sign in again to see Insights.' : 'Sign in to see Insights. Paste your Helix token: animus join kept it in ~/.animus/helix.json.';
 }
