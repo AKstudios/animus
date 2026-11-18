@@ -28,6 +28,8 @@ export type DisplayJob = {
   cost_usd?: number;
   /** A stopped job (its process is gone, with no outcome): the command that picks it up again. */
   resume?: string;
+  /** Why a queued job is held for room: memory, load or a tier at its limit, with the numbers. */
+  waiting?: string;
   /** Why a queued job is in the queue a second time. */
   resumed?: 'answer' | 'restart';
   /** Running jobs: the stage and who is working, as the job last said. */

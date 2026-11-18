@@ -7,6 +7,7 @@
 import { mkdirSync } from 'node:fs';
 import { dirname } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
+import type { Tier } from '../../plugin/src/profiles.ts';
 
 export type State = 'queued' | 'running' | 'ended' | 'cancelled';
 
@@ -28,6 +29,10 @@ export type HelixJob = {
   pid?: number;
   /** Times Helix came back and found the job running with no supervisor. */
   interrupted?: number;
+  /** The tier its implementer runs on, from the spec's labels when it was submitted: what tier_limits counts. */
+  tier?: Tier;
+  /** Why a queued job is held for room; cleared when it starts. */
+  waiting?: string;
   /** Animus's own id for the job, once its run has said it: what a restart or an answer resumes. */
   animus_job?: string;
   /** The person's answer to the job's question, for the next start. */

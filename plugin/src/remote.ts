@@ -14,7 +14,7 @@ export const VERSION_HEADER = 'animus-version';
 /** A job as Helix reports it. */
 export type RemoteJob = {
   id: number; state: string; person: string; repo: string; title: string; submitted: string; started?: string; ended?: string;
-  animus_job?: string; outcome?: string; pr?: string; reason?: string; question?: string; cost_usd?: number; log?: string;
+  animus_job?: string; outcome?: string; pr?: string; reason?: string; question?: string; cost_usd?: number; log?: string; waiting?: string;
   /** On a submission's answer: the submitter's skills Helix took with it. A Helix that predates them leaves this out. */
   skills?: string[];
 };
@@ -188,6 +188,7 @@ export function describeJob(j: RemoteJob): string {
     `job ${j.id}: ${j.title}`,
     `  ${how(j)}${j.pr ? `: ${j.pr}` : ''}`,
     `  for ${j.person} on ${j.repo}, submitted ${j.submitted.slice(0, 16).replace('T', ' ')}`,
+    ...(j.waiting ? [`  ${j.waiting}`] : []),
     ...(j.question ? [`  it asks: ${j.question}`, `  answer with: animus answer ${j.id} "<your answer>"`] : []),
     ...(j.reason ? [`  reason: ${j.reason.split('\n')[0]}`] : []),
     ...(j.log ? ['', j.log] : []),
