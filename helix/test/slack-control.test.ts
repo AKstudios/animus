@@ -161,3 +161,20 @@ test('/helix help, an empty command and an unknown one list the commands, the ow
   assert.match(owners!, /\/helix invite @user <github-login>.*owner only/);
   assert.match(owners!, /\/helix link @user <person>.*owner only/);
 });
+
+// Protects: criterion 3. Fails when: an old Cancel button on a finished job errors in public, or leaves its button on the message.
+test('pressing Cancel job on a job that is already over replies privately and removes the button', async () => {
+  const h = helix({ paused: true });
+  const job = h.submit('ana', 'too late');
+  h.store.putSlackThread(job.id, { channel: 'D0ANA', ts: '9.1' });
+  h.supervisor.cancel('ana', job.id);
+
+  await h.slack.deliver(press('U0ANA', job.id));
+  h.stop();
+
+  const text = `Job ${job.id} was cancelled`;
+  assert.deepEqual(h.slack.sent, [
+    { method: 'update', channel: 'D0ANA', ts: '9.1', text, blocks: [{ type: 'section', text: { type: 'mrkdwn', text } }] },
+    { method: 'respond', url: URL, text: `Job ${job.id} has already ended.` },
+  ]);
+});

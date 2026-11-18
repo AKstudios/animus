@@ -83,6 +83,9 @@ function kill(pid: number, child?: ChildProcess): void {
   } catch { /* already gone */ }
 }
 
+/** Whether a job can no longer be cancelled: it ended, failed or was cancelled already. */
+export const jobIsOver = (job: HelixJob): boolean => job.state !== 'queued' && job.state !== 'running';
+
 /**
  * Cancels a person's queued and running jobs, from any process: `helix
  * remove-person` runs beside `helix serve`, which sees the job's process end
@@ -285,9 +288,9 @@ export function supervise(opts: {
     },
     cancel(person, id) {
       const job = mine(person, id);
-      if (job.state !== 'queued' && job.state !== 'running') throw new Refused(409, `job ${id} has already ${job.state === 'cancelled' ? 'been cancelled' : 'ended'}`);
+      if (jobIsOver(job)) throw new Refused(409, `job ${id} has already ${job.state === 'cancelled' ? 'been cancelled' : 'ended'}`);
       const { pid, ...rest } = job;
-      store.save({ ...rest, state: 'cancelled', ended: now() });
+      saveAndTell({ ...rest, state: 'cancelled', ended: now() });
       store.record(person, 'cancelled', { job: id });
       if (pid) kill(pid, children.get(id));
       reap(id);

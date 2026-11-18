@@ -8,6 +8,13 @@ clients with how to update.
 
 ## Unreleased
 
+- A job's Slack start and resume posts link its page at `url` (Tailscale) and
+  `lan_url` (office network), whichever are set. When a job ends or is
+  cancelled, its thread's opening post is edited to say how, without the
+  **Cancel job** button (back when an answered job resumes); an old button
+  pressed for a finished job replies privately and is removed. This needs the
+  `chat:write` scope the bot already has.
+
 ## 0.4.6 (2026-11-18)
 
 - `/helix help` lists every Slack command, one line each, the owner's only to

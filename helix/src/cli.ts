@@ -188,7 +188,7 @@ function main(argv: string[]): number | undefined | Promise<number> {
       // Only with slack.enabled in config.yaml; turning it on or off takes a restart.
       const slack = startSlack(config, { say });
       // On a Helix with a GitHub App, each job and project check first makes sure the person's access token has an hour or more left.
-      const supervisor = supervise({ store, config, home, preflight, prepare: beforeJob(store, config), say, ...isolation, ...(slack ? { notify: slackNotifier(slack, store, say) } : {}) });
+      const supervisor = supervise({ store, config, home, preflight, prepare: beforeJob(store, config), say, ...isolation, ...(slack ? { notify: slackNotifier(slack, store, say, config) } : {}) });
       if (slack) {
         // With containers, a draft runs in one of its own on a clone of the project's, with only the person's Claude sign-in.
         const contained = config.container && draftLaunch({ home, animusRoot: ROOT, image: imageName(animusVersion()), limits: config.container, uid: uid(), gid: gid() });
