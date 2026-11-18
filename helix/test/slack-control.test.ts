@@ -5,7 +5,7 @@ import { join } from 'node:path';
 import { test } from 'node:test';
 import { animusVersion } from '../../plugin/src/version.ts';
 import { hashToken, type Config } from '../src/config.ts';
-import { slackBot } from '../src/slack.ts';
+import { helpText, slackBot } from '../src/slack.ts';
 import { openStore, type HelixJob } from '../src/store.ts';
 import { pauseFile, supervise, type Launch } from '../src/supervisor.ts';
 import { fakeTransport, until } from './fake-slack.ts';
@@ -143,3 +143,21 @@ for (const [who, user, cancels] of [['the job\'s person', 'U0ANA', true], ['the 
       : [{ method: 'respond', url: URL, text: `Only ana or <@U0OWNER> may cancel job ${job.id}.` }]);
   });
 }
+
+// Fails when: help, an empty command or an unknown one does not list the commands, or shows the owner's commands to someone else.
+test('/helix help, an empty command and an unknown one list the commands, the owner\'s only to the owner', async () => {
+  const h = helix();
+  await h.slack.deliver(command('U0ANA', 'help'));
+  await h.slack.deliver(command('U0ANA', ''));
+  await h.slack.deliver(command('U0ANA', 'frobnicate'));
+  await h.slack.deliver(command('U0OWNER', 'help'));
+  h.stop();
+
+  const [help, empty, unknown, owners] = h.respondedTo();
+  assert.equal(help, helpText(false));
+  assert.deepEqual([empty, unknown], [help, help]);
+  for (const c of ['draft', 'jobs', 'status', 'project', 'notify', 'help']) assert.match(help!, new RegExp('/helix ' + c));
+  assert.doesNotMatch(help!, /invite|\/helix link/);
+  assert.match(owners!, /\/helix invite @user <github-login>.*owner only/);
+  assert.match(owners!, /\/helix link @user <person>.*owner only/);
+});

@@ -15,7 +15,24 @@ import type { HelixJob, Store } from './store.ts';
 import type { Supervisor } from './supervisor.ts';
 import { animusVersion } from '../../plugin/src/version.ts';
 
-const USAGE = 'Usage: /helix draft <what you want, with links>, /helix project <name>, /helix jobs, /helix status, /helix invite @user <github-login>, /helix link @user <person>, or /helix notify off|on';
+const USAGE = 'Usage: /helix draft <what you want, with links>, /helix project <name>, /helix jobs, /helix status, /helix invite @user <github-login>, /helix link @user <person>, /helix notify off|on, or /helix help';
+/** /helix help, and what an empty or unknown command gets: every command, one line each; the owner's only to the owner. */
+export function helpText(byOwner: boolean): string {
+  return [
+    '*Helix* turns a written request into a pull request. Commands:',
+    '`/helix draft <what you want, with links>`: draft a job\'s spec in a thread. Reply there to change it, then press Submit. `@Helix <text>` in a channel does the same.',
+    '`/helix jobs`: your queued, running and waiting jobs, with their threads.',
+    '`/helix status`: how busy Helix is and which version it runs.',
+    '`/helix project <name>`: the project drafts in this channel are for.',
+    '`/helix notify off|on`: stop or start your jobs posting their progress to you.',
+    ...(byOwner ? [
+      '`/helix invite @user <github-login>`: invite someone (owner only).',
+      '`/helix link @user <person>`: link a Slack user to someone who already joined (owner only).',
+    ] : []),
+    '`/helix help`: this list.',
+    'In a job\'s thread: reply to answer its question, or press Cancel.',
+  ].join('\n');
+}
 const INVITE_USAGE = 'An invite sent on Slack names their GitHub login, so only a token that signs in as it is taken: /helix invite @user <github-login>';
 const INSTALL = `https://raw.githubusercontent.com/${SOURCE.repo}/${SOURCE.ref}/install.sh`;
 
@@ -99,7 +116,7 @@ export function slackBot(transport: Transport, opts: Core & { supervisor?: Jobs;
     if (sub === 'notify') return reply(notifyCommand(store, person, args));
     if (sub === 'draft') return draft(event.text.trim().slice(sub.length).trim());
     if (sub === 'project') return reply(projectCommand(store, person, event.channel, args));
-    return reply(USAGE);
+    return reply(helpText(byOwner));
   });
 }
 

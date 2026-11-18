@@ -8,6 +8,10 @@ clients with how to update.
 
 ## Unreleased
 
+- `/helix help` lists every Slack command, one line each, the owner's only to
+  the owner; an empty or unknown `/helix` now gets the same list. The Slack
+  app's manifest has a new description, a long description and `help` in the
+  usage hint: update the app from it (no reinstall needed).
 - Helix starts a queued job only when the machine and Claude have room.
   `config.yaml` takes `reserve_memory` (`2g`), `job_memory` (`4g`) and
   `tier_limits` (such as `deep: 1`); `slots` is now the most jobs at once. A
