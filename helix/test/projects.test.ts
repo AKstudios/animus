@@ -212,7 +212,9 @@ test('Helix runs the check as a helix check-project process of its own, whose ou
   process.env.HELIX_HOME = c.home;
   try {
     checkInChild(c.store, c.home)('app');
-    for (let i = 0; i < 500 && c.store.project('app')!.state === 'checking'; i++) await new Promise((r) => { setTimeout(r, 20); });
+    // The check settles the state, then says so: wait for its last line too, or a loaded machine reads the log in between.
+    const said = () => existsSync(checkLog(c.home, 'app')) && /is ready|failed:/.test(readFileSync(checkLog(c.home, 'app'), 'utf8'));
+    for (let i = 0; i < 500 && (c.store.project('app')!.state === 'checking' || !said()); i++) await new Promise((r) => { setTimeout(r, 20); });
     assert.equal(c.store.project('app')!.state, 'ready', readFileSync(checkLog(c.home, 'app'), 'utf8'));
     assert.match(readFileSync(checkLog(c.home, 'app'), 'utf8'), /^cloning [\s\S]*setup passed\napp is ready/m);
   } finally {

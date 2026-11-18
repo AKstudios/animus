@@ -14,7 +14,7 @@ import type { Agent, AgentResult } from './agent.ts';
 import { describe, failsOnBase, gateReport, jobChecks, LATER_SLICE, runChecks, type CheckResult } from './gates.ts';
 import { commitAll, mainCheckout, matchesAny, touchedFiles } from './git.ts';
 import { appendRun, jobDir, saveProgress, saveState, writeJson, type JobState, type Outcome, type Run, type Stage } from './log.ts';
-import { evidenceBranch, prBody, prState, type Evidence, type PrLookup, type Publish } from './pr.ts';
+import { evidenceBranch, findPrByTitle, prBody, prState, type PrFind, type Evidence, type PrLookup, type Publish } from './pr.ts';
 import { loadProfile } from './profile.ts';
 import { describePlan, escalate, modelFor, PLUGIN_ROOT, raise, readPrompt, resolvePlan, type Factory, type Tier } from './profiles.ts';
 import { animusCommand, git, AnimusError, tryGit } from './proc.ts';
@@ -37,6 +37,7 @@ export type Deps = {
   shots?: typeof takeShots;
   /** How a spec with `after:` learns the earlier pull request merged, and how it waits between looks; replaced in tests. */
   prState?: PrLookup;
+  findPr?: PrFind;
   sleep?: (ms: number) => Promise<void>;
 };
 
@@ -148,7 +149,7 @@ export async function runJob(opts: RunOptions, deps: Deps): Promise<Run> {
   if (!prior && spec.after.length) {
     at('setup', 'setup · waits for an earlier pull request to merge');
     const files = resolveAfter(repo, source!, spec.after);
-    await timed('queue', () => waitForMerged({ repo, files, lookup: deps.prState ?? prState, log, ...(deps.sleep ? { sleep: deps.sleep } : {}) }));
+    await timed('queue', () => waitForMerged({ repo, files, lookup: deps.prState ?? prState, find: deps.findPr ?? findPrByTitle, log, ...(deps.sleep ? { sleep: deps.sleep } : {}) }));
   }
   if (spec.defaulted.length) log(`the spec's header has no ${spec.defaulted.join(', ')}: the default ran`);
 
