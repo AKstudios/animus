@@ -3,33 +3,49 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Display jobs page: design reference</title>
+<title>Display Jobs page: design reference</title>
 <link rel="stylesheet" href="display.css">
 </head>
 <body>
 <header class="top">
-  <span class="brand">abstergo</span>
-  <nav class="tabs"><a href="overview.html">Overview</a><a class="on" href="#">Jobs</a><a href="#">People</a></nav>
-  <div class="stats"><span>slots <b>3/4</b></span><b>14:21:40</b></div>
+  <div class="brand"><svg width="18" height="18" viewBox="0 0 18 18" fill="none" stroke-width="1.6" aria-hidden="true"><path d="M3 2c6 4 6 10 12 14M15 2C9 6 9 12 3 16M5 5h8M5 13h8"></path></svg>abstergo</div>
+  <nav class="nav"><a href="overview.html">Overview</a><a class="on" href="jobs.html">Jobs</a><a href="#">People</a></nav>
+  <div class="meta"><span><span class="dot"></span>2 of 4 slots</span><span>14:21</span></div>
 </header>
-<div class="wrap">
-  <main class="main">
-    <h1>Jobs</h1>
-    <div class="filters">
-      <nav class="seg" aria-label="Result"><a class="on" href="#">All</a><a href="#">Merged</a><a href="#">Open</a><a href="#">Failed</a><a href="#">Needs input</a></nav>
-      <label class="mute">Project <select><option>all</option></select></label>
-      <label class="mute">Person <select><option>all</option></select></label>
-    </div>
-    <div>
-      <div class="row"><span class="tag" style="color:var(--accent)">RUNNING</span><span class="t">Swap a meal for another with the same ingredients</span><span class="by">#24 · meal-planner · ajmal</span></div>
-      <div class="row"><span class="tag asks">NEEDS INPUT</span><span class="t">/animus fix on a PR continues its branch</span><span class="by">#23 · animus · ajmal · 12m · $1.84</span></div>
-      <div class="row"><span class="tag merged">MERGED #19</span><span class="t">Slack's command is /animus and its bot is Animus</span><span class="by">#21 · animus · ajmal · 2m · $0.46</span></div>
-      <div class="row"><span class="tag open">OPEN PR #20</span><span class="t">Jobs start from the machine's free memory and load</span><span class="by">#18 · animus · ajmal · 28m · $3.90</span></div>
-      <div class="row"><span class="tag merged">MERGED #16</span><span class="t">Drafts from Slack</span><span class="by">#16 · animus · ajmal · 41m · $6.02</span></div>
-      <div class="row"><span class="tag fail">FAILED</span><span class="t">Join Helix with GitHub's sign-in</span><span class="by">#14 · animus · ajmal · 6m · $0.80</span><span class="why">The gates still failed after 2 fix rounds: test</span></div>
-      <div class="row"><span class="tag plain">CLOSED #21</span><span class="t">A Facebook link is named Facebook</span><span class="by">#12 · meal-planner · ajmal · 9m · $0.06</span></div>
-    </div>
-  </main>
+
+<div class="wrap" style="flex-direction:column;gap:24px">
+  <h1 style="margin:0;font-size:28px">Jobs</h1>
+
+  <div class="bar">
+    <nav class="seg" aria-label="Result"><a class="on" href="#">All</a><a href="#">Merged</a><a href="#">Open</a><a href="#">Failed</a><a href="#">Needs input</a></nav>
+    <select class="sel" aria-label="Project"><option>All projects</option><option>animus</option><option>meal-planner</option></select>
+    <select class="sel" aria-label="Person"><option>Everyone</option><option>ajmal</option></select>
+  </div>
+
+  <div class="sum">
+    <div><b>9</b><span class="sub">jobs</span></div>
+    <div><b>3</b><span class="sub">merged · 33%</span></div>
+    <div><b>1</b><span class="sub">failed</span></div>
+    <div><b class="mono">$13.25</b><span class="sub">spent</span></div>
+    <div><b class="mono">$2.22</b><span class="sub">per merged PR</span></div>
+  </div>
+
+  <div class="tbl">
+    <div class="tr th"><span>Result</span><span>Job</span><span>Project</span><span>Person</span><span class="n">Took</span><span class="n cost">Cost</span><span class="n">To merge</span></div>
+    <div class="day">Today</div>
+    <div class="tr"><span class="pill p-run">Running</span><span><a class="title" href="job.html">Swap a meal for another with the same ingredients</a><span class="why">Gates · attempt 1</span></span><span class="sub">meal-planner</span><span class="sub">ajmal</span><span class="n">7m</span><span class="n cost">—</span><span class="n">—</span></div>
+    <div class="tr"><span class="pill p-run">Running</span><span><a class="title" href="job.html">Start and follow work with /animus comments on GitHub</a><span class="why">Implement · slice 2 of 3</span></span><span class="sub">animus</span><span class="sub">ajmal</span><span class="n">18m</span><span class="n cost">—</span><span class="n">—</span></div>
+    <div class="tr"><span class="pill p-ask">Needs input</span><span><a class="title" href="job.html">/animus fix on a PR continues its branch</a><span class="why">Should a /animus comment on a closed issue start a draft?</span></span><span class="sub">animus</span><span class="sub">ajmal</span><span class="n">12m</span><span class="n cost">$1.84</span><span class="n">—</span></div>
+    <div class="tr"><span class="pill p-merged">Merged #19</span><span><a class="title" href="job.html">Slack's command is /animus and its bot is Animus</a></span><span class="sub">animus</span><span class="sub">ajmal</span><span class="n">2m</span><span class="n cost">$0.46</span><span class="n">3h</span></div>
+    <div class="tr"><span class="pill p-merged">Merged #24</span><span><a class="title" href="job.html">Clear ticks on the Shop tab</a></span><span class="sub">meal-planner</span><span class="sub">ajmal</span><span class="n">2m</span><span class="n cost">$0.17</span><span class="n">40m</span></div>
+    <div class="tr"><span class="pill p-open">Open #20</span><span><a class="title" href="job.html">Jobs start from the machine's free memory and load</a><span class="why">Waiting for review</span></span><span class="sub">animus</span><span class="sub">ajmal</span><span class="n">28m</span><span class="n cost">$3.90</span><span class="n">—</span></div>
+    <div class="day">Yesterday</div>
+    <div class="tr"><span class="pill p-merged">Merged #16</span><span><a class="title" href="job.html">Drafts from Slack</a></span><span class="sub">animus</span><span class="sub">ajmal</span><span class="n">41m</span><span class="n cost">$6.02</span><span class="n">7h</span></div>
+    <div class="tr"><span class="pill p-fail">Failed</span><span><a class="title" href="job.html">Join Helix with GitHub's sign-in</a><span class="why bad">The gates still failed after 2 fix rounds: test</span></span><span class="sub">animus</span><span class="sub">ajmal</span><span class="n">6m</span><span class="n cost">$0.80</span><span class="n">—</span></div>
+    <div class="tr"><span class="pill p-plain">Closed #21</span><span><a class="title" href="job.html">A Facebook link is named Facebook</a><span class="why">Closed without merging</span></span><span class="sub">meal-planner</span><span class="sub">ajmal</span><span class="n">9m</span><span class="n cost">$0.06</span><span class="n">—</span></div>
+  </div>
 </div>
+
+<nav class="tabbar"><a href="overview.html">Overview</a><a class="on" href="jobs.html">Jobs</a><a href="#">People</a></nav>
 </body>
 </html>

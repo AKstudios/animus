@@ -8,55 +8,91 @@
 </head>
 <body>
 <header class="top">
-  <span class="brand">abstergo</span>
-  <nav class="tabs"><a class="on" href="#">Overview</a><a href="jobs.html">Jobs</a><a href="#">People</a></nav>
-  <div class="stats"><span>slots <b>3/4</b></span><b>14:21:40</b></div>
+  <div class="brand"><svg width="18" height="18" viewBox="0 0 18 18" fill="none" stroke-width="1.6" aria-hidden="true"><path d="M3 2c6 4 6 10 12 14M15 2C9 6 9 12 3 16M5 5h8M5 13h8"></path></svg>abstergo</div>
+  <nav class="nav"><a class="on" href="overview.html">Overview</a><a href="jobs.html">Jobs</a><a href="#">People</a></nav>
+  <div class="meta"><span><span class="dot"></span>2 of 4 slots</span><span>14:21</span></div>
 </header>
+
 <div class="wrap">
   <main class="main">
     <div>
+      <div class="eyebrow">All projects</div>
       <h1><em>1 job needs you.</em> 2 agents at work.</h1>
-      <p class="last">Last finished 2h ago · <span class="tag merged">MERGED #19</span></p>
+      <p class="lead">Last job finished 2h ago: <span class="pill p-merged">Merged #19</span></p>
     </div>
+
     <section>
       <div class="sh"><h2>Needs you</h2><span class="n">1</span></div>
       <div class="ask">
+        <div class="who">animus · /animus fix on a PR continues its branch · waiting <span class="mono">28m</span></div>
         <p class="q">Should a /animus comment on a closed issue start a draft, or be ignored with a reply saying the issue is closed?</p>
-        <p class="mute"><span class="mono">#23</span> animus · /animus fix on a PR continues its branch · waiting <span class="mono">28m</span></p>
-        <div class="act"><code>animus answer 23 "…"</code><a class="btn" href="job.html">Open job</a></div>
+        <div class="row">
+          <a class="btn pri" href="job.html">Open job</a>
+          <span class="hint">animus answer 23 "…"</span>
+        </div>
       </div>
     </section>
+
     <section>
       <div class="sh"><h2>Working now</h2><span class="n">2</span></div>
       <div class="cards">
-        <a class="card" href="job.html"><span class="mute mono">#24 meal-planner · ajmal</span><span class="t">Swap a meal for another with the same ingredients</span><div class="track"><i class="d"></i><i class="d"></i><i class="d"></i><i class="c"></i><i></i><i></i><i></i></div><div class="step"><span><b>Gates</b> · attempt 1</span><span class="mono">07:15</span></div></a>
-        <a class="card" href="job.html"><span class="mute mono">#22 animus · ajmal</span><span class="t">Start and follow work with /animus comments on GitHub</span><div class="track"><i class="d"></i><i class="d"></i><i class="c"></i><i></i><i></i><i></i><i></i></div><div class="step"><span><b>Implement</b> · slice 2 of 3</span><span class="mono">18:42</span></div></a>
+        <a class="card" href="job.html">
+          <div class="sub">meal-planner · ajmal</div>
+          <div class="t">Swap a meal for another with the same ingredients</div>
+          <div class="track"><i class="d"></i><i class="d"></i><i class="d"></i><i class="c"></i><i></i><i></i><i></i></div>
+          <div class="st"><span><b>Gates</b> · attempt 1</span><span class="mono">07:15</span></div>
+          <div class="now">node --test test/swap.test.ts</div>
+        </a>
+        <a class="card" href="job.html">
+          <div class="sub">animus · ajmal</div>
+          <div class="t">Start and follow work with /animus comments on GitHub</div>
+          <div class="track"><i class="d"></i><i class="d"></i><i class="c"></i><i></i><i></i><i></i><i></i></div>
+          <div class="st"><span><b>Implement</b> · slice 2 of 3</span><span class="mono">18:42</span></div>
+          <div class="now">Edit helix/src/github-comments.ts</div>
+        </a>
       </div>
     </section>
+
     <section>
-      <div class="sh"><h2>Open PRs</h2><span class="n">1</span></div>
-      <div class="row"><span class="tag open">OPEN PR #20</span><span class="t">Jobs start from the machine's free memory and load</span><span class="by">#18 · animus · ajmal</span></div>
+      <div class="sh"><h2>Open pull requests</h2><span class="n">1</span></div>
+      <div>
+        <a class="li" href="job.html"><span class="pill p-open">Open #20</span><span class="tt">Jobs start from the machine's free memory and load</span><span class="r">animus · ajmal · opened 2h</span></a>
+      </div>
     </section>
+
     <section>
-      <div class="sh"><h2>Finished</h2><span class="n">5</span></div>
-      <div class="row"><span class="tag merged">MERGED #19</span><span class="t">Slack's command is /animus and its bot is Animus</span><span class="by">#21 · animus · ajmal · 2m · $0.46</span></div>
-      <div class="row"><span class="tag merged">MERGED #24</span><span class="t">Clear ticks on the Shop tab</span><span class="by">#20 · meal-planner · ajmal · 2m · $0.17</span></div>
-      <div class="row"><span class="tag merged">MERGED #16</span><span class="t">Drafts from Slack</span><span class="by">#16 · animus · ajmal · 41m · $6.02</span></div>
-      <div class="row"><span class="tag fail">FAILED</span><span class="t">Join Helix with GitHub's sign-in</span><span class="by">#14 · animus · ajmal · 6m · $0.80</span><span class="why">The gates still failed after 2 fix rounds: test</span></div>
-      <div class="row"><span class="tag plain">CLOSED #21</span><span class="t">A Facebook link is named Facebook</span><span class="by">#12 · meal-planner · ajmal · 9m · $0.06</span></div>
+      <div class="sh"><h2>Finished</h2><span class="n">5</span><a class="more" href="jobs.html">All jobs →</a></div>
+      <div>
+        <a class="li" href="job.html"><span class="pill p-merged">Merged #19</span><span class="tt">Slack's command is /animus and its bot is Animus</span><span class="r">animus · 2m · $0.46 · merged in 3h</span></a>
+        <a class="li" href="job.html"><span class="pill p-merged">Merged #24</span><span class="tt">Clear ticks on the Shop tab</span><span class="r">meal-planner · 2m · $0.17 · merged in 40m</span></a>
+        <a class="li" href="job.html"><span class="pill p-merged">Merged #16</span><span class="tt">Drafts from Slack</span><span class="r">animus · 41m · $6.02 · merged in 7h</span></a>
+        <a class="li" href="job.html"><span class="pill p-fail">Failed</span><span class="tt">Join Helix with GitHub's sign-in</span><span class="r">animus · 6m · $0.80</span><span class="why bad">The gates still failed after 2 fix rounds: test</span></a>
+        <a class="li" href="job.html"><span class="pill p-plain">Closed #21</span><span class="tt">A Facebook link is named Facebook</span><span class="r">meal-planner · 9m · $0.06 · not merged</span></a>
+      </div>
     </section>
   </main>
+
   <aside class="side">
-    <section class="panel">
-      <h2 style="font-size:15px">This week</h2>
-      <dl class="week"><div><dt>PRs merged</dt><dd>3</dd></div><div><dt>Jobs finished</dt><dd>6</dd></div><div><dt>Spent</dt><dd>$13.25</dd></div><div><dt>Median job</dt><dd>7m</dd></div></dl>
-    </section>
-    <nav class="panel" aria-label="Projects">
-      <h2 style="font-size:15px">Projects <span class="mute" style="font-weight:400">2</span></h2>
-      <div class="proj"><div class="h"><b>animus</b><span class="mute">1 running · 1 ask</span></div><div class="ticks"><i class="m"></i><i class="m"></i><i class="f"></i><i class="m"></i><i class="a"></i><i class="r"></i></div></div>
-      <div class="proj"><div class="h"><b>meal-planner</b><span class="mute">1 running</span></div><div class="ticks"><i class="m"></i><i></i><i class="r"></i></div></div>
-    </nav>
+    <div class="box">
+      <div class="sh" style="margin-bottom:16px"><h2>This week</h2></div>
+      <div class="kpis">
+        <div><div class="kv">3</div><div class="kl">PRs merged</div></div>
+        <div><div class="kv">6</div><div class="kl">jobs finished</div></div>
+        <div><div class="kv mono">$13.25</div><div class="kl">spent</div></div>
+        <div><div class="kv mono">7m</div><div class="kl">median job time</div></div>
+      </div>
+    </div>
+    <div class="box">
+      <div class="sh" style="margin-bottom:10px"><h2>Projects</h2><span class="n">2</span></div>
+      <div class="proj">
+        <a class="pr" href="#"><div class="h"><b>animus</b><span class="sub">1 running · 1 asks</span></div><div class="ticks"><i class="m"></i><i class="f"></i><i class="m"></i><i class="m"></i><i class="a"></i><i class="r"></i></div></a>
+        <a class="pr" href="#"><div class="h"><b>meal-planner</b><span class="sub">1 running</span></div><div class="ticks"><i class="m"></i><i></i><i class="r"></i></div></a>
+      </div>
+      <div class="key"><span><i class="m"></i>merged</span><span><i class="r"></i>running</span><span><i class="a"></i>asks</span><span><i class="f"></i>failed</span></div>
+    </div>
   </aside>
 </div>
+
+<nav class="tabbar"><a class="on" href="overview.html">Overview</a><a href="jobs.html">Jobs</a><a href="#">People</a></nav>
 </body>
 </html>
