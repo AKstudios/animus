@@ -138,8 +138,8 @@ test('the display\'s page and scripts need no token, and no path climbs out of i
   assert.deepEqual([script.status, script.headers.get('content-type')], [200, 'text/javascript; charset=utf-8']);
   assert.ok(text.includes('export function view(') && !text.includes('import type') && !text.includes(': Display'));
   assert.equal(text, stripTypeScriptTypes(readFileSync(join(DISPLAY, 'view.ts'), 'utf8')));
-  assert.equal((await get('/ui/fonts/titillium-web-400.woff2')).headers.get('content-type'), 'font/woff2');
-  for (const path of ['/ui/../src/server.ts', '/ui/%2e%2e/src/server.ts', '/ui/fonts/../../src/server.ts', '/ui/nothing.css', '/ui/fonts/OFL-TitilliumWeb.txt']) {
+  assert.equal((await get('/ui/fonts/jetbrains-mono-400.woff2')).headers.get('content-type'), 'font/woff2');
+  for (const path of ['/ui/../src/server.ts', '/ui/%2e%2e/src/server.ts', '/ui/fonts/../../src/server.ts', '/ui/nothing.css', '/ui/fonts/titillium-web-400.woff2']) {
     assert.equal((await get(path)).status, 401, path);
   }
   h.stop();

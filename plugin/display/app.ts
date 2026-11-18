@@ -143,7 +143,6 @@ const track = (v: View, j: Live) => `<span class="track" aria-hidden="true">${Ar
 const who = (j: { person: string; personPage?: string }) => (j.personPage ? `<a href="${esc(j.personPage)}">${esc(j.person)}</a>` : esc(j.person));
 
 const card = (v: View, j: Live) => `<article class="card" data-key="j-${j.id}">
-  <span class="corner-a" aria-hidden="true"></span><span class="corner-b" aria-hidden="true"></span>
   <div class="card-top"><span><span class="b">${ref(j.id)}</span> <span class="mute">${j.by.map((b) => (b.page ? `<a href="${esc(b.page)}">${esc(b.text)}</a>` : esc(b.text))).join(' · ')}</span></span><span class="elapsed">${j.elapsed}</span></div>
   <a class="card-title" href="${esc(j.page)}">${esc(j.title)}</a>
   <div class="card-stage">${track(v, j)}<div class="card-step"><span class="stage-name">${esc(j.stageText)}</span><span class="mute">${esc(j.stepText)}</span></div></div>
