@@ -7,7 +7,8 @@ import { AnimusError } from '../../plugin/src/proc.ts';
 import { personEnv, type Config } from './config.ts';
 import { freshToken, GITHUB, githubRepo, type GitHubUrls } from './github-app.ts';
 import type { Drafts } from './drafts.ts';
-import type { Project, Store } from './store.ts';
+import { isOwner } from './owner.ts';
+import type { HelixJob, Project, Store } from './store.ts';
 import type { Supervisor } from './supervisor.ts';
 
 /** Hidden in every comment Animus posts: a comment that carries it is never read as a command. */
@@ -93,8 +94,32 @@ export function draftComment(spec: string): string {
   ].join('\n');
 }
 
+/** What a job submitted from an issue says there when it ends; nothing for any other step, which the issue is not told. */
+function milestone(job: HelixJob): string | undefined {
+  if (job.state !== 'ended') return undefined;
+  if (job.outcome === 'needs-input') return `Job ${job.id} needs input: ${job.question}\nReply with a comment: \`/animus answer <your answer>\``;
+  if (job.pr) return `Job ${job.id} opened a pull request: ${job.pr}`;
+  return `Job ${job.id} failed: ${job.reason ?? job.outcome}`;
+}
+
+/**
+ * The supervisor's notify for the issue a job was submitted from: Animus
+ * comments there, as the job's person, when the job opens its pull request,
+ * fails or needs input. Comments go out one at a time, in the order they came.
+ */
+export function githubNotifier(opts: { store: Store; config: Pick<Config, 'github'>; github?: GitHubUrls; say?: (line: string) => void }): (job: HelixJob) => void {
+  let last = Promise.resolve();
+  return (job) => {
+    const text = job.github && milestone(job);
+    if (!job.github || !text) return;
+    const { repo, issue } = job.github;
+    last = last.then(() => commentAs(opts.store, opts.config, opts.github ?? GITHUB, job.person, repo, issue, text)).then(() => {})
+      .catch((err: unknown) => opts.say?.(`job ${job.id}: could not comment on ${repo}#${issue}: ${(err as Error).message}`));
+  };
+}
+
 const USAGE ='Say what you want after `/animus`, as in `/animus add a login page`.';
-// shortcut: answer, cancel and fix are read but not acted on until their commands exist; they are not draft text.
+// shortcut: fix is read but not acted on until its command exists; it is not draft text.
 const WORDS = ['submit', 'discard', 'answer', 'cancel', 'fix'];
 
 /**
@@ -104,7 +129,7 @@ const WORDS = ['submit', 'discard', 'answer', 'cancel', 'fix'];
  * was created at or after the position and is not among those handled.
  */
 export function commentWatcher(opts: {
-  store: Store; config: Pick<Config, 'github'>; drafts: Pick<Drafts, 'github' | 'githubDiscard' | 'githubSubmit'>; jobs: Pick<Supervisor, 'submit'>;
+  store: Store; config: Pick<Config, 'github' | 'owner'>; drafts: Pick<Drafts, 'github' | 'githubDiscard' | 'githubSubmit'>; jobs: Pick<Supervisor, 'submit' | 'answer' | 'cancel'>;
   github?: GitHubUrls; say?: (line: string) => void; now?: () => number;
 }): { poll(): Promise<void> } {
   const { store, config, drafts, jobs } = opts;
@@ -124,6 +149,27 @@ export function commentWatcher(opts: {
     return undefined;
   }
 
+  /** The latest job submitted from the issue that waits for an answer, or for `cancel` is queued or running. */
+  const jobOn = (repo: string, number: number, word: 'answer' | 'cancel') => (word === 'answer' ? store.inState('ended').filter((j) => j.outcome === 'needs-input') : [...store.inState('queued'), ...store.inState('running')])
+    .filter((j) => j.github?.repo.toLowerCase() === repo.toLowerCase() && j.github.issue === number)
+    .sort((a, b) => b.id - a.id)[0];
+
+  /** `/animus answer <text>` or `/animus cancel` on an issue, for its job: the person's, or anyone's for the owner; what to tell them on the issue. */
+  async function jobCommand(person: string, repo: string, number: number, word: 'answer' | 'cancel', text: string): Promise<string> {
+    if (word === 'answer' && !text) return 'Say the answer after `/animus answer`.';
+    const job = jobOn(repo, number, word);
+    if (!job) return `No job from this issue is ${word === 'answer' ? 'waiting for an answer' : 'queued or running'}.`;
+    if (job.person !== person && !isOwner(config, person)) return `Only ${job.person} or the owner may ${word} job ${job.id}.`;
+    try {
+      // The owner acts as the job's person, as the owner's Cancel does in Slack.
+      if (word === 'answer') jobs.answer(job.person, job.id, text); else jobs.cancel(job.person, job.id);
+    } catch (err) {
+      if (err instanceof AnimusError) return `Job ${job.id}: ${err.message}.`;
+      throw err;
+    }
+    return word === 'answer' ? `Got your answer: job ${job.id} resumes.` : `Job ${job.id} was cancelled.`;
+  }
+
   async function handle(project: Project, repo: string, c: IssueComment): Promise<void> {
     const login = c.user.login.toLowerCase();
     const person = Object.entries(store.people()).find(([, p]) => p.github?.toLowerCase() === login)?.[0];
@@ -139,6 +185,7 @@ export function commentWatcher(opts: {
     const word = text.split(/\s/)[0]!.toLowerCase();
     if (word === 'discard') { await reply(await drafts.githubDiscard(person, { repo, number })); return; }
     if (word === 'submit') { await reply(await drafts.githubSubmit(person, { repo, number }, jobs)); return; }
+    if (word === 'answer' || word === 'cancel') { await reply(await jobCommand(person, repo, number, word, text.slice(word.length).trim())); return; }
     if (WORDS.includes(word)) return;
     const token = await tokenOf(store, config, person, urls);
     // The reaction says "seen"; a refusal of it does not stop the draft.

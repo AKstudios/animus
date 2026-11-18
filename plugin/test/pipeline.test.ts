@@ -37,6 +37,20 @@ test('a small job is implemented, gated, reviewed by a fresh read-only session, 
   assert.match(body, /Nothing flagged/);
 });
 
+// Protects: a job Helix submitted from an issue. Fails when: its pull request does not say it closes the issue, or a failure report's draft does.
+test('the pull request body says Closes #<issue> when Helix set the issue, for a finished job only', async () => {
+  process.env.ANIMUS_CLOSES = '7';
+  try {
+    const ok = deps(fakeAgent([say('done'), () => clean()]).agent);
+    await runJob({ repo: makeRepo(), specFile: writeSpec(SMALL) }, ok);
+    const failed = deps(fakeAgent([say('no'), say('still no'), say('never')]).agent);
+    await runJob({ repo: makeRepo(), specFile: writeSpec(SMALL) }, failed);
+
+    assert.match(ok.published[0]!.body, /^Closes #7$/m);
+    assert.doesNotMatch(failed.published[0]!.body, /Closes #/);
+  } finally { delete process.env.ANIMUS_CLOSES; }
+});
+
 test('every run writes one line to the run log', async () => {
   const repo = makeRepo();
   const { agent } = fakeAgent([say('done'), () => clean()]);

@@ -5,10 +5,10 @@ import { join } from 'node:path';
 import { test } from 'node:test';
 import { hashToken, type Config } from '../src/config.ts';
 import { draftRunner, type DraftLaunch } from '../src/drafts.ts';
-import { commentWatcher, MARKER } from '../src/github-comments.ts';
+import { commentWatcher, githubNotifier, MARKER } from '../src/github-comments.ts';
 import { deviceCode, keepTokens, pollDevice } from '../src/github-app.ts';
 import { openStore } from '../src/store.ts';
-import { pauseFile, supervise } from '../src/supervisor.ts';
+import { pauseFile, supervise, type Launch } from '../src/supervisor.ts';
 import { fakeGitHub, type FakeGitHub } from './fake-github.ts';
 import { fakeTransport, until } from './fake-slack.ts';
 
@@ -22,6 +22,14 @@ const reply = fs.existsSync(folder + '/reply.md') ? '\\nRevised: ' + read(folder
 fs.writeFileSync(folder + '/draft.md', '# Draft\\n\\n' + read(folder + '/message.md') + '\\nIssue: ' + refs + reply);
 `;
 
+// Stands in for `animus run` and `animus resume`: the job's title says how it ends.
+const JOB = `
+const [title, answer] = process.argv.slice(1);
+if (title.startsWith('ask') && !answer) console.log(JSON.stringify({ outcome: 'needs-input', question: 'which provider?' }));
+else if (title.startsWith('fail')) console.log(JSON.stringify({ outcome: 'failed', reason: 'the checks never passed' }));
+else console.log(JSON.stringify({ outcome: 'pr', pr: 'https://github.com/o/app/pull/9' }));
+`;
+
 const T0 = Date.parse('2030-01-01T10:00:00Z');
 const at = (seconds: number) => new Date(T0 + seconds * 1000).toISOString().replace('.000Z', 'Z');
 const HOUR = 3600;
@@ -30,9 +38,10 @@ const HOUR = 3600;
  * A Helix with ana (GitHub login ana-gh, signed in through the app) and the
  * project app of o. The comment watcher's clock is T0 and moves with
  * clock.at; the first poll starts watching at T0. Issue 7 on o/app is open,
- * 8 is a pull request.
+ * 8 is a pull request. Jobs queue and stay queued, unless run is set: then
+ * they run as `animus` would end them (see JOB) and report on their issue.
  */
-async function helix(opts: { slack?: boolean; owner?: string } = {}) {
+async function helix(opts: { slack?: boolean; owner?: string; run?: boolean } = {}) {
   const home = mkdtempSync(join(tmpdir(), 'helix-github-comments-'));
   process.env.HELIX_HOME = home;
   const github: FakeGitHub = await fakeGitHub();
@@ -41,7 +50,7 @@ async function helix(opts: { slack?: boolean; owner?: string } = {}) {
   const envFile = join(home, 'ana.env');
   writeFileSync(envFile, '');
   store.putPerson('ana', { token_sha256: hashToken('ana-token'), env_file: envFile, github: 'ana-gh' });
-  writeFileSync(pauseFile(home), '');
+  if (!opts.run) writeFileSync(pauseFile(home), '');
   const signIn = async (name: string, login: string, file: string) => {
     const code = await deviceCode('Iv23liGood', github);
     github.approve(code.user_code, login);
@@ -63,10 +72,12 @@ async function helix(opts: { slack?: boolean; owner?: string } = {}) {
   if (opts.slack) store.linkSlack('ana', 'U1');
   const drafts = draftRunner(opts.slack ? slack.transport : undefined, { store, config, home, launch, github });
   const lines: string[] = [];
-  const jobs = supervise({ store, config, home });
+  const closes: (string | undefined)[] = [];
+  const launchJob: Launch = (job, _dir, env) => { closes.push(env.ANIMUS_CLOSES); return { command: process.execPath, args: ['-e', JOB, job.title, job.answer ?? ''] }; };
+  const jobs = supervise({ store, config, home, launch: launchJob, notify: githubNotifier({ store, config, github, say: (l) => lines.push(l) }) });
   const watcher = commentWatcher({ store, config, drafts, jobs, github, now: () => clock, say: (l) => lines.push(l) });
   await watcher.poll();
-  return { github, store, lines, drafts, slack: slack.sent, home, poll: () => watcher.poll(), clock: { at: (s: number) => { clock = T0 + s * 1000; } } };
+  return { github, store, lines, drafts, jobs, closes, slack: slack.sent, home, poll: () => watcher.poll(), clock: { at: (s: number) => { clock = T0 + s * 1000; } } };
 }
 
 // Protects: criterion 1. Fails when: the person gets no 👀, or the draft is not a marked comment with the spec in a markdown fence and the replies.
@@ -269,8 +280,8 @@ test('discards a draft untouched for 7 days with a comment on its issue', async 
 
 const SPEC = '# Passkey sign-in\n\n## Acceptance criteria\n\n1. A person signs in with a passkey.\n   $ npm test\n';
 /** A draft on issue 7 whose comment the person then edits on GitHub to this body. */
-async function draftEditedTo(edit: (draft: string) => string) {
-  const h = await helix();
+async function draftEditedTo(edit: (draft: string) => string, opts: Parameters<typeof helix>[0] = {}) {
+  const h = await helix(opts);
   h.github.addComment('o/app', 7, 'ana-gh', '/animus add passkey sign-in', at(30));
   await h.poll();
   await until('the draft', () => h.store.draftsIn('ready').length === 1);
@@ -316,4 +327,120 @@ test('replies that the latest draft comment has no spec block when it has none, 
 
   assert.deepEqual(h.store.list(), []);
   assert.equal(h.github.posted.at(-1)!.body, `the latest draft comment has no spec block I can read\n\n${MARKER}`);
+});
+
+/** ana's draft on issue 7 submitted as a job whose title is `title`, which says how it ends; the clock is then at 120 seconds. */
+async function submitted(title: string, opts: Parameters<typeof helix>[0] = {}) {
+  const h = await draftEditedTo((body) => body.replace(/```markdown[\s\S]*?\n```/, `\`\`\`markdown\n${SPEC.replace('Passkey sign-in', title)}\`\`\``), opts);
+  await h.poll();
+  await until('the job', () => h.store.list().length === 1);
+  return { h, job: h.store.list()[0]! };
+}
+const bodies = (h: Awaited<ReturnType<typeof helix>>) => h.github.posted.map((p) => p.body.replace(`\n\n${MARKER}`, ''));
+
+// Protects: criterion 8. Fails when: the issue is not told the PR opened, the job's PR body is not told to close the issue, or a stage in between is commented.
+test('comments on the issue when the job opens its pull request, and the job is told to close the issue', async () => {
+  const { h, job } = await submitted('pr', { run: true });
+  await until('the PR comment', () => h.github.posted.length === 3);
+
+  assert.deepEqual(bodies(h).slice(2), [`Job ${job.id} opened a pull request: https://github.com/o/app/pull/9`]);
+  assert.deepEqual(h.github.posted.map((p) => [p.number, p.login]), [[7, 'ana-gh'], [7, 'ana-gh'], [7, 'ana-gh']]);
+  assert.deepEqual(h.closes, ['7']);
+});
+
+// Protects: criterion 8. Fails when: a failed job leaves the issue silent or without its reason.
+test('comments on the issue with the reason when the job fails', async () => {
+  const { h, job } = await submitted('fail', { run: true });
+  await until('the failure comment', () => h.github.posted.length === 3);
+
+  assert.deepEqual(bodies(h).slice(2), [`Job ${job.id} failed: the checks never passed`]);
+});
+
+// Protects: criterion 8. Fails when: the question is not posted, or /animus answer does not resume the job with the text.
+test('comments the question when the job needs input, and /animus answer resumes it with the answer', async () => {
+  const { h, job } = await submitted('ask', { run: true });
+  await until('the question', () => h.github.posted.length === 3);
+  assert.match(bodies(h)[2]!, new RegExp(`^Job ${job.id} needs input: which provider\\?\n.*\`/animus answer <your answer>\``));
+
+  h.github.addComment('o/app', 7, 'ana-gh', '/animus answer GitHub, please', at(150));
+  h.clock.at(180);
+  await h.poll();
+  await until('the second PR comment', () => h.github.posted.length === 5);
+
+  assert.equal(bodies(h)[3], `Got your answer: job ${job.id} resumes.`);
+  assert.equal(bodies(h)[4], `Job ${job.id} opened a pull request: https://github.com/o/app/pull/9`);
+  assert.equal(h.store.get(job.id)!.outcome, 'pr');
+});
+
+test('replies that no job waits for an answer when /animus answer finds none, or has no text', async () => {
+  const { h } = await submitted('pr');
+  h.github.addComment('o/app', 7, 'ana-gh', '/animus answer yes', at(150));
+  h.github.addComment('o/app', 7, 'ana-gh', '/animus answer', at(151));
+  h.clock.at(180);
+  await h.poll();
+
+  assert.deepEqual(bodies(h).slice(2), ['No job from this issue is waiting for an answer.', 'Say the answer after `/animus answer`.']);
+});
+
+// Protects: criterion 8. Fails when: /animus cancel leaves the job queued, or says nothing.
+test('cancels the job from the issue on /animus cancel', async () => {
+  const { h, job } = await submitted('pr');
+  h.github.addComment('o/app', 7, 'ana-gh', '/animus cancel', at(150));
+  h.clock.at(180);
+  await h.poll();
+
+  assert.equal(h.store.get(job.id)!.state, 'cancelled');
+  assert.equal(bodies(h).at(-1), `Job ${job.id} was cancelled.`);
+  assert.equal(h.github.posted.length, 3);
+});
+
+test('replies that no job can be cancelled when the issue has none running or queued', async () => {
+  const h = await helix();
+  h.github.addComment('o/app', 7, 'ana-gh', '/animus cancel', at(30));
+  await h.poll();
+
+  assert.equal(bodies(h)[0], 'No job from this issue is queued or running.');
+});
+
+// Protects: criterion 9. Fails when: a person other than the job's or the owner answers or cancels it, or the reply is longer than a line.
+test('refuses /animus answer and /animus cancel from a person who is not the job\'s person or the owner, and changes nothing', async () => {
+  const { h, job } = await submitted('ask', { run: true, owner: 'nobody' });
+  await until('the question', () => h.github.posted.length === 3);
+  h.github.addComment('o/app', 7, 'bob-gh', '/animus answer nope', at(150));
+  h.clock.at(180);
+  await h.poll();
+  await until('the refusal', () => h.github.posted.length === 4);
+  assert.equal(bodies(h)[3], 'Only ana or the owner may answer job ' + job.id + '.');
+  assert.equal(h.store.get(job.id)!.outcome, 'needs-input');
+
+  const queued = await submitted('pr', { owner: 'nobody' });
+  queued.h.github.addComment('o/app', 7, 'bob-gh', '/animus cancel', at(150));
+  queued.h.clock.at(180);
+  await queued.h.poll();
+  assert.equal(queued.h.store.get(queued.job.id)!.state, 'queued');
+  assert.equal(bodies(queued.h).at(-1), `Only ana or the owner may cancel job ${queued.job.id}.`);
+});
+
+// Protects: criterion 9, for submit. Fails when: a person other than the draft's or the owner queues it.
+test('refuses /animus submit from a person who is not the draft\'s person or the owner, and queues nothing', async () => {
+  const h = await helix({ owner: 'nobody' });
+  h.github.addComment('o/app', 7, 'ana-gh', '/animus add passkey sign-in', at(30));
+  await h.poll();
+  await until('the draft', () => h.store.draftsIn('ready').length === 1);
+
+  h.github.addComment('o/app', 7, 'bob-gh', '/animus submit', at(90));
+  h.clock.at(120);
+  await h.poll();
+
+  assert.deepEqual(h.store.list(), []);
+  assert.equal(bodies(h).at(-1), 'Only ana or the owner may submit this draft.');
+});
+
+test('lets the owner cancel another person\'s job from the issue', async () => {
+  const { h, job } = await submitted('pr', { owner: 'bob' });
+  h.github.addComment('o/app', 7, 'bob-gh', '/animus cancel', at(150));
+  h.clock.at(180);
+  await h.poll();
+
+  assert.equal(h.store.get(job.id)!.state, 'cancelled');
 });

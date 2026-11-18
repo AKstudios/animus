@@ -30,8 +30,13 @@ clients with how to update.
   reads the spec block of the latest draft comment as it is on GitHub then, hand
   edits included, checks it as `animus plan` does and queues it as the draft
   person's job, with a comment naming the job; an incomplete spec, or a comment
-  with no readable spec block, gets a comment saying so and queues nothing. Job
-  updates on the issue come later.
+  with no readable spec block, gets a comment saying so and queues nothing. A
+  job submitted that way comments on its issue when its pull request opens (the
+  pull request says `Closes #<issue>`), when it fails, with the reason, and when
+  it needs input, with the question; stages in between are not commented.
+  `/animus answer <text>` on the issue answers the question and resumes the job,
+  and `/animus cancel` cancels it. `submit`, `discard`, `answer` and `cancel` by
+  anyone but the draft's or job's person, or the owner, get a one-line refusal.
 
 ## 0.4.7 (2026-11-18)
 

@@ -13,7 +13,7 @@ import { checkEnv, checkPerson, describeFindings, failing, githubPush, githubTok
 import { animusVersion } from '../../plugin/src/version.ts';
 import { containerLaunch, containerProblem, draftLaunch, imageName, personDirs, removeContainer } from './container.ts';
 import { draftRunner } from './drafts.ts';
-import { commentWatcher } from './github-comments.ts';
+import { commentWatcher, githubNotifier } from './github-comments.ts';
 import { addPerson, addRepo, configFile, envFileVars, helixHome, identityEnv, importRegistry, loadConfig, readyRepos, removeRepo } from './config.ts';
 import { ensureSetup } from '../../plugin/src/workspace.ts';
 import { loadProfile } from '../../plugin/src/profile.ts';
@@ -189,7 +189,9 @@ function main(argv: string[]): number | undefined | Promise<number> {
       // Only with slack.enabled in config.yaml; turning it on or off takes a restart.
       const slack = startSlack(config, { say });
       // On a Helix with a GitHub App, each job and project check first makes sure the person's access token has an hour or more left.
-      const supervisor = supervise({ store, config, home, preflight, prepare: beforeJob(store, config), say, ...isolation, ...(slack ? { notify: slackNotifier(slack, store, say, config) } : {}) });
+      // A job's progress goes to its Slack DM thread, when there is a bot, and its milestones to the issue it came from.
+      const notifiers = [...(slack ? [slackNotifier(slack, store, say, config)] : []), githubNotifier({ store, config, say })];
+      const supervisor = supervise({ store, config, home, preflight, prepare: beforeJob(store, config), say, ...isolation, notify: (job) => { for (const tell of notifiers) tell(job); } });
       // Drafts start from Slack, when it runs, and from /animus comments on GitHub.
       // With containers, a draft runs in one of its own on a clone of the project's, with only the person's Claude sign-in.
       const contained = config.container && draftLaunch({ home, animusRoot: ROOT, image: imageName(animusVersion()), limits: config.container, uid: uid(), gid: gid() });
