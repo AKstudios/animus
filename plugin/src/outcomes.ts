@@ -24,6 +24,8 @@ export type PrOutcome = {
   ms_to_merge?: number;
   /** Commits on the pull request made after the job's last run ended. */
   human_commits: number;
+  /** Lines those commits added and removed, read from the clone where it is here (0 when it is not). */
+  human_lines: { added: number; removed: number };
   /** Within 30 days of the merge; absent while not merged, or when the repository is not here to read. */
   reverted?: boolean;
   /** Lines the pull request added were changed or removed within 30 days of the merge. */
@@ -43,6 +45,17 @@ function settled(o: PrOutcome): boolean {
   return o.state === 'MERGED' && o.closed !== undefined && o.reverted !== undefined && Date.parse(o.checked) >= Date.parse(o.closed) + WATCH_MS;
 }
 
+/** Lines added and removed from one commit to another; binary files count for none. */
+function linesBetween(repo: string, from: string, to: string): { added: number; removed: number } {
+  const total = { added: 0, removed: 0 };
+  for (const line of (tryGit(repo, ['diff', '--numstat', from, to]) ?? '').split('\n')) {
+    const [a, r] = line.split('\t');
+    total.added += Number(a) || 0;
+    total.removed += Number(r) || 0;
+  }
+  return total;
+}
+
 /** Asks GitHub about every pull request in the run log whose outcome can still change, and saves what it says. */
 export function refreshOutcomes(facts: (url: string, cwd: string) => PrFacts | undefined, now = Date.now()): Outcomes {
   const outcomes = readOutcomes();
@@ -53,9 +66,10 @@ export function refreshOutcomes(facts: (url: string, cwd: string) => PrFacts | u
     const hasRepo = existsSync(join(run.repo, '.git'));
     const f = facts(pr, hasRepo ? run.repo : animusHome());
     if (!f) continue;
+    const human_commits = f.commits.filter((date) => Date.parse(date) > Date.parse(run.ended)).length;
     const o: PrOutcome = {
-      pr, job: run.job, state: f.state, opened: f.createdAt,
-      human_commits: f.commits.filter((date) => Date.parse(date) > Date.parse(run.ended)).length,
+      pr, job: run.job, state: f.state, opened: f.createdAt, human_commits,
+      human_lines: human_commits && hasRepo && f.head && run.head ? linesBetween(run.repo, run.head, f.head) : { added: 0, removed: 0 },
       checked: new Date(now).toISOString(),
     };
     const closed = f.state === 'MERGED' ? f.mergedAt : f.state === 'CLOSED' ? f.closedAt : undefined;

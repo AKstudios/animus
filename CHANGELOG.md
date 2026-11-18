@@ -8,6 +8,12 @@ clients with how to update.
 
 ## Unreleased
 
+- The run log's `review` gains `log`: every finding as `{ round, severity,
+  file, line, fate }` (`fixed`, `open` or `not-acted-on`), the counts as
+  before. `factory_version` is the plugin's version plus the commit (and
+  `-dirty`) from a git checkout, never `unknown`. `animus outcomes` records
+  `human_lines` (lines added and removed by commits after the job's last
+  run) beside `human_commits`, and `--json` shows them.
 - Each agent session leaves its tool calls in `tools.jsonl` in the job's
   folder, read by the script from the session's transcript when it ends, and
   the run log's agent entries gain `tools: { calls, errors, by_tool }`.

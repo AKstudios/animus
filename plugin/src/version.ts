@@ -4,6 +4,7 @@
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { PLUGIN_ROOT } from './profiles.ts';
+import { tryGit } from './proc.ts';
 import { parseVersion } from './semver.ts';
 
 export { atLeast, MIN_CLAUDE, parseVersion } from './semver.ts';
@@ -11,6 +12,13 @@ export { atLeast, MIN_CLAUDE, parseVersion } from './semver.ts';
 export function animusVersion(): string {
   const manifest = JSON.parse(readFileSync(join(PLUGIN_ROOT, '.claude-plugin', 'plugin.json'), 'utf8')) as { version?: string };
   return manifest.version ?? '0.0.0';
+}
+
+/** The release that runs: the plugin's version, with the commit (and -dirty) when it runs from a git checkout. */
+export function factoryVersion(): string {
+  const head = tryGit(PLUGIN_ROOT, ['rev-parse', '--short', 'HEAD']);
+  if (!head) return animusVersion();
+  return `${animusVersion()}+${head}${tryGit(PLUGIN_ROOT, ['status', '--porcelain', '--', '.']) ? '-dirty' : ''}`;
 }
 
 /**

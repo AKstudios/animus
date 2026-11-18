@@ -35,6 +35,16 @@ test('a merged pull request records its time to merge and the commits a person a
   assert.equal(read().human_commits, 0);
 });
 
+test('a pull request records the lines a person added and removed after the job', async () => {
+  const { repo, run, facts, commit, read } = await mergedJob();
+  commit('src/feature.txt', 'one\ndone\nthree\nfour\nfive\n');
+  commit('src/other.txt', 'x\n');
+  const late = [run.started, new Date(Date.parse(run.ended) + 60_000).toISOString()];
+  const o = read({ ...facts, commits: late, head: git(repo, ['rev-parse', 'HEAD']) });
+  assert.deepEqual(o.human_lines, { added: 3, removed: 0 });
+  assert.deepEqual(read({ ...facts, commits: [run.started] }).human_lines, { added: 0, removed: 0 });
+});
+
 test('a later change to the lines a pull request added is rework; a change elsewhere, or after 30 days, is not', async () => {
   const elsewhere = await mergedJob();
   elsewhere.commit('src/app.txt', 'app, changed\n');
@@ -68,7 +78,7 @@ test('a closed pull request is settled and not asked about again; an open or new
 
 test('the five numbers are counted per job and split by task class', () => {
   const run = (job: string, type: string, over: Partial<Run> = {}) => ({ job, type, cost_usd: 1, ms: { total: 60_000 }, gates: [{ attempt: 1, ok: true }], ...over }) as Run;
-  const outcome = (pr: string, over: Partial<Outcomes[string]>) => ({ [pr]: { pr, job: '', state: 'MERGED', opened: '', human_commits: 0, reverted: false, reworked: false, checked: '', ...over } }) as Outcomes;
+  const outcome = (pr: string, over: Partial<Outcomes[string]>) => ({ [pr]: { pr, job: '', state: 'MERGED', opened: '', human_commits: 0, human_lines: { added: 0, removed: 0 }, reverted: false, reworked: false, checked: '', ...over } }) as Outcomes;
   const rows = numbers([
     run('a', 'feature', { pr: 'a' }),                                    // merged, untouched
     run('b', 'feature', { gates: [{ attempt: 1, ok: false }] as Run['gates'], outcome: 'needs-input' }),

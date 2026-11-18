@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
 import { gitFindings, orbitMarketplace } from '../src/doctor.ts';
-import { atLeast, compatible } from '../src/version.ts';
+import { animusVersion, atLeast, compatible, factoryVersion } from '../src/version.ts';
 import { write } from './helpers.ts';
 
 test('a client and Helix work together on the same major version, and before 1.0 on the same minor', () => {
@@ -37,4 +37,8 @@ test('doctor warns about git hooks and commit signing of the person\'s that woul
   const config: Record<string, string> = { 'core.hooksPath': '~/.githooks', 'commit.gpgsign': 'true' };
   assert.deepEqual(gitFindings((k) => config[k] ?? '').map((f) => [f.level, f.what]), [['warn', 'git hooks'], ['warn', 'commit signing']]);
   assert.deepEqual(gitFindings(() => ''), []);
+});
+
+test('the factory version is the plugin version, with the commit from a git checkout, never unknown', () => {
+  assert.match(factoryVersion(), new RegExp(`^${animusVersion().replaceAll('.', '\\.')}(\\+[0-9a-f]+(-dirty)?)?$`));
 });

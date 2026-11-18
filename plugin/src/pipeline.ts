@@ -13,12 +13,13 @@ import { resolveAfter, waitForMerged } from './after.ts';
 import type { Agent, AgentResult } from './agent.ts';
 import { describe, failsOnBase, gateReport, jobChecks, LATER_SLICE, runChecks, type CheckResult } from './gates.ts';
 import { commitAll, mainCheckout, matchesAny, touchedFiles } from './git.ts';
-import { appendRun, jobDir, toolsLog, saveProgress, saveState, writeJson, type Cause, type JobState, type Outcome, type Run, type Stage } from './log.ts';
+import { appendRun, jobDir, toolsLog, saveProgress, saveState, writeJson, type Cause, type FindingLog, type JobState, type Outcome, type Run, type Stage } from './log.ts';
 import { evidenceBranch, findPrByTitle, prBody, prState, type PrFind, type Evidence, type PrLookup, type Publish } from './pr.ts';
 import { admitFile, profileOnBase, refusal, type Admitted } from './admit.ts';
 import { loadProfile } from './profile.ts';
 import { describePlan, escalate, modelFor, PLUGIN_ROOT, raise, readPrompt, type Factory, type Plan, type Tier } from './profiles.ts';
 import { animusCommand, git, AnimusError, tryGit } from './proc.ts';
+import { factoryVersion } from './version.ts';
 import { asReport, asReview, blockers, criteriaList, listFindings, REPORT_SCHEMA, REVIEW_SCHEMA, type Finding, type Report, type Review } from './review.ts';
 import { loadJobSkills, saveJobSkills, type PersonalSkill } from './personal.ts';
 import { roleSkills } from './skills.ts';
@@ -90,12 +91,6 @@ export function jobOf(cwd: string): string | undefined {
   const dir = tryGit(cwd, ['rev-parse', '--absolute-git-dir']);
   if (!dir || !existsSync(join(dir, MARKER))) return undefined;
   return (JSON.parse(readFileSync(join(dir, MARKER), 'utf8')) as { job: string }).job;
-}
-
-export function factoryVersion(): string {
-  const head = tryGit(PLUGIN_ROOT, ['rev-parse', '--short', 'HEAD']);
-  if (!head) return 'unknown';
-  return tryGit(PLUGIN_ROOT, ['status', '--porcelain']) ? `${head}-dirty` : head;
 }
 
 /** Puts the worktree back to its last commit: what the gates or a reviewer changed is not the job's work. */
@@ -215,6 +210,7 @@ export async function runJob(opts: RunOptions, deps: Deps): Promise<Run> {
   let shots: { dir: string; files: string[]; urls?: Record<string, string>; branch?: string } | undefined;
   const found = new Map<string, Finding>();
   let actedOn = 0;
+  const findingLog: FindingLog[] = [];
   /** Gate fix rounds spent outside the current allowance: each slice has its own, and so have the finished branch and its catch-up. */
   let spentBefore = 0;
   /** The base commit the branch caught up to before the push, once it has. */
@@ -559,11 +555,14 @@ export async function runJob(opts: RunOptions, deps: Deps): Promise<Run> {
         writeJson(join(dir, `review-${round}.json`), said);
         for (const f of said.findings) found.set(`${f.file ?? ''}:${f.problem}`, f);
         open = blockers(said.findings);
+        const mine = said.findings.map((f): FindingLog => ({ round, severity: f.severity, ...(f.file ? { file: f.file } : {}), ...(f.line !== undefined ? { line: f.line } : {}), fate: open.includes(f) ? 'open' : 'not-acted-on' }));
+        findingLog.push(...mine);
         if (said.status === 'not-ready') throw new Stop('failed', `the reviewer says the work is not ready: ${said.summary}`, 'review', { blockers_left: open.length });
         log(`review ${round}: ${said.findings.length} finding(s), ${open.length} to fix`);
         if (!open.length) break;
         if (round > factory.limits.review_rounds) throw new Stop('failed', `the review still found ${open.length} blocker(s) after its fix round`, 'review', { blockers_left: open.length });
         actedOn += open.length;
+        for (const l of mine) if (l.fate === 'open') l.fate = 'fixed';
         await implementer(`review-fix-${round}`, reviewFixPrompt(open), plan.implement.tier);
         await gate();
       }
@@ -619,7 +618,7 @@ export async function runJob(opts: RunOptions, deps: Deps): Promise<Run> {
   run.head = head;
   run.protected_touched = touchedFiles(wt, ws.base, head).filter((f) => matchesAny(f, repoProfile.protected));
   const all = [...found.values()];
-  if (reviewRounds) run.review = { rounds: reviewRounds, findings: all.length, blockers: all.filter((f) => f.severity === 'blocker').length, acted_on: actedOn, open: outcome === 'failed' ? open.length : 0 };
+  if (reviewRounds) run.review = { rounds: reviewRounds, findings: all.length, blockers: all.filter((f) => f.severity === 'blocker').length, acted_on: actedOn, open: outcome === 'failed' ? open.length : 0, log: findingLog };
   const failed = outcome === 'failed';
   const cut = state.slicing?.slices ?? [];
   if (cut.length) run.slices = { by: state.sliced_by ?? 'script', planned: cut.length, done: cut.length > 1 ? state.slices_done?.length ?? 0 : failed || outcome === 'needs-input' ? 0 : 1, ...(planFallback ? { fallback: planFallback } : {}) };

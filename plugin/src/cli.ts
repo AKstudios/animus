@@ -14,7 +14,7 @@ import { addProject } from './project.ts';
 import { describe, failsOnBase, jobChecks, runChecks } from './gates.ts';
 import { githubUrl, mainCheckout, touchedFiles } from './git.ts';
 import { describeRuns, describeTools, jobDir, loadState, readRuns, readTools, type Run } from './log.ts';
-import { factoryVersion, jobOf, onPath, runJob, uiJobOf } from './pipeline.ts';
+import { jobOf, onPath, runJob, uiJobOf } from './pipeline.ts';
 import { describeNumbers, numbers, refreshOutcomes } from './outcomes.ts';
 import { prFacts, publish, pushEvidence } from './pr.ts';
 import { personalFor, readSkillsFile, skillsForRole, snapshotSkills, whereToRun, type PersonalSkill, type Where } from './personal.ts';
@@ -27,7 +27,7 @@ import * as helix from './remote.ts';
 import { describeSkills, grantsFor } from './skills.ts';
 import { criteriaSoFar, describeSlicing, planSlices } from './slices.ts';
 import { loadSpec } from './spec.ts';
-import { animusVersion } from './version.ts';
+import { animusVersion, factoryVersion } from './version.ts';
 import { describeShots, takeShots, uiDown, uiTarget, uiUp } from './ui.ts';
 import { basename, join } from 'node:path';
 

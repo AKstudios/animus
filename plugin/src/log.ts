@@ -57,6 +57,9 @@ export type Outcome = 'pr' | 'draft-pr' | 'dry-run' | 'needs-input' | 'failed';
 export const CAUSES = ['setup', 'admit', 'plan', 'needs-input', 'gates', 'review', 'budget', 'context', 'agent-error', 'cancelled', 'interrupted'] as const;
 export type Cause = (typeof CAUSES)[number];
 
+/** A review finding and what became of it: sent back and fixed, a blocker still open, or left for the person. */
+export type FindingLog = { round: number; severity: string; file?: string; line?: number; fate: 'fixed' | 'open' | 'not-acted-on' };
+
 /** One line of the run log. */
 export type Run = {
   job: string;
@@ -92,7 +95,7 @@ export type Run = {
   handoffs?: number;
   /** How the spec was cut: by the planner or by script, into how many slices, and how many passed their gates. */
   slices?: { by: 'planner' | 'script'; planned: number; done: number; fallback?: string };
-  review: { rounds: number; findings: number; blockers: number; acted_on: number; open: number } | null;
+  review: { rounds: number; findings: number; blockers: number; acted_on: number; open: number; log?: FindingLog[] } | null;
   outcome: Outcome;
   /** Set on every run that did not end as a pull request. */
   cause?: Cause;
