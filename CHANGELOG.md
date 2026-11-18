@@ -13,6 +13,16 @@ clients with how to update.
   `/helix` is no longer answered. Update the Slack app from
   helix/deploy/slack/manifest.yaml and reinstall it to the workspace. The
   `helix` CLI is unchanged.
+- Helix reads each project's issue and pull request comments about once a
+  minute, from the moment it first sees the project. A person's `/animus <text>`
+  on an issue gets a 👀 reaction and a draft spec as a comment (the spec in a
+  `markdown` block, with the replies it understands), written from the issue and
+  the comment, whether or not Slack is set up. A second `/animus <changes>` while
+  the draft is open posts the revised draft as a new comment. A comment more
+  than a day old when first seen is answered as too old; on a pull request,
+  `/animus` replies that `fix` is not available yet. Comments by people not on
+  the Helix, by Animus itself, or on repositories that are not projects are
+  ignored. `submit`, `discard` and job updates on the issue come later.
 
 ## 0.4.7 (2026-11-18)
 

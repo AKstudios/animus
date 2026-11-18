@@ -10,6 +10,7 @@ import { checkDraft, fetchReferences, findLinks, GITHUB_ITEM, GITHUB_VARS, type 
 import { AnimusError } from '../../plugin/src/proc.ts';
 import { loadFactory } from '../../plugin/src/profiles.ts';
 import { personEnv, type Config } from './config.ts';
+import { commentAs, draftComment } from './github-comments.ts';
 import { freshToken, GITHUB, githubRepo, reachableRepos, type GitHubUrls } from './github-app.ts';
 import type { Transport } from './slack-api.ts';
 import type { Draft, Store } from './store.ts';
@@ -32,6 +33,8 @@ const animusDraft: DraftLaunch = (draft, repoDir) => ({
 export type Drafts = {
   /** Starts a draft from what a person wrote; what to tell them privately when it cannot start. */
   start(person: string, user: string, channel: string, text: string): Promise<string | undefined>;
+  /** A person's `/animus <text>` on an issue of a project: a new draft, or a revision of their open draft on that issue; what to tell them on the issue when it cannot start. */
+  github(person: string, on: { project: string; repo: string; number: number; url: string }, text: string): Promise<string | undefined>;
   /** The projects a person may submit to: the ones a draft offers them. */
   projects(person: string): Promise<string[]>;
   /** A press of a project in a draft's list (PICK); what to tell the presser privately, if anything. */
@@ -63,13 +66,18 @@ const draftBlocks = (id: number, text: string) => [
 const withoutGitHub = (env: Record<string, string | undefined>): Record<string, string> =>
   Object.fromEntries(Object.entries(env).filter((e): e is [string, string] => e[1] !== undefined && !(GITHUB_VARS as readonly string[]).includes(e[0])));
 
-export function draftRunner(transport: Pick<Transport, 'post' | 'upload' | 'update' | 'deleteFile'>, opts: {
+/** A Helix without the Slack bot still drafts for GitHub comments; only a Slack draft needs this. */
+const refuse = () => Promise.reject(new AnimusError('the Slack bot is not running on this Helix'));
+const noSlack = { post: refuse, upload: refuse, update: refuse, deleteFile: refuse };
+
+export function draftRunner(slack: Pick<Transport, 'post' | 'upload' | 'update' | 'deleteFile'> | undefined, opts: {
   store: Store; config: Config; home: string; launch?: DraftLaunch; github?: GitHubUrls;
   /** The bot's token, which fetches Slack files a message links to. */
   slackToken?: string;
   fetch?: Fetch; say?: (line: string) => void;
 }): Drafts {
   const { store, config, home } = opts;
+  const transport = slack ?? noSlack;
   const launch = opts.launch ?? animusDraft;
   const github = opts.github ?? GITHUB;
   const say = opts.say ?? (() => {});
@@ -113,6 +121,14 @@ export function draftRunner(transport: Pick<Transport, 'post' | 'upload' | 'upda
     });
   };
 
+  /** Says something in a draft's thread, or as a comment on its issue as its person; a comment that cannot be posted is logged, not thrown. */
+  const tell = async (draft: Draft, text: string): Promise<void> => {
+    if (!draft.github) { await transport.post(draft.channel, text, draft.ts); return; }
+    try {
+      await commentAs(store, config, github, draft.person, draft.github.repo, draft.github.issue, text);
+    } catch (err) { say(`draft ${draft.id}: could not comment on ${draft.github.repo}#${draft.github.issue}: ${(err as Error).message}`); }
+  };
+
   /** Whether a draft is still the one a session started on: Discard or expiry may close it meanwhile. */
   const stillRunning = (draft: Draft) => store.draft(draft.id)?.state === 'running';
 
@@ -120,7 +136,7 @@ export function draftRunner(transport: Pick<Transport, 'post' | 'upload' | 'upda
     const running: Draft = { ...draft, state: 'running' };
     store.saveDraft(running);
     // A revision keeps the draft it revises when its session fails.
-    const revising = Boolean(draft.post);
+    const revising = Boolean(draft.post ?? draft.github?.comment);
     let text: string;
     try {
       const project = store.project(draft.project ?? '');
@@ -142,11 +158,12 @@ export function draftRunner(transport: Pick<Transport, 'post' | 'upload' | 'upda
       const reason = (err as Error).message;
       if (revising) {
         store.saveDraft({ ...running, state: 'ready', reason });
-        await transport.post(draft.channel, `The draft could not be revised: ${reason}. It is as it was: reply again, Submit or Discard.`, draft.ts);
+        await tell(draft, `The draft could not be revised: ${reason}. It is as it was: ${draft.github ? 'comment `/animus` again, `/animus submit` or `/animus discard`' : 'reply again, Submit or Discard'}.`);
         return;
       }
       store.saveDraft({ ...running, state: 'failed', reason });
       const said = `The draft could not be written: ${reason}`;
+      if (draft.github) { await tell(draft, `${said}. Comment \`/animus discard\` to close it.`); return; }
       await transport.post(draft.channel, said, draft.ts, [
         { type: 'section', text: { type: 'mrkdwn', text: said } },
         { type: 'actions', elements: [button(DISCARD, String(draft.id), 'Discard')] },
@@ -154,6 +171,13 @@ export function draftRunner(transport: Pick<Transport, 'post' | 'upload' | 'upda
       return;
     }
     if (!stillRunning(draft)) return;
+    if (draft.github) {
+      // A revision is a new comment, so the issue shows how the draft changed; the latest one is what submit reads.
+      const comment = await commentAs(store, config, github, draft.person, draft.github.repo, draft.github.issue, draftComment(text));
+      const { reason: _, ...rest } = running;
+      store.saveDraft({ ...rest, state: 'ready', touched: now(), github: { ...draft.github, comment } });
+      return;
+    }
     const blocks = draftBlocks(draft.id, text);
     // A revision replaces the draft's post and its file, so the thread holds one draft.
     const post = draft.post ?? await transport.post(draft.channel, text, draft.ts, blocks);
@@ -181,7 +205,7 @@ export function draftRunner(transport: Pick<Transport, 'post' | 'upload' | 'upda
     tick();
     if (store.draft(draft.id)?.state !== 'queued') return;
     const ahead = running.size + store.draftsIn('queued').filter((d) => d.id < draft.id).length;
-    await transport.post(draft.channel, `Waiting for a draft slot: ${ahead} draft${ahead === 1 ? ' is' : 's are'} ahead of this one.`, draft.ts);
+    await tell(draft, `Waiting for a draft slot: ${ahead} draft${ahead === 1 ? ' is' : 's are'} ahead of this one.`);
   }
 
   /** Closes a draft as submitted or discarded: nothing of it stays but its row. */
@@ -202,10 +226,28 @@ export function draftRunner(transport: Pick<Transport, 'post' | 'upload' | 'upda
   for (const draft of store.draftsIn('running')) store.saveDraft({ ...draft, state: 'queued' });
   tick();
 
-  return {
+  const openOf = (person: string) => OPEN.flatMap((s) => store.draftsIn(s)).filter((d) => d.person === person);
+
+  const drafts: Drafts = {
     projects: choices,
+    async github(person, on, text) {
+      const open = openOf(person);
+      // One open draft per person per issue: more text revises it.
+      const mine = open.find((d) => d.github?.repo === on.repo && d.github.issue === on.number);
+      if (mine) return drafts.reply(person, mine, text);
+      if (open.length >= MAX_OPEN) return `You have ${open.length} open drafts: submit or discard one before you start another.`;
+      const draft = store.addDraft({ state: 'queued', person, channel: '', ts: '', project: on.project, folder: '', created: now(), touched: now(), github: { repo: on.repo, issue: on.number } });
+      draft.folder = join(home, 'drafts', String(draft.id));
+      mkdirSync(draft.folder, { recursive: true });
+      // The issue's link is a reference like any other: a script fetches it with the person's token before the session starts.
+      writeFileSync(join(draft.folder, 'message.md'), `${text}\n\n${on.url}\n`);
+      store.saveDraft(draft);
+      store.record(person, 'drafted', { draft: draft.id, project: on.project });
+      await enqueue(draft);
+      return undefined;
+    },
     async start(person, user, channel, text) {
-      const open = OPEN.flatMap((s) => store.draftsIn(s)).filter((d) => d.person === person).length;
+      const open = openOf(person).length;
       if (open >= MAX_OPEN) return `You have ${open} open drafts: submit or discard one before you start another.`;
       const project = projectFor(text, channel);
       const names = project ? [] : await choices(person);
@@ -288,8 +330,9 @@ export function draftRunner(transport: Pick<Transport, 'post' | 'upload' | 'upda
       for (const draft of (['picking', 'ready', 'failed'] as const).flatMap((s) => store.draftsIn(s))) {
         if (Date.parse(draft.touched) > before) continue;
         close(draft, 'discarded');
-        await transport.post(draft.channel, `This draft was discarded after ${EXPIRE_DAYS} days untouched.`, draft.ts);
+        await tell(draft, `This draft was discarded after ${EXPIRE_DAYS} days untouched.`);
       }
     },
   };
+  return drafts;
 }

@@ -95,12 +95,24 @@ export type SlackThread = { channel: string; ts: string };
  * why is in reason; submitted: queued as job; discarded: by its person, or
  * after 7 days untouched. folder: message.md, references/, draft.md and the
  * reply.md to revise it with (plugin/src/draft.ts), gone once it is closed.
+ * github: a draft that began as a /animus comment on an issue, not in Slack:
+ * its repository (owner/name), the issue's number, and the id of its latest
+ * draft comment once posted; its channel and ts are then empty.
  */
 export type Draft = {
   id: number; state: 'picking' | 'queued' | 'running' | 'ready' | 'failed' | 'submitted' | 'discarded';
   person: string; channel: string; ts: string; project?: string; folder: string;
   created: string; touched: string; reason?: string; post?: string; file?: string; job?: number;
+  github?: { repo: string; issue: number; comment?: number };
 };
+
+/**
+ * How far Helix has read a project's GitHub comments: position is the creation
+ * time of the newest comment it handled (when the project was first watched,
+ * that moment), and handled the ids of the comments created at exactly that
+ * time, which `since` on update time would bring back.
+ */
+export type CommentWatch = { position: string; handled: number[] };
 
 export type Store = {
   add(job: Omit<HelixJob, 'id'>): HelixJob;
@@ -152,6 +164,9 @@ export type Store = {
   /** The draft whose thread this is. */
   draftOfThread(channel: string, ts: string): Draft | undefined;
   saveDraft(draft: Draft): void;
+  /** Where reading a project's GitHub comments stands; none until it is first watched. */
+  commentWatch(project: string): CommentWatch | undefined;
+  setCommentWatch(project: string, watch: CommentWatch): void;
   /** The project a channel's drafts are for when their message links no issue: /helix project. */
   channelProject(channel: string): string | undefined;
   setChannelProject(channel: string, project: string): void;
@@ -183,6 +198,7 @@ export function openStore(file: string): Store {
   db.exec('create index if not exists activity_who on activity (who, id)');
   db.exec('create table if not exists drafts (id integer primary key autoincrement, state text not null, data text not null)');
   db.exec('create table if not exists channel_projects (channel text primary key, project text not null)');
+  db.exec('create table if not exists comment_watch (project text primary key, data text not null)');
   const data = <T>(r: unknown): T => JSON.parse((r as { data: string }).data) as T;
   const asInvite = (r: unknown): Invite => JSON.parse((r as { data: string }).data) as Invite;
   const live = (i: Invite, at: Date) => Date.parse(i.expires) > at.getTime();
@@ -234,7 +250,13 @@ export function openStore(file: string): Store {
     project: (name) => { const r = db.prepare('select data from projects where name = ?').get(name); return r ? data<Project>(r) : undefined; },
     projects: () => db.prepare('select data from projects order by name').all().map((r) => data<Project>(r)),
     putProject(p) { db.prepare('insert into projects (name, data) values (?, ?) on conflict (name) do update set data = excluded.data').run(p.name, JSON.stringify(p)); },
-    dropProject: (name) => Number(db.prepare('delete from projects where name = ?').run(name).changes) > 0,
+    dropProject(name) {
+      // A project added again is watched from then, not from where the old one was read to.
+      db.prepare('delete from comment_watch where project = ?').run(name);
+      return Number(db.prepare('delete from projects where name = ?').run(name).changes) > 0;
+    },
+    commentWatch: (project) => { const r = db.prepare('select data from comment_watch where project = ?').get(project); return r ? data<CommentWatch>(r) : undefined; },
+    setCommentWatch(project, w) { db.prepare('insert into comment_watch (project, data) values (?, ?) on conflict (project) do update set data = excluded.data').run(project, JSON.stringify(w)); },
     upgrade: (tag) => { const r = db.prepare('select data from upgrades where tag = ?').get(tag); return r ? data<Upgrade>(r) : undefined; },
     putUpgrade(u) { db.prepare('insert into upgrades (tag, data) values (?, ?) on conflict (tag) do update set data = excluded.data').run(u.tag, JSON.stringify(u)); },
     addDraft(d) {

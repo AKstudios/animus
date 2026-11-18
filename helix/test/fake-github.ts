@@ -23,6 +23,17 @@ export type FakeGitHub = GitHubUrls & {
   permissions: Record<string, Record<string, string>>;
   /** The repositories (owner/name) each login has access to; a login left out has access to every installed one. */
   access: Record<string, string[]>;
+  /** An issue (or pull request) on owner/name, as the issue and comment routes serve it. */
+  addIssue(repo: string, number: number, issue: { title: string; body: string; pull?: boolean }): void;
+  /** A comment by a login on an issue; created defaults to now. updated is when it was last edited, by default created. Returns its id. */
+  addComment(repo: string, number: number, login: string, body: string, created?: string): number;
+  /** The login edits a comment: its update time, which `since` goes by, moves to at (default now). */
+  edit(id: number, at?: string): void;
+  /** Every comment, including those the API was asked to post. */
+  comments: { id: number; repo: string; number: number; login: string; body: string; created_at: string; updated_at: string }[];
+  /** The comments and reactions posted through the API, as the token's login. */
+  posted: { repo: string; number: number; login: string; body: string }[];
+  reactions: { repo: string; comment: number; login: string; content: string }[];
   close(): Promise<void>;
 };
 
@@ -43,8 +54,18 @@ export async function fakeGitHub(opts: { clientId?: string; deviceFlow?: boolean
     return { access_token: `ghu_${issued}`, expires_in: 28800, refresh_token: `ghr_${issued}`, refresh_token_expires_in: 15811200, token_type: 'bearer', scope: '' };
   };
   const ids: Record<string, number> = {};
+  const issues = new Map<string, { title: string; body: string; pull?: boolean }>();
+  const second = () => `${new Date().toISOString().slice(0, 19)}Z`;
   const fake: FakeGitHub = {
     web: '', api: '', calls: [], slowDowns: 0, installed: {}, access: {}, permissions: {},
+    comments: [], posted: [], reactions: [],
+    addIssue: (repo, number, issue) => { issues.set(`${repo}#${number}`, issue); },
+    addComment(repo, number, login, body, created = second()) {
+      const id = fake.comments.length + 1;
+      fake.comments.push({ id, repo, number, login, body, created_at: created, updated_at: created });
+      return id;
+    },
+    edit(id, at = second()) { fake.comments.find((c) => c.id === id)!.updated_at = at; },
     approve: (userCode, login) => Object.assign(devices.find((d) => d.user === userCode)!, { state: 'approved', login }),
     deny: (userCode) => { devices.find((d) => d.user === userCode)!.state = 'denied'; },
     expire: (accessToken) => { access.delete(accessToken); },
@@ -82,9 +103,49 @@ export async function fakeGitHub(opts: { clientId?: string; deviceFlow?: boolean
     return [200, issue(device.login!)];
   };
 
-  const api = (path: string, token: string): [number, unknown] => {
+  const shown = (c: FakeGitHub['comments'][number]) => ({
+    id: c.id, body: c.body, user: { login: c.login }, created_at: c.created_at, updated_at: c.updated_at,
+    html_url: `https://github.com/${c.repo}/${issues.get(`${c.repo}#${c.number}`)?.pull ? 'pull' : 'issues'}/${c.number}#issuecomment-${c.id}`,
+  });
+
+  /** The repository routes: issues, their comments, and comment reactions. */
+  const repoApi = (method: string, path: string, login: string, body: Record<string, string>): [number, unknown] | undefined => {
+    const m = /^\/repos\/([^/]+)\/([^/]+)\/issues(?:\/(.*))?$/.exec(new URL(path, 'http://x').pathname);
+    if (!m) return undefined;
+    const repo = `${m[1]}/${m[2]}`;
+    if (!reaches(login, m[1]!, m[2]!)) return [404, { message: 'Not Found' }];
+    const rest = m[3] ?? '';
+    const url = new URL(path, 'http://x');
+    if (method === 'GET' && rest === 'comments') {
+      const since = Date.parse(url.searchParams.get('since') ?? '1970-01-01');
+      const per = Number(url.searchParams.get('per_page') ?? 30);
+      const page = Number(url.searchParams.get('page') ?? 1);
+      const all = fake.comments.filter((c) => c.repo === repo && Date.parse(c.updated_at) >= since)
+        .sort((a, b) => Date.parse(a.created_at) - Date.parse(b.created_at) || a.id - b.id);
+      return [200, all.slice((page - 1) * per, page * per).map(shown)];
+    }
+    const reaction = /^comments\/(\d+)\/reactions$/.exec(rest);
+    if (method === 'POST' && reaction) {
+      fake.reactions.push({ repo, comment: Number(reaction[1]), login, content: body.content! });
+      return [201, { content: body.content }];
+    }
+    const issue = /^(\d+)(\/comments)?$/.exec(rest);
+    const found = issue && issues.get(`${repo}#${issue[1]}`);
+    if (!found) return [404, { message: 'Not Found' }];
+    const number = Number(issue[1]);
+    if (method === 'POST' && issue[2]) {
+      fake.posted.push({ repo, number, login, body: body.body! });
+      return [201, shown(fake.comments[fake.addComment(repo, number, login, body.body!) - 1]!)];
+    }
+    if (issue[2]) return [200, fake.comments.filter((c) => c.repo === repo && c.number === number).map(shown)];
+    return [200, { title: found.title, body: found.body, state: 'open', html_url: `https://github.com/${repo}/${found.pull ? 'pull' : 'issues'}/${number}`, user: { login: 'someone' }, ...(found.pull ? { pull_request: {} } : {}) }];
+  };
+
+  const api = (method: string, path: string, token: string, body: Record<string, string>): [number, unknown] => {
     const login = access.get(token);
     if (!login) return [401, { message: 'Bad credentials' }];
+    const repoRoute = repoApi(method, path, login, body);
+    if (repoRoute) return repoRoute;
     const url = new URL(path, 'http://x');
     if (url.pathname === '/user') return [200, { login, id: ids[login] ??= 1000 + Object.keys(ids).length }];
     if (url.pathname === '/user/installations') {
@@ -109,7 +170,7 @@ export async function fakeGitHub(opts: { clientId?: string; deviceFlow?: boolean
       fake.calls.push(`${req.method} ${req.url!.split('?')[0]}`);
       const body = (req.headers['content-type'] ?? '').includes('json') ? JSON.parse(raw || '{}') as Record<string, string> : Object.fromEntries(new URLSearchParams(raw));
       const [status, answer] = req.url!.startsWith('/api/')
-        ? api(path, (req.headers.authorization ?? '').replace(/^(Bearer|token) /, ''))
+        ? api(req.method!, path, (req.headers.authorization ?? '').replace(/^(Bearer|token) /, ''), body)
         : oauth(path, body);
       res.writeHead(status, { 'content-type': 'application/json' });
       res.end(JSON.stringify(answer));
