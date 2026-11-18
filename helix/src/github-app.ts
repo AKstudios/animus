@@ -102,16 +102,31 @@ export async function githubUser(token: string, urls = GITHUB): Promise<{ login:
  * every installation they can see that they have access to. slug is the
  * app's, for its installation link, when they can see any installation.
  */
-export async function reachableRepos(token: string, urls = GITHUB): Promise<{ repos: string[]; slug?: string }> {
-  const installs = (await pages('/user/installations', 'installations', token, urls)) as { id: number; app_slug?: string }[];
+export async function reachableRepos(token: string, urls = GITHUB): Promise<{ repos: string[]; slug?: string; missing: Record<string, string[]> }> {
+  const installs = (await pages('/user/installations', 'installations', token, urls)) as { id: number; app_slug?: string; permissions?: Record<string, string> }[];
   const repos: string[] = [];
+  const missing: Record<string, string[]> = {};
   for (const inst of installs) {
     const listed = (await pages(`/user/installations/${inst.id}/repositories`, 'repositories', token, urls)) as { full_name: string }[];
     repos.push(...listed.map((r) => r.full_name));
+    const lacks = JOB_PERMISSIONS.filter((p) => inst.permissions?.[p] !== 'write');
+    if (lacks.length) for (const r of listed) missing[r.full_name.toLowerCase()] = lacks;
   }
   const slug = installs.find((i) => i.app_slug)?.app_slug;
-  return { repos, ...(slug ? { slug } : {}) };
+  return { repos, ...(slug ? { slug } : {}), missing };
 }
+
+/**
+ * What a job needs the app to have, as write, on its repository's installation:
+ * contents to push its branch, pull_requests to open its pull request. An
+ * installation keeps the permissions it was installed with until its owner
+ * accepts the app's new ones, so each installation is read, not the app.
+ */
+export const JOB_PERMISSIONS = ['contents', 'pull_requests'] as const;
+
+/** What to tell a person whose repository's installation lacks some of JOB_PERMISSIONS. */
+export const permissionsAdvice = (full: string, lacks: readonly string[]) =>
+  `Helix's GitHub App may not write ${lacks.map((p) => p.replace('_', ' ')).join(' or ')} in ${full}, so its jobs could not ${lacks.includes('contents') ? 'push' : 'open their pull requests'}: the app needs Contents and Pull requests set to Read and write, and ${full.split('/')[0]} has to accept them (Settings, GitHub Apps, the app, Review request)`;
 
 /** Every page of a list GitHub pages. */
 async function pages(path: string, key: string, token: string, urls: GitHubUrls): Promise<unknown[]> {
@@ -210,6 +225,8 @@ export const beforeJob = (store: Store, config: Pick<Config, 'github'>, urls = G
   const full = githubRepo(store.project(repo)?.url ?? '');
   if (!token || !full) return;
   const reach = await reachableRepos(token, urls);
+  const lacks = reach.missing[full.toLowerCase()];
+  if (lacks) throw new AnimusError(permissionsAdvice(full, lacks));
   if (reach.repos.some((r) => r.toLowerCase() === full.toLowerCase())) return;
   throw new AnimusError(`Helix's GitHub App cannot reach ${full} for you: ask its owner to install the app on it${reach.slug ? ` at ${installLink(reach.slug, urls)}` : ''}`);
 };

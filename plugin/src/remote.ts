@@ -148,7 +148,7 @@ export type DeviceStart = { device_code: string; user_code: string; verification
 export const joinDevice = (url: string, code: string) => request<DeviceStart>('POST', url, '/join/device', undefined, { code });
 
 /** A project Helix's GitHub App cannot reach for the person, and the link its owner installs the app with. */
-export type Unreachable = { project: string; owner: string; install?: string };
+export type Unreachable = { project: string; owner: string; install?: string; missing?: string[] };
 export type Joined = { name: string; token: string; github?: string; cannot_push?: string[]; unreachable?: Unreachable[] };
 
 /**

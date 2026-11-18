@@ -55,7 +55,7 @@ export type JoinGitHub = { clientId: string; urls?: GitHubUrls; wait?: (seconds:
 export type DeviceStart = { device_code: string; user_code: string; verification_uri: string; expires_in: number };
 
 /** A project Helix's app cannot reach for the person, and where its owner installs the app (unknown while the app reaches nothing of theirs). */
-export type Unreachable = { project: string; owner: string; install?: string };
+export type Unreachable = { project: string; owner: string; install?: string; missing?: string[] };
 
 export type Joined = { name: string; token: string; github?: string; cannot_push: string[]; unreachable?: Unreachable[] };
 
@@ -137,8 +137,10 @@ async function unreachable(store: Store, github: JoinGitHub, token: string): Pro
   let reach: Awaited<ReturnType<typeof reachableRepos>>;
   try { reach = await reachableRepos(token, github.urls); } catch (err) { return refusedBy(err); }
   const repos = new Set(reach.repos.map((r) => r.toLowerCase()));
-  return store.projects().filter((p) => p.state === 'ready').flatMap((p) => {
+  return store.projects().filter((p) => p.state === 'ready').flatMap((p): Unreachable[] => {
     const full = githubRepo(p.url);
+    const lacks = full ? reach.missing[full.toLowerCase()] : undefined;
+    if (full && lacks) return [{ project: p.name, owner: full.split('/')[0]!, missing: lacks }];
     if (!full || repos.has(full.toLowerCase())) return [];
     return [{ project: p.name, owner: full.split('/')[0]!, ...(reach.slug ? { install: installLink(reach.slug, github.urls) } : {}) }];
   });

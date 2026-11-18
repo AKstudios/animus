@@ -8,6 +8,12 @@ clients with how to update.
 
 ## Unreleased
 
+- A Helix job for a repository whose GitHub App installation lacks Contents
+  or Pull requests write is refused before it starts, saying what the app
+  needs and who accepts it, instead of doing all its work and failing to open
+  its pull request. `animus join` lists such projects apart from those the app
+  does not reach. The app's logo is in `helix/deploy/github/`.
+
 ## 0.4.3 (2026-11-18)
 
 - Helix no longer ends a running job's GitHub token. GitHub ends an access

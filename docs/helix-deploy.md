@@ -70,11 +70,19 @@ written `<org>` below.
      but it.
    - **Webhook**: untick **Active**. Helix takes no events from GitHub.
    - **Repository permissions**: Contents read and write, Pull requests read
-     and write; Metadata read-only comes with them. Nothing else.
+     and write; Metadata read-only comes with them. Nothing else: Workflows in
+     particular would let a job change CI, which the factory keeps for people.
+     A permission changed later reaches an installation only once its owner
+     accepts it (its **Settings**, **GitHub Apps**, the app, **Review
+     request**); until then Helix refuses jobs for its repositories, saying so,
+     and `animus join` lists them.
+   - **Logo**: [helix/deploy/github/logo.png](../helix/deploy/github/logo.png).
    - **Where can this GitHub App be installed?**: **Any account**, so
      projects outside `<org>` can install it too.
 2. **Create GitHub App**. On its page, under **About**, copy the **Client
-   ID** (`Iv23…`). Helix needs no client secret and no private key.
+   ID** (`Iv23…`). Helix needs no client secret and no private key, but
+   GitHub will not install an app without one: generate one, and keep it off
+   the Helix machine (a password manager, or delete it).
 3. **Install App**, and install it on `<org>` with the repositories Helix
    takes jobs for (or all of them). The owner of any other project installs
    it on theirs from the app's public page,

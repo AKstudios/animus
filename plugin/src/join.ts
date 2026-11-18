@@ -135,10 +135,19 @@ export async function githubLogin(io = { say, open: openPage }): Promise<string>
 
 /** The projects Helix's app cannot reach for the person, each with the link its owner installs the app with. */
 export function describeUnreachable(list: readonly helix.Unreachable[]): string {
+  const absent = list.filter((u) => !u.missing);
+  const short = list.filter((u) => u.missing);
   return [
-    'Helix\'s GitHub App cannot reach these projects for you (it is not installed on them, or you have no access), so Helix refuses your jobs there until it can.',
-    'Ask each one\'s owner to install the app on it:',
-    ...list.map((u) => `  ${u.project} (${u.owner}): ${u.install ?? 'ask whoever runs Helix for the app\'s installation link'}`),
+    ...(absent.length ? [
+      'Helix\'s GitHub App cannot reach these projects for you (it is not installed on them, or you have no access), so Helix refuses your jobs there until it can.',
+      'Ask each one\'s owner to install the app on it:',
+      ...absent.map((u) => `  ${u.project} (${u.owner}): ${u.install ?? 'ask whoever runs Helix for the app\'s installation link'}`),
+    ] : []),
+    ...(short.length ? [
+      'Helix\'s GitHub App is installed on these projects without write access to what jobs need, so Helix refuses your jobs there until it has it.',
+      'The app needs Contents and Pull requests set to Read and write, and each owner has to accept them (Settings, GitHub Apps, the app, Review request):',
+      ...short.map((u) => `  ${u.project} (${u.owner}): lacks ${u.missing!.map((p) => p.replace('_', ' ')).join(' and ')}`),
+    ] : []),
   ].join('\n');
 }
 

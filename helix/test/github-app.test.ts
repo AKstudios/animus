@@ -419,3 +419,37 @@ test('renewing for running jobs renews only a running job\'s person, and only on
   assert.deepEqual([withHoursLeft, nearEnd, idle], ['ghu_1', 'ghu_2', 'ghu_2']);
   assert.deepEqual(said, []);
 });
+
+// Protects: the jobs that did all their work and then could not open their pull request. Fails when: a job starts for a repository whose installation lacks Pull requests (or Contents) write, or the reason does not say what the app needs and who accepts it.
+test('a job for a repository whose installation cannot write pull requests fails before it starts, saying what the app needs', async () => {
+  const github = await fakeGitHub();
+  const h = await helixWithApp(github);
+  await joinCleo(h);
+  github.permissions = { acme: { contents: 'write', metadata: 'read' } };
+
+  const job = await cleosJob(h, 'app');
+  h.stop();
+  await github.close();
+
+  assert.equal(h.launched.length, 0);
+  assert.equal(job.reason, 'Helix\'s GitHub App may not write pull requests in acme/app, so its jobs could not open their pull requests: the app needs Contents and Pull requests set to Read and write, and acme has to accept them (Settings, GitHub Apps, the app, Review request)');
+});
+
+// Protects: join telling the person before their first job. Fails when: a project whose installation lacks pull requests write is not named at the end of join, or is named as not installed.
+test('join names a project whose installation lacks pull requests write, apart from those the app does not reach', async () => {
+  const github = await fakeGitHub();
+  github.permissions = { acme: { contents: 'write', metadata: 'read' } };
+  const h = await helixWithApp(github);
+  const { code } = invite(h.store, 'cleo');
+  h.approver = { code: 'WDJB-MJH1', login: 'cleo-gh' };
+  const io = terminal();
+
+  const joined = await signInWithGitHub(h.url, code, 'sk-ant-oat01-cleo', undefined, io);
+  h.stop();
+  await github.close();
+
+  assert.deepEqual(joined.unreachable?.map((u) => [u.project, u.missing ?? null]), [['app', ['pull_requests']], ['site', null]]);
+  const said = describeUnreachable(joined.unreachable!);
+  assert.match(said, /installed on these projects without write access to what jobs need[\s\S]*\n {2}app \(acme\): lacks pull requests/);
+  assert.match(said, /cannot reach these projects for you[\s\S]*\n {2}site \(AKstudios\): /);
+});

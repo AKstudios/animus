@@ -19,6 +19,8 @@ export type FakeGitHub = GitHubUrls & {
   slowDowns: number;
   /** The repositories the app is installed on, by owner. */
   installed: Record<string, string[]>;
+  /** Each installation's permissions, by owner; one left out has contents and pull requests write. */
+  permissions: Record<string, Record<string, string>>;
   /** The repositories (owner/name) each login has access to; a login left out has access to every installed one. */
   access: Record<string, string[]>;
   close(): Promise<void>;
@@ -42,7 +44,7 @@ export async function fakeGitHub(opts: { clientId?: string; deviceFlow?: boolean
   };
   const ids: Record<string, number> = {};
   const fake: FakeGitHub = {
-    web: '', api: '', calls: [], slowDowns: 0, installed: {}, access: {},
+    web: '', api: '', calls: [], slowDowns: 0, installed: {}, access: {}, permissions: {},
     approve: (userCode, login) => Object.assign(devices.find((d) => d.user === userCode)!, { state: 'approved', login }),
     deny: (userCode) => { devices.find((d) => d.user === userCode)!.state = 'denied'; },
     expire: (accessToken) => { access.delete(accessToken); },
@@ -86,7 +88,7 @@ export async function fakeGitHub(opts: { clientId?: string; deviceFlow?: boolean
     const url = new URL(path, 'http://x');
     if (url.pathname === '/user') return [200, { login, id: ids[login] ??= 1000 + Object.keys(ids).length }];
     if (url.pathname === '/user/installations') {
-      const all = installations(login).map((i) => ({ id: i.id, app_slug: 'animus-helix', account: { login: i.owner } }));
+      const all = installations(login).map((i) => ({ id: i.id, app_slug: 'animus-helix', account: { login: i.owner }, permissions: fake.permissions[i.owner] ?? { contents: 'write', metadata: 'read', pull_requests: 'write' } }));
       return [200, { total_count: all.length, installations: all }];
     }
     const m = /^\/user\/installations\/(\d+)\/repositories$/.exec(url.pathname);
