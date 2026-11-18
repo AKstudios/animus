@@ -8,6 +8,8 @@ clients with how to update.
 
 ## Unreleased
 
+## 0.5.0 (2026-11-18)
+
 - **Breaking:** Slack's command is `/animus` and its bot is Animus, not
   `/helix` and Helix: every subcommand and `@Animus <text>` work as before, and
   `/helix` is no longer answered. Update the Slack app from
