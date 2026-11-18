@@ -299,6 +299,10 @@ a.tag:hover { opacity: 1; background: color-mix(in srgb, currentColor 22%, trans
 
 @media (max-width: 640px) {
   .head, .offline { padding-left: 16px; padding-right: 16px; }
+  .head { gap: 8px 16px; }
+  body { padding-bottom: 56px; overflow-x: hidden; }
+  .tabs { position: fixed; left: 0; right: 0; bottom: 0; z-index: 5; margin: 0; gap: 0; flex-wrap: nowrap; background: var(--head); border-top: 1px solid var(--line); }
+  .tabs a { flex: 1 1 0; display: flex; align-items: center; justify-content: center; min-height: 52px; padding: 0; border-radius: 0; font-size: 13px; }
   .side { padding: 0 16px 32px; }
   .main { padding: 20px 16px 32px; }
   .done-row { grid-template-columns: minmax(0, 1fr); }
