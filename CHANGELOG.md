@@ -12,6 +12,10 @@ clients with how to update.
   folder, read by the script from the session's transcript when it ends, and
   the run log's agent entries gain `tools: { calls, errors, by_tool }`.
   `animus tools <job>` (and `--json`) shows the sessions and every call.
+- A gate check that fails is run once more on the same tree before the work
+  is sent back. Passing then, it counts as passed, the run log marks it
+  `flaky: true` in that gate run, and the job says `flaky: <check> failed,
+  then passed on the same code`.
 
 - **Breaking:** a spec's header is held to its keys. A key other than `title`,
   `size`, `difficulty`, `type`, `base`, `ui`, `after` and `design` (or, under

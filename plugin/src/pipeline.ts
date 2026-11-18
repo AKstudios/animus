@@ -322,13 +322,24 @@ export async function runJob(opts: RunOptions, deps: Deps): Promise<Run> {
       const t = Date.now();
       lastGates = await timed('gates', () => {
         const results = runChecks(wt, checks, job);
+        // A failed check runs once more on the same tree: passing then, it was flaky and counts as passed.
+        const failed = results.filter((r) => !r.ok);
+        if (failed.length) {
+          restore(wt);
+          const again = runChecks(wt, checks.filter((c) => failed.some((r) => r.name === c.name)), job);
+          for (const r of again) {
+            if (!r.ok) continue;
+            results[results.findIndex((x) => x.name === r.name)] = { ...r, flaky: true };
+            log(`flaky: ${r.name} failed, then passed on the same code`);
+          }
+        }
         // The proof that the tests fail without the change is for the whole job: it runs on the finished branch.
         if (!plan.prove || slice) return results;
         return [...results, failsOnBase({ repo, profile: repoProfile, spec, base: ws.base, head, files: touchedFiles(wt, ws.base, head), job, green: results.every((r) => r.ok) })];
       });
       restore(wt);
       const ok = lastGates.every((r) => r.ok);
-      run.gates.push({ attempt, ok, ms: Date.now() - t, checks: lastGates.map((r) => ({ name: r.name, ok: r.ok, skipped: r.skipped, ms: r.ms })) });
+      run.gates.push({ attempt, ok, ms: Date.now() - t, checks: lastGates.map((r) => ({ name: r.name, ok: r.ok, skipped: r.skipped, ms: r.ms, ...(r.flaky ? { flaky: true } : {}) })) });
       mkdirSync(join(dir, 'gates'), { recursive: true });
       writeFileSync(join(dir, 'gates', `run-${attempt}.txt`), gateReport(lastGates));
       for (const line of describe(lastGates).split('\n').slice(0, lastGates.length)) log(`  ${line}`);

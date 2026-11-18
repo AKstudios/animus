@@ -49,7 +49,7 @@ export function describeTools(agents: readonly AgentRun[], lines: readonly ToolL
   return out.join('\n');
 }
 
-export type GateRun = { attempt: number; ok: boolean; ms: number; checks: { name: string; ok: boolean; skipped: boolean; ms: number }[] };
+export type GateRun = { attempt: number; ok: boolean; ms: number; checks: { name: string; ok: boolean; skipped: boolean; ms: number; flaky?: boolean }[] };
 
 export type Outcome = 'pr' | 'draft-pr' | 'dry-run' | 'needs-input' | 'failed';
 
