@@ -161,6 +161,22 @@ test('Helix counts a use for each lesson on the run line a contained job wrote i
   supervisor.wake();
   await ended(two.id);
   assert.deepEqual(readLessons().map((l) => l.uses), [1, 0]);
+
+  // A job may write anything to its person's home: a run line that is not a run, or a broken lessons file, must not stop Helix.
+  script = `require('fs').appendFileSync(${JSON.stringify(join(ana, 'runs.jsonl'))}, 'null\\n');`;
+  const three = store.add({ state: 'queued', person: 'ana', repo: 'app', spec: '', title: 't', draft: false, submitted: '' });
+  supervisor.wake();
+  await ended(three.id);
+  script = writes([first!.id]);
+  writeFileSync(lessonsFile(), '{ not json');
+  const four = store.add({ state: 'queued', person: 'ana', repo: 'app', spec: '', title: 't', draft: false, submitted: '' });
+  supervisor.wake();
+  await ended(four.id);
+  script = '';
+  const five = store.add({ state: 'queued', person: 'ana', repo: 'app', spec: '', title: 't', draft: false, submitted: '' });
+  supervisor.wake();
+  await ended(five.id);
+  assert.equal(store.get(five.id)!.state, 'ended');
   supervisor.stop();
   store.close();
 }));

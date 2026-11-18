@@ -222,9 +222,15 @@ export function supervise(opts: {
         });
         say(`job ${job.id} ended: ${result.outcome ?? 'failed'}${result.pr ? ` ${result.pr}` : ''}`);
         // A container job was given Helix's lessons read-only and cannot count them: its run line says which.
-        const home = opts.animusHomeOf?.(current.person);
-        const given = home && current.started ? readRuns(join(home, 'runs.jsonl')).findLast((r) => r.job === current.animus_job && Date.parse(r.ended) >= Date.parse(current.started!))?.lessons : undefined;
-        if (given) countUses(given);
+        // The person's home is the job's to write, so nothing read from it may stop Helix: a failure is said and the queue goes on.
+        try {
+          const home = opts.animusHomeOf?.(current.person);
+          const given = home && current.started ? readRuns(join(home, 'runs.jsonl')).findLast((r) => r.job === current.animus_job && Date.parse(r.ended) >= Date.parse(current.started!))?.lessons : undefined;
+          const ids = Array.isArray(given) ? given.filter((n): n is number => Number.isInteger(n)) : [];
+          if (ids.length) countUses(ids);
+        } catch (err) {
+          say(`job ${job.id}: lesson uses not counted: ${err instanceof Error ? err.message : String(err)}`);
+        }
       }
       tick();
     };

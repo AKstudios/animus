@@ -190,7 +190,8 @@ export function appendRun(run: Run): void {
 export function readRuns(file = runLog()): Run[] {
   if (!existsSync(file)) return [];
   return readFileSync(file, 'utf8').split('\n').filter(Boolean).flatMap((line) => {
-    try { return [JSON.parse(line) as Run]; } catch { return []; }
+    // Only objects: a line that is JSON but not a run (`null`, a number) is skipped like one that is not JSON.
+    try { const r: unknown = JSON.parse(line); return r && typeof r === 'object' && !Array.isArray(r) ? [r as Run] : []; } catch { return []; }
   });
 }
 
