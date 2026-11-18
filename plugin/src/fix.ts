@@ -26,15 +26,19 @@ export function activeFix(pr: string): { job: string; what: string } | undefined
   return undefined;
 }
 
+/** The runs in this repo whose pull request is `pr` (a number, `#number` or the URL), oldest first. */
+export function openedHere(repo: string, pr: string): Run[] {
+  const n = /^#?(\d+)$/.exec(pr.trim())?.[1];
+  return readRuns().filter((r) => r.repo === repo && r.pr && (r.pr === pr.trim() || (n && r.pr.endsWith(`/${n}`))));
+}
+
 /**
  * The job a fix continues: the latest run in this repo whose pull request is `pr` (a number, `#number` or the URL),
  * and its state. Refuses, with one line, a pull request no job opened, one that is merged or closed, and one that
  * has a fix running or waiting for an answer. `lookup` says whether GitHub has the pull request open.
  */
 export function fixTarget(repo: string, pr: string, lookup: PrLookup = prState): { run: Run; state?: JobState } {
-  const n = /^#?(\d+)$/.exec(pr.trim())?.[1];
-  const opened = readRuns().filter((r) => r.repo === repo && r.pr && (r.pr === pr.trim() || (n && r.pr.endsWith(`/${n}`))));
-  const run = opened.at(-1);
+  const run = openedHere(repo, pr).at(-1);
   if (!run) throw new AnimusError(`no job opened pull request ${pr}, so there is nothing to fix`);
   const github = lookup(run.pr!, repo);
   if (github && github !== 'OPEN') throw new AnimusError(`pull request ${pr} is ${github.toLowerCase()}, so it cannot be fixed`);

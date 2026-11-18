@@ -13,6 +13,7 @@ import { animusHome, CANCELLED_MARKER, loadProgress, type Progress } from '../..
 import type { PersonalSkill } from '../../plugin/src/personal.ts';
 import { loadFactory, resolvePlan, type Tier } from '../../plugin/src/profiles.ts';
 import { parseSpec } from '../../plugin/src/spec.ts';
+import { isOwner } from './owner.ts';
 import { readMachine, waitReason, type Reading } from './room.ts';
 import { credentialEnv, personEnv, readyRepos, type Config } from './config.ts';
 import { liveTokenFile } from './github-app.ts';
@@ -28,9 +29,13 @@ export const PLUGIN = join(dirname(fileURLToPath(import.meta.url)), '..', '..', 
 export type Launch = (job: HelixJob, repoDir: string, env: Record<string, string>) => { command: string; args: string[]; env?: Record<string, string>; cwd?: string };
 
 /** What `animus` is asked to do for a job: run it, or resume one that ran before. */
-export const animusArgs = (job: HelixJob, repoDir: string): string[] => (job.animus_job
-  ? ['resume', job.animus_job, ...(job.answer ? ['--answer', job.answer] : [])]
-  : ['run', job.spec, '--repo', repoDir, ...(job.draft ? ['--draft'] : []), ...(existsSync(skillsFile(job)) ? ['--skills', skillsFile(job)] : [])]);
+export const animusArgs = (job: HelixJob, repoDir: string): string[] => {
+  if (job.animus_job) return ['resume', job.animus_job, ...(job.answer ? ['--answer', job.answer] : [])];
+  const skills = existsSync(skillsFile(job)) ? ['--skills', skillsFile(job)] : [];
+  // `--` keeps an ask that starts with a dash from being read as an option.
+  if (job.fix_of) return ['fix', '--repo', repoDir, ...skills, '--', job.pr!, job.ask!];
+  return ['run', job.spec, '--repo', repoDir, ...(job.draft ? ['--draft'] : []), ...skills];
+};
 
 /** Where Helix keeps the skills a person sent with a spec: beside it, so a job's container sees them where the spec is. */
 export const skillsFile = (job: Pick<HelixJob, 'spec'>) => join(dirname(job.spec), 'skills.json');
@@ -55,8 +60,13 @@ export const pauseFile = (home: string) => join(home, 'paused');
 /** What `helix upgrade` writes in the pause file: the next `helix serve` takes the pause off. */
 export const UNTIL_RESTART = 'until restart';
 
+/** A fix on an open pull request (GLOSSARY.md): the pull request as a number, `#number` or its URL, and what to change. */
+export type FixRequest = { repo: string; pr: string; ask: string; skills?: PersonalSkill[] };
+
 export type Supervisor = {
   submit(person: string, s: Submission): HelixJob;
+  /** Queues a fix of an open pull request a job on this Helix opened, for `person` or the owner. */
+  fix(person: string, f: FixRequest): HelixJob;
   cancel(person: string, id: number): HelixJob;
   answer(person: string, id: number, text: string): HelixJob;
   log(id: number, lines?: number): string;
@@ -152,6 +162,13 @@ export function supervise(opts: {
     return job;
   };
 
+  /** Refuses a repository Helix does not have, or has not finished checking. */
+  const readyProject = (repo: string): void => {
+    const project = store.project(repo);
+    if (project?.state === 'checking') throw new Refused(409, `Helix is still checking the project ${repo}: animus project list says when it is ready`);
+    if (project?.state !== 'ready') throw new Refused(400, `Helix has no project named ${repo}; it has ${Object.keys(readyRepos(store)).join(', ') || 'none'}. Add it from a checkout of it: animus project add`);
+  };
+
   function start(job: HelixJob): void {
     const project = store.project(job.repo);
     const repoDir = project?.state === 'ready' ? project.dir : '';
@@ -173,7 +190,8 @@ export function supervise(opts: {
       // The profile is read from the base branch as GitHub has it now, with the person's token as their pushes use.
       opts.fresh?.(repoDir, jobEnv);
       // A queued job is admitted again: the profile may have changed since it was submitted. A resumed one was admitted when it first started.
-      const refused = job.animus_job ? undefined : opts.admit?.(job, repoDir, jobEnv);
+      // A fix has no spec of its own: the animus process reads the spec of the job it continues.
+      const refused = job.animus_job || job.fix_of ? undefined : opts.admit?.(job, repoDir, jobEnv);
       if (refused) {
         saveAndTell({ ...job, state: 'ended', ended: now(), outcome: 'refused', reason: refused });
         say(`job ${job.id} was refused before it started: ${refused.split('\n')[0]}`);
@@ -289,10 +307,31 @@ export function supervise(opts: {
   tick();
 
   return {
+    fix(person, f) {
+      readyProject(f.repo);
+      const n = /^#?(\d+)$/.exec(f.pr.trim())?.[1];
+      const onPr = store.list().filter((j) => j.repo === f.repo && j.pr && (j.pr === f.pr.trim() || (n && j.pr.endsWith(`/${n}`))));
+      // A fix that failed has no pull request to its name, so the jobs that ended in one are the ones that opened or updated it.
+      const ended = onPr.filter((j) => j.state === 'ended' && (j.outcome === 'pr' || j.outcome === 'draft-pr')).sort((a, b) => a.id - b.id);
+      const opener = ended[0];
+      const target = ended.at(-1);
+      if (!opener || !target) throw new Refused(404, `no job on Helix opened pull request ${f.pr} of ${f.repo}, so there is nothing to fix`);
+      if (person !== opener.person && !isOwner(config, person)) throw new Refused(403, `pull request ${f.pr} was opened by ${opener.person}'s job ${opener.id}: only ${opener.person} or the owner may fix it`);
+      const active = onPr.find((j) => j.fix_of && (j.state === 'queued' || j.state === 'running' || (j.state === 'ended' && j.outcome === 'needs-input')));
+      if (active) throw new Refused(409, `pull request ${f.pr} has a fix ${active.state === 'ended' ? 'waiting for an answer' : active.state}: job ${active.id}`);
+      // It runs as the person whose job opened the pull request: their folder holds the worktree and session it continues.
+      const job = store.add({ state: 'queued', person: opener.person, repo: f.repo, spec: '', title: `fix: ${target.title}`, ...(target.tier ? { tier: target.tier } : {}), draft: false, pr: target.pr!, fix_of: target.id, ask: f.ask, submitted: now() });
+      // The job's folder is where a container finds what Helix keeps for the job (its skills); a fix has no spec file in it.
+      job.spec = join(home, 'jobs', String(job.id), 'fix');
+      mkdirSync(dirname(job.spec), { recursive: true });
+      if (f.skills?.length) writeFileSync(skillsFile(job), `${JSON.stringify(f.skills, null, 2)}\n`);
+      store.save(job);
+      store.record(person, 'submitted', { job: job.id, repo: f.repo, fix_of: target.id });
+      tick();
+      return store.get(job.id)!;
+    },
     submit(person, s) {
-      const project = store.project(s.repo);
-      if (project?.state === 'checking') throw new Refused(409, `Helix is still checking the project ${s.repo}: animus project list says when it is ready`);
-      if (project?.state !== 'ready') throw new Refused(400, `Helix has no project named ${s.repo}; it has ${Object.keys(readyRepos(store)).join(', ') || 'none'}. Add it from a checkout of it: animus project add`);
+      readyProject(s.repo);
       let title: string;
       let tier: Tier | undefined;
       try {
