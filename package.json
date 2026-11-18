@@ -9,6 +9,7 @@
   },
   "scripts": {
     "test": "sh scripts/with-tmp.sh node --disable-warning=ExperimentalWarning --test 'plugin/test/**/*.test.ts' 'helix/test/**/*.test.ts' 'scripts/test/**/*.test.ts'",
+    "changelog": "node -e \"console.log('release notes are written by npm run release from merged pull requests')\"",
     "typecheck": "tsc --noEmit",
     "release": "node scripts/release.ts",
     "deploy": "node scripts/deploy.ts"
