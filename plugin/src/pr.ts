@@ -36,6 +36,8 @@ export type PrInput = {
   caughtUp?: { branch: string; commit: string; resolved?: readonly string[] };
   /** Why the job failed; makes this a failure report. */
   failure?: string;
+  /** The issue the job was submitted from: merging the pull request closes it. */
+  closes?: number;
   models: string;
   cost_usd: number;
 };
@@ -58,6 +60,7 @@ export function prBody(p: PrInput): string {
     p.slices.forEach((x, i) => out.push(`${i + 1}. **${cell(x.title)}**: ${x.summary ? cell(x.summary) : '*not finished*'}`));
     out.push('');
   } else if (p.summary) out.push(p.summary, '');
+  if (p.closes) out.push(`Closes #${p.closes}`, '');
 
   const here: string[] = [];
   if (p.failure && p.failure.includes('\n')) here.push(`- The failure in full:\n\n\`\`\`\n${tail(p.failure)}\n\`\`\``);

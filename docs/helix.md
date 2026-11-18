@@ -93,7 +93,7 @@ another owner first: helix owner <person> on the machine".
 
 `helix check` asks the services themselves: who the GitHub token is and when
 it ends, whether it may push to each project (a push that sends nothing), and
-whether the Claude token answers. It exits 1 if anything but a push fails. A
+whether the Claude token answers, and whether some person's token can read each project's comments ([GitHub comments](#github-comments)). It exits 1 if anything but a push fails. A
 refused push shows as `no`: nobody has to reach every project. Before each
 job, Helix checks the GitHub token again with a push to that job's project,
 so a token that ended or may not push fails the job at once with the reason.
@@ -148,6 +148,50 @@ Anyone without a Slack link who writes to the bot or sends any `/animus`
 command gets a private "You're not on this Helix. Ask <owner> for an
 invite.", and nothing they sent is kept. Only the owner may invite and link. Every command is acknowledged at once and answered privately; one
 sent while Helix is down gets Slack's own error and is not queued.
+
+## GitHub comments
+
+A person's `/animus` on an issue in a project Helix has starts a draft there,
+as `/animus draft` does in Slack ([ADR 0001](adr/0001-slack-jobs-start-from-a-confirmed-draft.md)).
+Helix reads GitHub by polling and opens no port
+([ADR 0006](adr/0006-github-comments-reach-helix-by-polling.md)): inside `helix
+serve`, about once a minute per project, one `GET /repos/{owner}/{repo}/issues/comments?since=`
+with the GitHub token of the person who added the project, else another
+person's (a read one token fails is logged and the next is tried). Helix keeps
+per project a position (the newest comment it handled, starting at the moment
+it first watched the project) and the ids of the comments it handled in
+`helix.db`, so a comment is acted on once, only when created after the
+position: an edited old comment is not. A command is a comment whose first line
+starts with `/animus`; the commenter must be a person on this Helix, matched by
+their GitHub login, and anyone else is ignored silently, as is a comment
+Animus posted (each carries a hidden marker). Comments and reactions are posted
+with the person's own token, so they show as that person with the app's badge.
+
+- `/animus <what you want>` gets a 👀 and a draft spec as a comment: the spec
+  in a `markdown` block, written from the issue and your comment. Another
+  `/animus <changes>` posts the revised draft as a new comment, and editing the
+  draft comment by hand works too. One draft is open per person per issue, and
+  GitHub and Slack drafts share the limit of 3 open per person, `draft_slots`
+  and the 7-day expiry, after which the draft is discarded with a comment. A
+  person with a Slack link is DMed a link to each draft and revision.
+- `/animus submit` reads the spec block of the latest draft comment as it is on
+  GitHub then, hand edits included, checks it as `animus plan` does and queues
+  it as your job on that project, with a comment naming the job. An incomplete
+  spec, or a comment with no readable spec block, gets a comment saying so and
+  queues nothing.
+- `/animus discard` closes the draft with a comment.
+- The job comments on the issue when its pull request opens (the pull request
+  says `Closes #<issue>`), when it fails, with the reason, and when it needs
+  input, with the question. `/animus answer <text>` answers it and resumes the
+  job, and `/animus cancel` cancels it. You still get your Slack DM thread.
+- `submit`, `discard`, `answer` and `cancel` from anyone but the draft's or
+  job's person, or the owner, get a one-line reply that only they may.
+- A `/animus` comment more than 24 hours old when Helix first sees it (left
+  while Helix was down) is answered as too old and starts nothing. On a pull
+  request, `/animus` replies that `fix` is not available yet.
+
+`helix check` flags a project that no person's GitHub token can read comments
+on: it is never watched, so a `/animus` there goes unanswered.
 
 ## Projects
 

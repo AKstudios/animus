@@ -13,6 +13,7 @@ import { checkEnv, checkPerson, describeFindings, failing, githubPush, githubTok
 import { animusVersion } from '../../plugin/src/version.ts';
 import { containerLaunch, containerProblem, draftLaunch, imageName, personDirs, removeContainer } from './container.ts';
 import { draftRunner } from './drafts.ts';
+import { checkComments, commentWatcher, githubNotifier } from './github-comments.ts';
 import { addPerson, addRepo, configFile, envFileVars, helixHome, identityEnv, importRegistry, loadConfig, readyRepos, removeRepo } from './config.ts';
 import { ensureSetup } from '../../plugin/src/workspace.ts';
 import { loadProfile } from '../../plugin/src/profile.ts';
@@ -188,17 +189,23 @@ function main(argv: string[]): number | undefined | Promise<number> {
       // Only with slack.enabled in config.yaml; turning it on or off takes a restart.
       const slack = startSlack(config, { say });
       // On a Helix with a GitHub App, each job and project check first makes sure the person's access token has an hour or more left.
-      const supervisor = supervise({ store, config, home, preflight, prepare: beforeJob(store, config), say, ...isolation, ...(slack ? { notify: slackNotifier(slack, store, say, config) } : {}) });
-      if (slack) {
-        // With containers, a draft runs in one of its own on a clone of the project's, with only the person's Claude sign-in.
-        const contained = config.container && draftLaunch({ home, animusRoot: ROOT, image: imageName(animusVersion()), limits: config.container, uid: uid(), gid: gid() });
-        const drafts = draftRunner(slack, {
-          store, config, home, say, slackToken: envFileVars(slackEnvFile()).SLACK_BOT_TOKEN,
-          ...(contained ? { launch: (draft, repoDir, env) => contained({ id: String(draft.id), person: draft.person, folder: draft.folder, mirror: repoDir, base: tryGit(repoDir, ['rev-parse', 'HEAD']) ?? 'HEAD' }, env) } : {}),
-        });
-        slackBot(slack, { store, config, supervisor, drafts });
-        setInterval(() => { drafts.expire().catch((err: unknown) => say(`drafts: ${(err as Error).message}`)); }, 60 * 60 * 1000).unref();
-      }
+      // A job's progress goes to its Slack DM thread, when there is a bot, and its milestones to the issue it came from.
+      const notifiers = [...(slack ? [slackNotifier(slack, store, say, config)] : []), githubNotifier({ store, config, say })];
+      const supervisor = supervise({ store, config, home, preflight, prepare: beforeJob(store, config), say, ...isolation, notify: (job) => { for (const tell of notifiers) tell(job); } });
+      // Drafts start from Slack, when it runs, and from /animus comments on GitHub.
+      // With containers, a draft runs in one of its own on a clone of the project's, with only the person's Claude sign-in.
+      const contained = config.container && draftLaunch({ home, animusRoot: ROOT, image: imageName(animusVersion()), limits: config.container, uid: uid(), gid: gid() });
+      const drafts = draftRunner(slack, {
+        store, config, home, say, ...(slack ? { slackToken: envFileVars(slackEnvFile()).SLACK_BOT_TOKEN } : {}),
+        ...(contained ? { launch: (draft, repoDir, env) => contained({ id: String(draft.id), person: draft.person, folder: draft.folder, mirror: repoDir, base: tryGit(repoDir, ['rev-parse', 'HEAD']) ?? 'HEAD' }, env) } : {}),
+      });
+      if (slack) slackBot(slack, { store, config, supervisor, drafts });
+      setInterval(() => { drafts.expire().catch((err: unknown) => say(`drafts: ${(err as Error).message}`)); }, 60 * 60 * 1000).unref();
+      // About once a minute, each project's new GitHub comments; the first read now starts watching a new project.
+      const comments = commentWatcher({ store, config, drafts, jobs: supervisor, say });
+      const readComments = () => { comments.poll().catch((err: unknown) => say(`github comments: ${(err as Error).message}`)); };
+      readComments();
+      setInterval(readComments, 60 * 1000).unref();
       const server = serve({ config, store, supervisor, home, startCheck: checkInChild(store, home, say, (person) => freshToken(store, config, person)),...(config.container ? { reap: removeContainer } : {}), ...(slack ? { slack } : {}) });
       server.listen(config.port, config.host, () => console.error(`helix ${animusVersion()}: listening on http://${config.host}:${config.port}, ${config.slots} job(s) at once${config.container ? ', each in a container' : ''}, projects: ${Object.keys(readyRepos(store)).join(', ') || 'none yet'}`));
       // A running job reads its person's GitHub token from their live token file; renewing it when due lets a long job still push.
@@ -251,6 +258,12 @@ function main(argv: string[]): number | undefined | Promise<number> {
             // A sign-in through the GitHub App is refreshed first, so the token checked is the one jobs get.
             const findings = [...await checkSignIn(store, config, name), ...checkPerson(store, name, { agent })];
             console.log(describeFindings(name, findings));
+            ok &&= !failing(findings).length;
+          }
+          // A project belongs to no one: whether anyone's token reads its comments is asked once, on a whole check.
+          if (!positionals[0]) {
+            const findings = await checkComments(store, config);
+            if (findings.length) console.log(describeFindings('projects', findings));
             ok &&= !failing(findings).length;
           }
           return ok ? 0 : 1;
