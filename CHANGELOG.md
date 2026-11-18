@@ -13,9 +13,19 @@ clients with how to update.
   carries on from its implementer session (or a handoff when the session is
   over the context budget), proves every criterion again and pushes to the
   same pull request, whose body keeps `Closes #N` and gains a Fixes list. The
-  run log's `fix_of` names the job it continues; `trigger` is `fix`. Every
-  pull request body now carries the spec in a collapsed block, left out with
-  a note past GitHub's 65,536 characters.
+  run log's `fix_of` names the job it continues; `trigger` is `fix`, and
+  `without_session: true` marks a fix that ran from the pull request alone
+  (its spec read from the description, a fresh session). `animus fix`
+  refuses a pull request no job opened, a merged or closed one and one with
+  a fix queued, running or waiting for an answer; a failed fix, or one the
+  reviewer refuses on a ready pull request, pushes nothing. Every pull
+  request body now carries the spec in a collapsed block, left out with a
+  note past GitHub's 65,536 characters. `animus cleanup` keeps a job's
+  worktree and branch while a fix of its pull request is queued, running or
+  waiting. With a Helix, `animus fix` submits to the new `POST /jobs/fix`
+  (`repo`, `pr`, `ask`; the job's person or the owner), which runs it as an
+  `animus fix` process in a new container, and the job page links the job it
+  fixes. Adding the route is not breaking.
 - A spec refused at admission, and a job ended by SIGINT, SIGTERM or a Helix
   cancel, now leave a run line with cause `admit`, `interrupted` or
   `cancelled`. Helix writes a `cancelled` file beside the job's spec before it
