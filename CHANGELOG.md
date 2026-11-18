@@ -26,7 +26,11 @@ clients with how to update.
   revision posted. `/animus discard` on the issue closes the draft with a
   comment (the draft's person or the owner may), and a draft untouched for 7
   days is discarded with a comment on its issue. GitHub and Slack drafts share
-  the limit of 3 open per person and the `draft_slots` queue. `submit` and job
+  the limit of 3 open per person and the `draft_slots` queue. `/animus submit`
+  reads the spec block of the latest draft comment as it is on GitHub then, hand
+  edits included, checks it as `animus plan` does and queues it as the draft
+  person's job, with a comment naming the job; an incomplete spec, or a comment
+  with no readable spec block, gets a comment saying so and queues nothing. Job
   updates on the issue come later.
 
 ## 0.4.7 (2026-11-18)

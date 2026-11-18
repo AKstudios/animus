@@ -8,6 +8,7 @@ import { personEnv, type Config } from './config.ts';
 import { freshToken, GITHUB, githubRepo, type GitHubUrls } from './github-app.ts';
 import type { Drafts } from './drafts.ts';
 import type { Project, Store } from './store.ts';
+import type { Supervisor } from './supervisor.ts';
 
 /** Hidden in every comment Animus posts: a comment that carries it is never read as a command. */
 export const MARKER = '<!-- animus -->';
@@ -28,8 +29,31 @@ async function gh(method: string, path: string, token: string, urls: GitHubUrls,
       signal: AbortSignal.timeout(15_000),
     });
   } catch (err) { throw new AnimusError(`GitHub could not be reached: ${(err as Error).message}`); }
-  if (!res.ok) throw new AnimusError(`GitHub refused ${method} ${path}: HTTP ${res.status}`);
+  if (!res.ok) throw Object.assign(new AnimusError(`GitHub refused ${method} ${path}: HTTP ${res.status}`), { status: res.status });
   return res.json().catch(() => ({}));
+}
+
+/** A comment's body as it is on GitHub now, hand edits included; undefined when it is gone. */
+export async function commentBody(store: Store, config: Pick<Config, 'github'>, urls: GitHubUrls, person: string, repo: string, id: number): Promise<string | undefined> {
+  const token = await tokenOf(store, config, person, urls);
+  if (!token) throw new AnimusError(`${person} has no GitHub token to read comments with`);
+  try {
+    return ((await gh('GET', `/repos/${repo}/issues/comments/${id}`, token, urls)) as { body?: string }).body ?? '';
+  } catch (err) {
+    if ((err as { status?: number }).status === 404) return undefined;
+    throw err;
+  }
+}
+
+/** The spec in a draft comment: the first closed `markdown` fence, or undefined when there is none or it is empty. GitHub may save line breaks as CRLF. */
+export function specBlock(comment: string): string | undefined {
+  const lines = comment.split(/\r?\n/);
+  const open = lines.findIndex((l) => /^ {0,3}`{3,}markdown\s*$/.test(l));
+  if (open < 0) return undefined;
+  const ticks = /`+/.exec(lines[open]!)![0].length;
+  const close = lines.findIndex((l, i) => i > open && new RegExp(`^ {0,3}\`{${ticks},}\\s*$`).test(l));
+  const spec = close < 0 ? '' : lines.slice(open + 1, close).join('\n').trim();
+  return spec ? `${spec}\n` : undefined;
 }
 
 /** The person's GitHub token, renewed when due: their sign-in through the app, else the one they pasted. */
@@ -70,7 +94,7 @@ export function draftComment(spec: string): string {
 }
 
 const USAGE ='Say what you want after `/animus`, as in `/animus add a login page`.';
-// shortcut: all but discard are read but not acted on until their commands exist; they are not draft text.
+// shortcut: answer, cancel and fix are read but not acted on until their commands exist; they are not draft text.
 const WORDS = ['submit', 'discard', 'answer', 'cancel', 'fix'];
 
 /**
@@ -80,10 +104,10 @@ const WORDS = ['submit', 'discard', 'answer', 'cancel', 'fix'];
  * was created at or after the position and is not among those handled.
  */
 export function commentWatcher(opts: {
-  store: Store; config: Pick<Config, 'github'>; drafts: Pick<Drafts, 'github' | 'githubDiscard'>;
+  store: Store; config: Pick<Config, 'github'>; drafts: Pick<Drafts, 'github' | 'githubDiscard' | 'githubSubmit'>; jobs: Pick<Supervisor, 'submit'>;
   github?: GitHubUrls; say?: (line: string) => void; now?: () => number;
 }): { poll(): Promise<void> } {
-  const { store, config, drafts } = opts;
+  const { store, config, drafts, jobs } = opts;
   const urls = opts.github ?? GITHUB;
   const say = opts.say ?? (() => {});
   const now = opts.now ?? Date.now;
@@ -114,6 +138,7 @@ export function commentWatcher(opts: {
     const text = body.slice('/animus'.length).trim();
     const word = text.split(/\s/)[0]!.toLowerCase();
     if (word === 'discard') { await reply(await drafts.githubDiscard(person, { repo, number })); return; }
+    if (word === 'submit') { await reply(await drafts.githubSubmit(person, { repo, number }, jobs)); return; }
     if (WORDS.includes(word)) return;
     const token = await tokenOf(store, config, person, urls);
     // The reaction says "seen"; a refusal of it does not stop the draft.

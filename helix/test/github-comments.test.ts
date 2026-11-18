@@ -8,7 +8,7 @@ import { draftRunner, type DraftLaunch } from '../src/drafts.ts';
 import { commentWatcher, MARKER } from '../src/github-comments.ts';
 import { deviceCode, keepTokens, pollDevice } from '../src/github-app.ts';
 import { openStore } from '../src/store.ts';
-import { pauseFile } from '../src/supervisor.ts';
+import { pauseFile, supervise } from '../src/supervisor.ts';
 import { fakeGitHub, type FakeGitHub } from './fake-github.ts';
 import { fakeTransport, until } from './fake-slack.ts';
 
@@ -63,7 +63,8 @@ async function helix(opts: { slack?: boolean; owner?: string } = {}) {
   if (opts.slack) store.linkSlack('ana', 'U1');
   const drafts = draftRunner(opts.slack ? slack.transport : undefined, { store, config, home, launch, github });
   const lines: string[] = [];
-  const watcher = commentWatcher({ store, config, drafts, github, now: () => clock, say: (l) => lines.push(l) });
+  const jobs = supervise({ store, config, home });
+  const watcher = commentWatcher({ store, config, drafts, jobs, github, now: () => clock, say: (l) => lines.push(l) });
   await watcher.poll();
   return { github, store, lines, drafts, slack: slack.sent, home, poll: () => watcher.poll(), clock: { at: (s: number) => { clock = T0 + s * 1000; } } };
 }
@@ -264,4 +265,55 @@ test('discards a draft untouched for 7 days with a comment on its issue', async 
   assert.equal(h.store.draftsIn('discarded').length, 1);
   assert.match(h.github.posted.at(-1)!.body, /^This draft was discarded after 7 days untouched\./);
   assert.equal(h.github.posted.at(-1)!.number, 7);
+});
+
+const SPEC = '# Passkey sign-in\n\n## Acceptance criteria\n\n1. A person signs in with a passkey.\n   $ npm test\n';
+/** A draft on issue 7 whose comment the person then edits on GitHub to this body. */
+async function draftEditedTo(edit: (draft: string) => string) {
+  const h = await helix();
+  h.github.addComment('o/app', 7, 'ana-gh', '/animus add passkey sign-in', at(30));
+  await h.poll();
+  await until('the draft', () => h.store.draftsIn('ready').length === 1);
+  const draft = h.github.comments.find((c) => c.body.startsWith('Animus drafted'))!;
+  draft.body = edit(draft.body);
+  h.github.addComment('o/app', 7, 'ana-gh', '/animus submit', at(90));
+  h.clock.at(120);
+  return h;
+}
+
+// Protects: criterion 6. Fails when: submit queues the draft as first posted instead of the comment as edited, queues it as someone else, or does not name the job.
+test('queues the spec of the draft comment as edited by hand as the person\'s job, and names the job', async () => {
+  const h = await draftEditedTo((body) => body.replace(/```markdown[\s\S]*?\n```/, `\`\`\`markdown\n${SPEC}\`\`\``));
+
+  await h.poll();
+
+  const [job] = h.store.list();
+  assert.equal(job!.title, 'Passkey sign-in');
+  assert.equal(job!.person, 'ana');
+  assert.equal(job!.repo, 'app');
+  assert.deepEqual(job!.github, { repo: 'o/app', issue: 7 });
+  assert.equal(h.store.list().length, 1);
+  assert.equal(h.store.draftsIn('submitted').length, 1);
+  assert.equal(h.github.posted.at(-1)!.body, `Submitted as job ${job!.id}: Passkey sign-in (app).\n\n${MARKER}`);
+});
+
+// Protects: criterion 6. Fails when: a spec missing its checks is queued, or the person is not told what is missing.
+test('replies with what is missing and queues nothing when the spec is incomplete', async () => {
+  const h = await draftEditedTo((body) => body.replace(/```markdown[\s\S]*?\n```/, '```markdown\n# Passkey sign-in\n\n## Acceptance criteria\n\n1. A person signs in.\n```'));
+
+  await h.poll();
+
+  assert.deepEqual(h.store.list(), []);
+  assert.equal(h.store.draftsIn('ready').length, 1);
+  assert.match(h.github.posted.at(-1)!.body, /^Not submitted: draft\.md: criterion 1 has no check/);
+});
+
+// Protects: criterion 6. Fails when: a comment edited to have no spec block queues a job or gets another answer.
+test('replies that the latest draft comment has no spec block when it has none, and queues nothing', async () => {
+  const h = await draftEditedTo(() => 'I deleted the spec');
+
+  await h.poll();
+
+  assert.deepEqual(h.store.list(), []);
+  assert.equal(h.github.posted.at(-1)!.body, `the latest draft comment has no spec block I can read\n\n${MARKER}`);
 });

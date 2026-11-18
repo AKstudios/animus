@@ -10,7 +10,7 @@ import { checkDraft, fetchReferences, findLinks, GITHUB_ITEM, GITHUB_VARS, type 
 import { AnimusError } from '../../plugin/src/proc.ts';
 import { loadFactory } from '../../plugin/src/profiles.ts';
 import { personEnv, type Config } from './config.ts';
-import { commentAs, draftComment } from './github-comments.ts';
+import { commentAs, commentBody, draftComment, specBlock } from './github-comments.ts';
 import { freshToken, GITHUB, githubRepo, reachableRepos, type GitHubUrls } from './github-app.ts';
 import type { Transport } from './slack-api.ts';
 import type { Draft, Store } from './store.ts';
@@ -37,6 +37,8 @@ export type Drafts = {
   github(person: string, on: { project: string; repo: string; number: number; url: string }, text: string): Promise<string | undefined>;
   /** A person's `/animus discard` on an issue: closes the draft there, theirs or, for the owner, anyone's; what to tell them on the issue. */
   githubDiscard(person: string, on: { repo: string; number: number }): Promise<string>;
+  /** A person's `/animus submit` on an issue: queues the spec in the draft's latest comment, as it is on GitHub now, as its person's job; what to tell them on the issue. */
+  githubSubmit(person: string, on: { repo: string; number: number }, jobs: Pick<Supervisor, 'submit'>): Promise<string>;
   /** The projects a person may submit to: the ones a draft offers them. */
   projects(person: string): Promise<string[]>;
   /** A press of a project in a draft's list (PICK); what to tell the presser privately, if anything. */
@@ -263,6 +265,27 @@ export function draftRunner(slack: Pick<Transport, 'post' | 'upload' | 'update' 
       close(draft, 'discarded');
       store.record(draft.person, 'draft-discarded', { draft: draft.id });
       return 'Draft discarded.';
+    },
+    async githubSubmit(person, on, jobs) {
+      const here = OPEN.flatMap((st) => store.draftsIn(st)).filter((d) => d.github?.repo === on.repo && d.github.issue === on.number);
+      const draft = here.find((d) => d.person === person) ?? here[0];
+      if (!draft?.github) return 'There is no open draft on this issue.';
+      if (draft.person !== person && person !== config.owner) return `Only ${draft.person} or the owner may submit this draft.`;
+      if (draft.state !== 'ready' || !draft.github.comment) return draft.state === 'failed' ? 'This draft could not be written, so there is nothing to submit: `/animus discard` it and start another.' : 'This draft is not posted yet: submit once it is.';
+      // The comment as it is now: the person may have edited it by hand.
+      const comment = await commentBody(store, config, github, draft.person, on.repo, draft.github.comment);
+      const spec = comment === undefined ? undefined : specBlock(comment);
+      if (!spec) return 'the latest draft comment has no spec block I can read';
+      let job;
+      try {
+        checkDraft(loadFactory(), spec);
+        job = jobs.submit(draft.person, { repo: draft.project!, spec, name: 'draft.md', github: { repo: on.repo, issue: on.number } });
+      } catch (err) {
+        if (!(err instanceof AnimusError)) throw err;
+        return `Not submitted: ${err.message}. Edit the draft comment or comment \`/animus <what to change>\`.`;
+      }
+      close(draft, 'submitted', { job: job.id });
+      return `Submitted as job ${job.id}: ${job.title} (${job.repo}).`;
     },
     async start(person, user, channel, text) {
       const open = openOf(person).length;

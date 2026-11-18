@@ -124,6 +124,11 @@ export async function fakeGitHub(opts: { clientId?: string; deviceFlow?: boolean
         .sort((a, b) => Date.parse(a.created_at) - Date.parse(b.created_at) || a.id - b.id);
       return [200, all.slice((page - 1) * per, page * per).map(shown)];
     }
+    const one = /^comments\/(\d+)$/.exec(rest);
+    if (method === 'GET' && one) {
+      const found = fake.comments.find((c) => c.repo === repo && c.id === Number(one[1]));
+      return found ? [200, shown(found)] : [404, { message: 'Not Found' }];
+    }
     const reaction = /^comments\/(\d+)\/reactions$/.exec(rest);
     if (method === 'POST' && reaction) {
       fake.reactions.push({ repo, comment: Number(reaction[1]), login, content: body.content! });

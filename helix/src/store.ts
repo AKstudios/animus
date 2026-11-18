@@ -21,6 +21,8 @@ export type HelixJob = {
   spec: string;
   title: string;
   draft: boolean;
+  /** The GitHub issue it was submitted from with /animus submit. */
+  github?: { repo: string; issue: number };
   submitted: string;
   /** When it last went back into the queue: after an answer, or when Helix stopped while it ran. */
   queued?: string;

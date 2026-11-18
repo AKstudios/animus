@@ -200,7 +200,7 @@ function main(argv: string[]): number | undefined | Promise<number> {
       if (slack) slackBot(slack, { store, config, supervisor, drafts });
       setInterval(() => { drafts.expire().catch((err: unknown) => say(`drafts: ${(err as Error).message}`)); }, 60 * 60 * 1000).unref();
       // About once a minute, each project's new GitHub comments; the first read now starts watching a new project.
-      const comments = commentWatcher({ store, config, drafts, say });
+      const comments = commentWatcher({ store, config, drafts, jobs: supervisor, say });
       const readComments = () => { comments.poll().catch((err: unknown) => say(`github comments: ${(err as Error).message}`)); };
       readComments();
       setInterval(readComments, 60 * 1000).unref();
