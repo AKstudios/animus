@@ -244,25 +244,40 @@ a.tag:hover { opacity: 1; background: color-mix(in srgb, currentColor 22%, trans
 .numbers { display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 12px; }
 .numbers > div { display: flex; flex-direction: column; gap: 2px; padding: 12px 16px; background: var(--panel); border: 1px solid var(--line); border-radius: 12px; }
 .numbers .num { font-family: var(--mono); font-size: 22px; font-weight: 600; }
-.timebar { display: block; width: 100%; height: 12px; border-radius: 6px; background: var(--soft); }
+.crumb { font-size: 13px; color: var(--mute); }
+.crumb a { color: inherit; text-decoration: none; }
+.crumb a:hover { text-decoration: underline; }
+.crumb code { font-family: var(--mono); }
+.kv { display: flex; justify-content: space-between; gap: 12px; font-size: 14px; overflow-wrap: anywhere; }
+.kv > :last-child { text-align: right; }
+.kv a { color: inherit; }
+.timebar { display: block; width: 100%; height: 28px; border-radius: 6px; overflow: hidden; background: var(--soft); }
 .timebar rect { stroke: var(--bg); stroke-width: 2px; vector-effect: non-scaling-stroke; }
+.timebar text { font-family: var(--mono); font-size: 12px; fill: #0b0d10; }
+.timebar .st-setup + text, .timebar .st-pr + text { fill: #e6e9ee; }
+.mark { font-weight: 700; }
+.chips { display: flex; flex-wrap: wrap; gap: 8px; padding-top: 10px; }
+.chip { font-family: var(--mono); font-size: 12px; padding: 2px 10px; border-radius: 999px; border: 1px solid var(--line); }
+.chip[open] { flex-basis: 100%; }
+.chip summary { cursor: pointer; }
+.chip .mark { margin-right: 6px; }
+.criterion .mark { font-size: 15px; }
+.criterion .out > summary { cursor: pointer; font-size: 13px; color: var(--mute); text-decoration: underline; }
+.folds { border-bottom: 1px solid var(--line); }
+.folds .fold { border-top: 1px solid var(--line); padding: 12px 2px; }
 .timekey { display: flex; flex-wrap: wrap; gap: 6px 18px; font-size: 14px; }
 .timekey i { display: inline-block; width: 10px; height: 10px; border-radius: 3px; margin-right: 6px; }
 .timekey code { font-family: var(--mono); color: var(--mute); }
 .timekey .on { font-weight: 600; }
-/* Stages are not statuses: one hue, each stage a step lighter, so no stage reads as failed or merged. */
-.seg-0 { --c: var(--fill); } .seg-1 { --c: color-mix(in srgb, var(--fill) 78%, var(--bg)); } .seg-2 { --c: color-mix(in srgb, var(--fill) 60%, var(--bg)); }
-.seg-3 { --c: color-mix(in srgb, var(--fill) 46%, var(--bg)); } .seg-4 { --c: color-mix(in srgb, var(--fill) 34%, var(--bg)); } .seg-5 { --c: color-mix(in srgb, var(--mute) 60%, var(--bg)); } .seg-6 { --c: color-mix(in srgb, var(--mute) 40%, var(--bg)); }
-[class^='seg-'] { background: var(--c); fill: var(--c); }
-.criterion { display: grid; grid-template-columns: 64px minmax(0, 1fr); align-items: start; gap: 4px 14px; padding: 12px 4px; border-bottom: 1px solid var(--soft); font-size: 14px; }
+/* A colour per stage, the same in both themes, as the design's canvas draws them. */
+.st-setup, .st-pr { --c: #3a4450; } .st-plan { --c: #7fa7b3; } .st-implement { --c: #22c3ee; } .st-gates { --c: #f5a524; }
+.st-review { --c: #b79cff; } .st-evidence { --c: #4ade80; } .st-labels { --c: #0b0d10; }
+[class^='st-'] { background: var(--c); fill: var(--c); }
+.criterion { display: grid; grid-template-columns: 24px minmax(0, 1fr); align-items: start; gap: 4px 14px; padding: 12px 4px; border-bottom: 1px solid var(--soft); font-size: 14px; }
 .criterion .what { display: flex; flex-direction: column; gap: 4px; min-width: 0; overflow-wrap: anywhere; }
 .criterion code { font-family: var(--mono); font-size: 12px; color: var(--mute); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .criterion .out { grid-column: 2; }
-.pill[open] { flex-basis: 100%; }
-.pills { display: flex; flex-wrap: wrap; gap: 8px; padding-top: 10px; }
-.pill { font-family: var(--mono); font-size: 12px; padding: 2px 10px; border-radius: 999px; border: 1px solid currentColor; }
-.pill summary { cursor: pointer; }
-.fold { border: 1px solid var(--line); border-radius: 12px; background: var(--panel); padding: 10px 16px; }
+.fold { border: 0; background: none; }
 .fold > summary { cursor: pointer; font-size: 15px; font-weight: 600; }
 .fold[open] > summary { margin-bottom: 10px; }
 .check, .finding { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 16px; padding: 8px 4px; border-bottom: 1px solid var(--line); font-size: 15px; }

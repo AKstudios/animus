@@ -104,7 +104,11 @@ export function localJobPage(id: string): JobPage | undefined {
   const job = PLAIN.test(id) ? jobOf(id, runs) : undefined;
   if (!job) return undefined;
   const spec = read(loadState(id)?.spec ?? join(jobDir(id), 'spec.md'));
-  return { at: new Date().toISOString(), stages: STAGES, job, ...(spec !== undefined ? { spec } : {}), log: '', ...folderParts(jobDir(id), runs.filter((r) => r.job === id)) };
+  let outcomes: Outcomes = {};
+  try { outcomes = readOutcomes(); } catch { /* unreadable: no PR is known */ }
+  const o = job.pr ? outcomes[job.pr] : undefined;
+  const pr: Partial<JobPage> = o ? { pr_state: o.state.toLowerCase() as PrState, pr_opened: o.opened, ...(o.state === 'MERGED' ? { pr_merged: o.closed ?? o.checked } : {}) } : {};
+  return { at: new Date().toISOString(), stages: STAGES, job, ...pr, ...(spec !== undefined ? { spec } : {}), log: '', ...folderParts(jobDir(id), runs.filter((r) => r.job === id)) };
 }
 
 /** Listens on the first free port from `port` up, on 127.0.0.1 only. */

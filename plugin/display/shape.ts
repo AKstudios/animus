@@ -65,6 +65,10 @@ export type JobPage = {
   questions?: { question: string; answer?: string }[];
   /** Its latest screenshots, as named in its shots folder (`build/…`), each served with a token at /jobs/<id>/shots/<name>; `at` is when they were taken. */
   shots?: { at: string; files: string[] };
+  /** What GitHub (locally, outcomes.json) said of its PR, and when it opened and merged; left out where it has not said. */
+  pr_state?: PrState;
+  pr_opened?: string;
+  pr_merged?: string;
   /** What the job's run has printed, all of it. */
   log: string;
 };

@@ -224,11 +224,14 @@ const pre = (text: string, attrs = '') => `<pre class="text"${attrs}>${esc(text)
 const none = (text: string) => `<div class="none">${esc(text)}</div>`;
 
 function jobSections(v: JobPageView): string {
-  const stages = v.bar.length ? `<svg class="timebar" viewBox="0 0 100 1" preserveAspectRatio="none" role="img" aria-label="Where the time went">${v.bar.map((s, i) => `<rect class="seg-${i % 7}" x="${v.bar.slice(0, i).reduce((a, b) => a + b.pct, 0)}" width="${s.pct}" height="1"/>`).join('')}</svg>
-    <div class="timekey">${v.bar.map((s, i) => `<span class="${s.on ? 'on' : ''}"><i class="seg-${i % 7}"></i>${esc(s.name)} <code>${s.on ? 'now' : esc(s.took)}</code></span>`).join('')}</div>` : '';
+  // Each stage is its own nested svg so its name is clipped to its part; the CSP allows no style attribute, so widths are percentages in attributes.
+  const stages = v.bar.length ? `<svg class="timebar" role="img" aria-label="Where the time went">${v.bar.map((s) => `<svg x="${s.at}%" width="${s.pct}%" height="28"><rect class="st-${esc(s.name)}" width="100%" height="28"/>${s.label ? `<text x="8" y="18">${esc(s.label)}</text>` : ''}</svg>`).join('')}</svg>
+    <div class="timekey">${v.bar.map((s) => `<span class="${s.on ? 'on' : ''}"><i class="st-${esc(s.name)}"></i>${esc(s.name)} <code>${s.on ? 'now' : esc(s.took)}</code></span>`).join('')}</div>` : '';
   const fold = (name: string, title: string, body: string, open = false) => `<details class="fold ${name}" data-key="fold-${name}"${open ? ' open' : ''}><summary>${title}</summary>${body}</details>`;
-  const criteria = v.criteria.map((c) => `<div class="criterion"><span class="tag tone-${c.tone}">${esc(c.tag)}</span><div class="what"><p>${esc(c.text)}</p>${c.command ? `<code>${esc(c.command)}</code>` : ''}</div>${c.output ? `<details class="out"><summary>Output</summary>${pre(c.output)}</details>` : ''}</div>`).join('');
-  const pills = v.pills.map((c) => c.output ? `<details class="pill tone-${c.tone}"><summary>${esc(c.name)} ${esc(c.tag)}</summary>${pre(c.output)}</details>` : `<span class="pill tone-${c.tone}" title="${esc(c.command)}">${esc(c.name)} ${esc(c.tag)}</span>`).join('');
+  const mark = (tone: string, tag: string) => `<span class="mark tone-${tone}" aria-label="${tone === 'fail' ? 'failed' : tone === 'ink' ? 'passed' : esc(tag)}">${esc(tag)}</span>`;
+  const criteria = v.criteria.map((c) => `<div class="criterion">${mark(c.tone, c.tag)}<div class="what"><p>${esc(c.text)}</p>${c.command ? `<code>${esc(c.command)}</code>` : ''}</div>${c.output ? `<details class="out"><summary>output</summary>${pre(c.output)}</details>` : ''}</div>`).join('');
+  const pills = v.pills.map((c) => c.output ? `<details class="chip"><summary>${mark(c.tone, c.tag)}${esc(c.name)}</summary>${pre(c.output)}</details>` : `<span class="chip" title="${esc(c.command)}">${mark(c.tone, c.tag)}${esc(c.name)}</span>`).join('');
+  const note = (text: string) => (text ? ` <span class="count">${esc(text)}</span>` : '');
   const slices = v.slices.length ? `<ol class="slices">${v.slices.map((s) => `<li${s.done ? ' class="done"' : ''}><span class="b">${esc(s.title)}</span> <span class="mute">${s.done ? 'done' : ''}</span><div class="mute">${esc(s.delivers)}</div></li>`).join('')}</ol>` : '';
   const reviews = v.reviews.map((r) => `<div class="round"><div class="label">${esc(r.title)}</div><p>${esc(r.summary)}</p>
     ${r.findings.map((f) => `<div class="finding"><span class="tag tone-${f.tone}">${esc(f.tag)}</span>${f.where ? `<code>${esc(f.where)}</code>` : ''}<p>${esc(f.problem)}</p>${f.fix ? `<p class="mute">${esc(f.fix)}</p>` : ''}</div>`).join('') || none('No findings.')}</div>`).join('');
@@ -241,15 +244,26 @@ function jobSections(v: JobPageView): string {
     v.reason ? `<pre class="text why">${esc(v.reason)}</pre>` : '',
     `<div class="numbers">${v.numbers.map((n) => `<div><code class="num">${esc(n.v)}</code><span class="mute">${esc(n.k)}</span></div>`).join('')}</div>`,
     section('stages', 'Where the time went', stages || none('No stage has taken time yet.')),
-    criteria ? section('criteria', `Acceptance criteria <span class="count">${v.criteria.filter((c) => c.tone === 'ink').length} of ${v.criteria.length} proven</span>`, `<div class="list">${criteria}</div>`) : '',
-    section('checks', 'Checks', pills ? `<div class="pills">${pills}</div>` : none(criteria ? 'No other checks.' : 'No checks have run yet.')),
-    section('review', 'Review', reviews || none('Not reviewed yet.')),
+    criteria ? section('criteria', `Acceptance criteria${note(v.notes.criteria)}`, `<div class="list">${criteria}</div>`) : '',
+    section('checks', `Checks${note(v.notes.checks)}`, pills ? `<div class="chips">${pills}</div>` : none(criteria ? 'No other checks.' : 'No checks have run yet.')),
+    section('review', `Review${note(v.notes.review)}`, reviews || none('Not reviewed yet.')),
     shots ? section('screenshots', 'Screenshots', `<div class="shots">${shots}</div>`) : '',
-    slices ? fold('slices', `Slices <span class="count">${v.slices.filter((s) => s.done).length} of ${v.slices.length}</span>`, slices) : '',
-    fold('questions', 'Questions', questions || none('It has asked nothing.')),
-    fold('spec', 'Spec', v.spec ? pre(v.spec) : none('Helix no longer has the spec.')),
-    fold('log', 'Log', v.log ? pre(v.log, ' data-log') : none(v.noLog), v.follow),
+    `<div class="folds">${[
+      slices ? fold('slices', `Slices${note(`${v.slices.filter((s) => s.done).length} of ${v.slices.length}`)}`, slices) : '',
+      fold('spec', 'Spec', v.spec ? pre(v.spec) : none('Helix no longer has the spec.')),
+      fold('log', 'Log', v.log ? pre(v.log, ' data-log') : none(v.noLog), v.follow),
+      fold('questions', `Questions${note(v.questions.length ? '' : 'none asked')}`, questions || none('It has asked nothing.')),
+    ].join('')}</div>`,
   ].join('');
+}
+
+/** The panels beside a job page's main column: its pull request and its labels. */
+function jobSide(v: JobPageView): string {
+  const rows = (r: { k: string; v: string }[]) => r.map((x) => `<div class="kv"><span class="mute">${esc(x.k)}</span><span>${esc(x.v)}</span></div>`).join('');
+  const pr = v.pr ? `<section class="panel pr"><h2>Pull request</h2>
+    <div class="kv"><span>${esc(v.pr.number)}</span>${v.pr.href ? `<a class="tone-${v.pr.tone}" href="${esc(v.pr.href)}" target="_blank" rel="noopener noreferrer">${esc(v.pr.state)} ↗</a>` : `<span class="tone-${v.pr.tone}">${esc(v.pr.state)}</span>`}</div>${rows(v.pr.rows)}</section>` : '';
+  const labels = v.labels.length ? `<section class="panel labels"><h2>Labels</h2>${rows(v.labels)}</section>` : '';
+  return pr || labels ? `<aside class="side">${pr}${labels}</aside>` : '';
 }
 
 function jobMain(id: number | string, now: number, local: boolean): string {
@@ -258,7 +272,8 @@ function jobMain(id: number | string, now: number, local: boolean): string {
   const lead = v && !notice ? `<div class="tag-row"><span class="tag tone-${v.tag.tone}">${esc(v.tag.text)}</span><span class="mute">${ref(id) ? `${ref(id)} · ` : ''}${esc(v.line)}</span></div>` : '';
   const scope = `<div class="scope"><div><h1>${esc(v?.title ?? `Job ${ref(id) || id}`)}</h1>${lead}</div></div>`;
   const body = notice ? `<div class="none boxed">${esc(notice.text)}</div>${notice.signIn ? signIn : ''}` : v ? jobSections(v) : '';
-  return `<main class="main">${back('/jobs', 'Jobs')}${scope}${body}</main>`;
+  const trail = v && !notice ? `<nav class="crumb" aria-label="Trail"><a href="/jobs">Jobs</a> / ${esc(v.trail.project)} / <code>${esc(v.trail.job)}</code></nav>` : back('/jobs', 'Jobs');
+  return `<main class="main">${trail}${scope}${body}</main>${v && !notice ? jobSide(v) : ''}`;
 }
 
 function peopleList(local: boolean): string {

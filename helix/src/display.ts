@@ -96,11 +96,14 @@ export function personPage(opts: { store: Store }, name: string, before = Infini
  * the spec Helix was sent, and what its Animus folder and run log say, read
  * fresh. It needs a token: the server sees to that.
  */
-export function jobPage(opts: { store: Store; supervisor: Supervisor }, id: number): JobPage | undefined {
+export function jobPage(opts: { store: Store; supervisor: Supervisor }, id: number, github: { prs: DisplayPr[]; closed: DisplayClosed[] } = { prs: [], closed: [] }): JobPage | undefined {
   const job = opts.store.get(id);
   if (!job) return undefined;
   const spec = read(job.spec);
-  const page: JobPage = { at: new Date().toISOString(), stages: STAGES, job: jobOf(job, opts.supervisor), ...(spec !== undefined ? { spec } : {}), log: opts.supervisor.log(id, Infinity) };
+  const open = github.prs.find((p) => p.job === id);
+  const closed = github.closed.find((c) => c.job === id);
+  const pr: Partial<JobPage> = open ? { pr_state: 'open', pr_opened: open.created } : closed ? { pr_state: closed.merged ? 'merged' : 'closed', ...(closed.merged ? { pr_merged: closed.at } : {}) } : {};
+  const page: JobPage = { at: new Date().toISOString(), stages: STAGES, job: jobOf(job, opts.supervisor), ...pr, ...(spec !== undefined ? { spec } : {}), log: opts.supervisor.log(id, Infinity) };
   const dir = folderOf(opts.supervisor, job);
   if (!job.animus_job || !dir) return page;
   const runs = readRuns(join(opts.supervisor.animusHome(job.person), 'runs.jsonl')).filter((r) => r.job === job.animus_job);
