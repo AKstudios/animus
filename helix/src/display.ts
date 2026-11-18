@@ -6,7 +6,7 @@ import { statSync } from 'node:fs';
 import { hostname } from 'node:os';
 import { join } from 'node:path';
 import { listJobs, type JobFilter } from '../../plugin/display/job-list.ts';
-import { PERSON_JOBS, type Display, type DisplayClosed, type DisplayPr, type JobListPage, type DisplayJob, type DisplayRepo, type JobPage, type PeoplePage, type PersonPage, type PersonRow } from '../../plugin/display/shape.ts';
+import { PERSON_JOBS, type Display, type DisplayClosed, type DisplayPr, type JobListPage, type ListJob, type DisplayJob, type DisplayRepo, type JobPage, type PeoplePage, type PersonPage, type PersonRow } from '../../plugin/display/shape.ts';
 import { folderParts, read, shotFile } from '../../plugin/src/job-folder.ts';
 import { readRuns, STAGES } from '../../plugin/src/log.ts';
 import { loadProfile, PROFILE_PATH } from '../../plugin/src/profile.ts';
@@ -96,11 +96,14 @@ export function personPage(opts: { store: Store }, name: string, before = Infini
  * the spec Helix was sent, and what its Animus folder and run log say, read
  * fresh. It needs a token: the server sees to that.
  */
-export function jobPage(opts: { store: Store; supervisor: Supervisor }, id: number): JobPage | undefined {
+export function jobPage(opts: { store: Store; supervisor: Supervisor }, id: number, github: { prs: DisplayPr[]; closed: DisplayClosed[] } = { prs: [], closed: [] }): JobPage | undefined {
   const job = opts.store.get(id);
   if (!job) return undefined;
   const spec = read(job.spec);
-  const page: JobPage = { at: new Date().toISOString(), stages: STAGES, job: jobOf(job, opts.supervisor), ...(spec !== undefined ? { spec } : {}), log: opts.supervisor.log(id, Infinity) };
+  const open = github.prs.find((p) => p.job === id);
+  const closed = github.closed.find((c) => c.job === id);
+  const pr: Partial<JobPage> = open ? { pr_state: 'open', pr_opened: open.created } : closed ? { pr_state: closed.merged ? 'merged' : 'closed', ...(closed.merged ? { pr_merged: closed.at } : {}) } : {};
+  const page: JobPage = { at: new Date().toISOString(), stages: STAGES, job: jobOf(job, opts.supervisor), ...pr, ...(spec !== undefined ? { spec } : {}), log: opts.supervisor.log(id, Infinity) };
   const dir = folderOf(opts.supervisor, job);
   if (!job.animus_job || !dir) return page;
   const runs = readRuns(join(opts.supervisor.animusHome(job.person), 'runs.jsonl')).filter((r) => r.job === job.animus_job);
@@ -139,10 +142,11 @@ export function display(opts: { config: Config; store: Store; supervisor: Superv
  */
 export function jobList(opts: { store: Store; supervisor: Supervisor }, f: Partial<JobFilter>, before: string | undefined, github: { prs: DisplayPr[]; closed: DisplayClosed[] }): JobListPage {
   const open = new Set(github.prs.map((p) => p.job));
-  const closed = new Map(github.closed.map((c) => [c.job, c.merged ? 'merged' as const : 'closed' as const]));
-  const jobs = opts.store.list(-1).map((j) => {
-    const state = open.has(j.id) ? 'open' as const : closed.get(j.id);
-    return { ...jobOf(j, opts.supervisor), ...(state ? { pr_state: state } : {}) };
+  const closed = new Map(github.closed.map((c) => [c.job, c]));
+  const jobs = opts.store.list(-1).map((j): ListJob => {
+    const c = closed.get(j.id);
+    const state = open.has(j.id) ? 'open' as const : c ? c.merged ? 'merged' as const : 'closed' as const : undefined;
+    return { ...jobOf(j, opts.supervisor), ...(state ? { pr_state: state } : {}), ...(c?.merged && !open.has(j.id) ? { pr_merged: c.at } : {}) };
   });
   return { at: new Date().toISOString(), ...listJobs(jobs, f, before) };
 }

@@ -26,6 +26,7 @@ clients with how to update.
   (`repo`, `pr`, `ask`; the job's person or the owner), which runs it as an
   `animus fix` process in a new container, and the job page links the job it
   fixes. Adding the route is not breaking.
+- The display's overview is the same on `animus ui` and on Helix: Needs you, Working now, Queued, Open pull requests, Finished. Result tags are in sentence case, a Finished row says how long its PR took to merge, and the Projects panel has ticks and a key in place of the "All projects" button.
 - A spec refused at admission, and a job ended by SIGINT, SIGTERM or a Helix
   cancel, now leave a run line with cause `admit`, `interrupted` or
   `cancelled`. Helix writes a `cancelled` file beside the job's spec before it

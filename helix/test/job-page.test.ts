@@ -125,10 +125,10 @@ test('a job page shows the job\'s facts, spec, stages and slices, checks with a 
     { title: 'Export a book', delivers: 'A whole book exports.', done: false },
   ]);
   assert.deepEqual(v.checks, [
-    { name: 'typecheck', command: 'npm run typecheck', tag: 'ok', tone: 'ink', detail: '1.2s' },
-    { name: 'test', command: 'npm test (all)', tag: 'FAIL', tone: 'fail', detail: '4.1s', output: 'not ok 3 - exports the cover\n\n  expected 1 page, got 0' },
+    { name: 'typecheck', command: 'npm run typecheck', tag: '✓', tone: 'ink', detail: '1.2s' },
+    { name: 'test', command: 'npm test (all)', tag: '✗', tone: 'fail', detail: '4.1s', output: 'not ok 3 - exports the cover\n\n  expected 1 page, got 0' },
     { name: 'lint', command: 'npm run lint', tag: 'skip', tone: 'mute', detail: 'no change under src/' },
-    { name: 'acceptance-1', command: 'node --test test/pdf.test.ts', tag: 'FAIL', tone: 'fail', detail: '0.9s', output: 'not ok 1 - a book exports' },
+    { name: 'acceptance-1', command: 'node --test test/pdf.test.ts', tag: '✗', tone: 'fail', detail: '0.9s', output: 'not ok 1 - a book exports' },
   ]);
   assert.deepEqual(v.reviews, [
     { title: 'Review 1', summary: 'Close; the cover is lost.', findings: [
@@ -169,10 +169,12 @@ test('a merged job page leads with its tag and line, four numbers and a bar of e
     reviews: [{ summary: 'ok', findings: [] }], slices: [{ title: 'a', delivers: '', done: true }, { title: 'b', delivers: '', done: false }],
   });
   const v = jobView(p, NOW, false, { job: 9, number: 4, merged: true, at: '2026-11-17T12:00:30Z' });
-  assert.deepEqual([v.tag, v.line], [{ text: 'MERGED #4', tone: 'merged' }, 'app · ana · started 2026-11-17 10:05 UTC · merged after 1h 20m']);
+  assert.deepEqual([v.tag, v.line], [{ text: 'Merged #4', tone: 'merged' }, 'app · ana · started 2026-11-17 10:05 UTC · merged after 1h 20m']);
   assert.deepEqual(v.numbers, [{ k: 'time taken', v: '35m' }, { k: 'cost', v: '$3.40' }, { k: 'gate runs', v: '3' }, { k: 'slices passed', v: '1 of 2' }]);
   assert.deepEqual(v.bar, [
-    { name: 'plan', took: '2m', pct: 20, on: false }, { name: 'implement', took: '6m', pct: 60, on: false }, { name: 'review', took: '2m', pct: 20, on: false },
+    { name: 'plan', took: '2m', pct: 20, at: 0, label: 'plan', on: false },
+    { name: 'implement', took: '6m', pct: 60, at: 20, label: 'implement · 2 slices', on: false },
+    { name: 'review', took: '2m', pct: 20, at: 80, label: 'review', on: false },
   ]);
   assert.equal(jobView({ ...p, slices: undefined }, NOW).numbers[3]!.v, '1');
 });
@@ -188,15 +190,34 @@ test('a job page lists each acceptance criterion with its check, the other check
   ];
   const v = jobView(page({ state: 'ended' }, { spec, checks }), NOW);
   assert.deepEqual(v.criteria, [
-    { text: 'First thing wraps here.', tag: 'ok', tone: 'ink', command: 'node --test a.ts' },
-    { text: 'Second thing', tag: 'FAIL', tone: 'fail', command: 'node --test b.ts', output: 'not ok' },
+    { text: 'First thing wraps here.', tag: '✓', tone: 'ink', command: 'node --test a.ts' },
+    { text: 'Second thing', tag: '✗', tone: 'fail', command: 'node --test b.ts', output: 'not ok' },
   ]);
   assert.deepEqual(v.pills, [
-    { name: 'test', command: 'npm test', tag: 'FAIL', tone: 'fail', output: 'boom' },
+    { name: 'test', command: 'npm test', tag: '✗', tone: 'fail', output: 'boom' },
     { name: 'lint', command: 'npm run lint', tag: 'skip', tone: 'mute' },
   ]);
   const bare = jobView(page({ state: 'ended' }, { spec: 'no list', checks }), NOW);
   assert.deepEqual([bare.criteria, bare.pills.length], [[], 4]);
+});
+
+// Protects: criterion 5, the trail, the Pull request and Labels panels and the headings' counts. Fails when: a panel shows the wrong state, branch or time, a label is missed, or a count is wrong.
+test('a job page has a trail, a Pull request panel with its branch and times, the spec\'s labels and counts for its headings', () => {
+  const spec = '---\nsize: medium\ndifficulty: hard\ntype: feature\n---\n# T\n';
+  const p = page({ id: 9, animus_job: 'the-job-1a2b', state: 'ended', outcome: 'pr', pr: 'https://github.com/o/app/pull/4' }, {
+    spec, pr_state: 'merged', pr_opened: '2026-11-17T10:41:00Z', pr_merged: '2026-11-17T12:00:00Z',
+    checks: [{ name: 'test', command: 'npm test', status: 'ok', detail: '1s' }, { name: 'lint', command: 'npm run lint', status: 'fail', detail: '1s', output: 'x' }],
+    reviews: [{ summary: 's', findings: [{ severity: 'blocker', problem: 'p' }, { severity: 'note', problem: 'q' }] }, { summary: 't', findings: [] }],
+  });
+  const v = jobView(p, NOW);
+  assert.deepEqual(v.trail, { project: 'app', job: 'the-job-1a2b' });
+  assert.deepEqual(v.pr, { number: '#4', href: 'https://github.com/o/app/pull/4', state: 'merged', tone: 'merged', rows: [
+    { k: 'branch', v: 'animus/the-job-1a2b' }, { k: 'opened', v: '2026-11-17 10:41 UTC' }, { k: 'merged', v: '2026-11-17 12:00 UTC' },
+  ] });
+  assert.deepEqual(v.labels, [{ k: 'size', v: 'medium' }, { k: 'difficulty', v: 'hard' }, { k: 'type', v: 'feature' }]);
+  assert.deepEqual(v.notes, { criteria: '0 of 0 proven', checks: '1 failed on the last run', review: '2 rounds · 2 findings' });
+  assert.equal(jobView(page({}), NOW).pr, undefined);
+  assert.deepEqual(jobView(page({}, { spec: '# T\n' }), NOW).labels, []);
 });
 
 // Protects: a running job's page follows it. Fails when: the stage it is on is not marked, or its log is not followed.

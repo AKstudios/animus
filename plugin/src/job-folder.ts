@@ -36,7 +36,8 @@ function parseGates(text: string): JobCheck[] {
     return { c, at, body: at + mark.length };
   }).filter((s) => s.at >= 0);
   sections.forEach((s, i) => {
-    if (s.c.status === 'fail') s.c.output = text.slice(s.body, sections[i + 1] ? sections[i + 1]!.at - 1 : undefined);
+    const out = text.slice(s.body, sections[i + 1] ? sections[i + 1]!.at - 1 : undefined);
+    if (out.trim() || s.c.status === 'fail') s.c.output = out;
   });
   return checks;
 }

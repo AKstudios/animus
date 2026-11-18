@@ -12,10 +12,18 @@ export type JobPageView = {
   /** The result tag, and the one line under the title: project, person, when it started, and how long a merged PR took to merge. */
   tag: { text: string; tone: Tone };
   line: string;
+  /** `Jobs / <project> / <job>`: the project and the job's own name. */
+  trail: { project: string; job: string };
   /** Time taken, cost, gate runs, and slices passed or review rounds. */
   numbers: { k: string; v: string }[];
-  /** Each stage that took time, its width the share of the time, with its time beneath. */
-  bar: { name: string; took: string; pct: number; on: boolean }[];
+  /** Each stage that took time: where it starts and how wide it is, as a share of the time; `label` is its name in its part, empty where it does not fit. */
+  bar: { name: string; took: string; pct: number; at: number; label: string; on: boolean }[];
+  /** The side panel for the job's pull request: its number, state, branch and times; left out for a job with none. */
+  pr?: { number: string; href?: string; state: string; tone: Tone; rows: { k: string; v: string }[] };
+  /** The side panel of the spec header's size, difficulty and type: only the ones it names. */
+  labels: { k: string; v: string }[];
+  /** What each heading counts, beside it. */
+  notes: { criteria: string; checks: string; review: string };
   /** The spec's acceptance criteria in its words, each with its `acceptance-<n>` check; empty when the spec cannot be read that way. */
   criteria: { text: string; tag: string; tone: Tone; command: string; output?: string }[];
   /** The checks that are not a criterion's, as small tags; a failed one has its output. */
@@ -41,7 +49,7 @@ export type JobPageView = {
 };
 
 export const OUTCOMES: Record<string, string> = { pr: 'pull request', 'draft-pr': 'draft pull request', 'dry-run': 'dry run', 'needs-input': 'needs input', failed: 'failed' };
-const CHECK: Record<string, [string, Tone]> = { ok: ['ok', 'ink'], fail: ['FAIL', 'fail'], skip: ['skip', 'mute'] };
+const CHECK: Record<string, [string, Tone]> = { ok: ['✓', 'ink'], fail: ['✗', 'fail'], skip: ['skip', 'mute'] };
 const SEVERITY: Record<string, Tone> = { blocker: 'fail', 'should-fix': 'ask', note: 'mute' };
 
 /** The items of the spec's "Acceptance criteria" list, in its words (the `$ command` lines left out). */
@@ -57,6 +65,17 @@ export function criteriaOf(spec: string): string[] {
   }
   return items;
 }
+
+/** The size, difficulty and type the spec's header (its `---` block) names, in that order. */
+export function labelsOf(spec: string): { k: string; v: string }[] {
+  const head = /^---\r?\n([\s\S]*?)\r?\n---/.exec(spec)?.[1] ?? '';
+  return ['size', 'difficulty', 'type'].flatMap((k) => {
+    const v = new RegExp(`^${k}:[ \\t]*(\\S.*)$`, 'm').exec(head)?.[1]?.trim();
+    return v ? [{ k, v }] : [];
+  });
+}
+
+const plural = (n: number, one: string) => `${n} ${n === 1 ? one : `${one}s`}`;
 
 /** A time as the page shows it: in UTC, so every screen that shows the job says the same. */
 export const when = (iso: string) => `${iso.slice(0, 10)} ${iso.slice(11, 16)} UTC`;
@@ -95,8 +114,22 @@ export function jobView(p: JobPage, now: number, local = false, closed?: Display
   const merged = closed?.merged && j.ended ? Math.max(0, Date.parse(closed.at) - Date.parse(j.ended)) : undefined;
   const done = (p.slices ?? []).filter((s) => s.done).length;
   const { tag, tone } = recent(j, local, closed);
+  let from = 0;
+  const bar = p.stages.flatMap((name) => {
+    const ms = p.ms?.[name] ?? 0;
+    if (ms <= 0) return [];
+    const pct = Math.round((ms / total) * 1000) / 10;
+    const text = name === 'implement' && (p.slices?.length ?? 0) > 1 ? `${name} · ${plural(p.slices!.length, 'slice')}` : name === 'gates' && (p.gate_runs ?? 0) > 1 ? `${name} ×${p.gate_runs}` : name;
+    const part = { name, took: span(ms), pct, at: from, label: pct >= text.length + 2 ? text : '', on: j.state === 'running' && j.progress?.stage === name };
+    from += pct;
+    return [part];
+  });
+  const state = p.pr_state ?? (closed ? (closed.merged ? 'merged' : 'closed') : undefined);
+  const mergedAt = p.pr_merged ?? (closed?.merged ? closed.at : undefined);
+  const found = (p.reviews ?? []).reduce((n, r) => n + r.findings.length, 0);
+  const failed = checks.filter((c) => c.tone === 'fail').length;
   return {
-    id: j.id, title: j.title, facts,
+    id: j.id, title: j.title, facts, trail: { project: j.repo, job: String(j.animus_job ?? j.id) },
     tag: { text: tag, tone },
     line: [j.repo, j.person, j.started ? `started ${when(j.started)}` : `submitted ${when(j.submitted)}`, ...(merged !== undefined ? [`merged after ${span(merged)}`] : [])].join(' · '),
     numbers: [
@@ -104,10 +137,18 @@ export function jobView(p: JobPage, now: number, local = false, closed?: Display
       { k: 'gate runs', v: String(p.gate_runs ?? 0) },
       p.slices?.length ? { k: 'slices passed', v: `${done} of ${p.slices.length}` } : { k: 'review rounds', v: String(p.reviews?.length ?? 0) },
     ],
-    bar: p.stages.flatMap((name) => {
-      const ms = p.ms?.[name] ?? 0;
-      return ms > 0 ? [{ name, took: span(ms), pct: Math.round((ms / total) * 1000) / 10, on: j.state === 'running' && j.progress?.stage === name }] : [];
-    }),
+    bar,
+    ...(j.pr ? { pr: {
+      number: pr ? `#${pr}` : j.pr, ...(/^https?:\/\//.test(j.pr) ? { href: j.pr } : {}),
+      state: state ?? 'open', tone: (state === 'merged' ? 'merged' : state === 'closed' ? 'mute' : 'open') as Tone,
+      rows: [{ k: 'branch', v: `animus/${j.animus_job ?? j.id}` }, ...(p.pr_opened ? [{ k: 'opened', v: when(p.pr_opened) }] : []), ...(mergedAt ? [{ k: 'merged', v: when(mergedAt) }] : [])],
+    } } : {}),
+    labels: labelsOf(p.spec ?? ''),
+    notes: {
+      criteria: `${criteria.filter((c) => c.tone === 'ink').length} of ${criteria.length} proven`,
+      checks: !checks.length ? '' : failed ? `${failed} failed on the last run` : 'all passed on the last run',
+      review: p.reviews?.length ? `${plural(p.reviews.length, 'round')} · ${plural(found, 'finding')}` : '',
+    },
     criteria,
     pills: checks.filter((c) => !used.has(c.name)).map(({ detail: _d, ...c }) => c),
     ...(j.reason ? { reason: j.reason } : {}),
