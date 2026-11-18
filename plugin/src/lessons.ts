@@ -106,3 +106,21 @@ export function describeLessons(lessons: readonly Lesson[], now: number): string
   }
   return out.join('\n') || 'no lessons yet: animus retro proposes some from the last week of runs';
 }
+
+export const PROMPT_CAP = 10;
+
+/** The lessons a job's agent is given: kept and unexpired, its project's or the factory's, for that agent, newest first, at most 10. */
+export function lessonsForPrompt(project: string, agent: Lesson['agent'], now: number, lessons: readonly Lesson[] = readLessons()): Lesson[] {
+  return lessons.filter((l) => stateOf(l, now) === 'kept' && l.agent === agent && inScope(l, project)).sort((a, b) => b.id - a.id).slice(0, PROMPT_CAP);
+}
+
+/** The section of an agent's standing instructions that carries its lessons; nothing when it has none. */
+export const lessonsSection = (lessons: readonly Lesson[]): string => lessons.length ? `# Lessons from earlier jobs\n\nA person kept these from earlier jobs' records. Follow them where they apply; the spec and the project's rules still decide what the work must do.\n\n${lessons.map((l) => `- ${l.text}`).join('\n')}` : '';
+
+/** A job was given these lessons: each one's uses go up by one. */
+export function countUses(ids: readonly number[]): void {
+  if (!ids.length) return;
+  const store = load();
+  for (const l of store.lessons) if (ids.includes(l.id)) l.uses++;
+  writeJson(lessonsFile(), store);
+}

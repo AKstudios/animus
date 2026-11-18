@@ -83,6 +83,8 @@ export type Run = {
   /** The commit of Animus's prompts, profiles and scripts that ran the job. */
   factory_version: string;
   skills: string[];
+  /** Ids of the kept lessons (lessons.ts) the job's agents were given. */
+  lessons?: number[];
   started: string;
   ended: string;
   /** Wall time per stage, in ms. queue is 0 in local mode; plan is the planner's sessions. */

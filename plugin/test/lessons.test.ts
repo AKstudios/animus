@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 import { rmSync } from 'node:fs';
 import { beforeEach, test } from 'node:test';
-import { accept, dismiss, describeLessons, expiresAt, readLessons, stateOf, lessonsFile } from '../src/lessons.ts';
+import { accept, addProposals, dismiss, describeLessons, expiresAt, lessonsForPrompt, lessonsSection, readLessons, stateOf, lessonsFile, type Lesson } from '../src/lessons.ts';
 import { animusHome, appendRun, runLog, writeJson, type Run } from '../src/log.ts';
 import { outcomesFile } from '../src/outcomes.ts';
 import { loadFactory } from '../src/profiles.ts';
@@ -153,4 +153,26 @@ test('animus lessons lists proposed and kept lessons with ids, cites, uses and d
   assert.deepEqual(readLessons().map((l) => [l.id, l.status]), [[1, 'kept'], [2, 'dismissed'], [3, 'dismissed']]);
   const missing = animus('accept', '9');
   assert.deepEqual([missing.status, missing.stderr], [2, 'animus: no lesson 9: animus lessons lists them\n']);
+});
+
+// Protects: criteria 3 and 4, the choice of what a prompt carries. Fails when: a lesson of another project, agent or state reaches a prompt, or the cap or the order is wrong.
+test('a prompt gets the kept, unexpired lessons of its project and the factory for that agent, newest first, at most 10', () => {
+  const lesson = (text: string, over: Partial<Pick<Lesson, 'scope' | 'project' | 'agent'>> = {}) => ({ text, scope: 'project' as const, project: 'meal-planner', agent: 'implementer' as const, cites: ['a', 'b'], ...over });
+  const old = addProposals([lesson('expired one')], NOW - 70 * DAY)[0]!;
+  accept(old.id, NOW - 70 * DAY);
+  const kept = addProposals(Array.from({ length: 11 }, (_, i) => lesson(`kept ${i + 1}`)), NOW - DAY);
+  for (const l of kept) accept(l.id, NOW - DAY);
+  const [factory, other, reviewers, proposed, dismissed] = addProposals([
+    lesson('factory wide', { scope: 'factory', project: 'tracker' }), lesson('other project', { project: 'tracker' }), lesson('for reviewers', { agent: 'reviewer' }), lesson('still proposed'), lesson('dismissed'),
+  ], NOW - DAY);
+  for (const l of [factory!, other!, reviewers!]) accept(l.id, NOW - DAY);
+  dismiss(dismissed!.id);
+
+  const given = lessonsForPrompt('meal-planner', 'implementer', NOW);
+
+  assert.deepEqual(given.map((l) => l.text), ['factory wide', ...[11, 10, 9, 8, 7, 6, 5, 4, 3].map((n) => `kept ${n}`)]);
+  assert.deepEqual(lessonsForPrompt('meal-planner', 'reviewer', NOW).map((l) => l.text), ['for reviewers']);
+  assert.ok(![old, proposed!].some((l) => given.some((g) => g.id === l.id)));
+  assert.equal(lessonsSection([]), '');
+  assert.match(lessonsSection(given), /^# Lessons from earlier jobs\n[\s\S]*\n- factory wide\n- kept 11\n/);
 });

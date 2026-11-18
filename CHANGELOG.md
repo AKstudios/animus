@@ -15,7 +15,10 @@ clients with how to update.
   lists proposed, kept and expired lessons from the new
   `ANIMUS_HOME/lessons.json`, and `animus lessons accept <id>` /
   `dismiss <id>` keep or drop one. A kept lesson expires after 60 days
-  unless a retro sees it again. Lessons are not yet given to jobs.
+  unless a retro sees it again. Every later job gives its project's and the
+  factory's kept lessons to the implementer, planner and reviewer they are for
+  (at most 10 each, newest first, under "Lessons from earlier jobs"), adds one
+  to each lesson's uses, and lists the ids as `lessons` on its run line.
 - A spec refused at admission, and a job ended by SIGINT, SIGTERM or a Helix
   cancel, now leave a run line with cause `admit`, `interrupted` or
   `cancelled`. Helix writes a `cancelled` file beside the job's spec before it

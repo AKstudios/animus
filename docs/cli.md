@@ -127,6 +127,12 @@ ids, cited jobs, uses and days left. A kept lesson expires 60 days after it
 was accepted or last seen again by a retro; `accept` on an expired one keeps
 it again, `dismiss` drops a lesson for good.
 
+Every later job of the project (a factory lesson, every project's) gives its
+kept, unexpired lessons to the agent each is for, under "Lessons from earlier
+jobs" in that agent's instructions: at most 10 per agent, newest first. Each
+job a lesson is given to adds one to its uses, and the job's run line lists
+the ids as `lessons`. A job picked up again counts as a new job.
+
 #### `animus cleanup [<job>...] [--days <n>] [--dry-run]`
 
 Removes what finished jobs left behind. A job whose PR is merged or closed
