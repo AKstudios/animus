@@ -47,7 +47,8 @@ export const MAX_INTERRUPTIONS = 3;
 /** Looks at a person's credentials before their job starts: why the job cannot run, or variables to add to it (the person's git identity). */
 export type Preflight = (person: string, env: Record<string, string>, repoDir: string, repo: string) => { why?: string; env?: Record<string, string> };
 
-export type Submission = { repo: string; spec: string; name?: string; draft?: boolean; skills?: PersonalSkill[] };
+/** github: the issue it was submitted from, which its progress is told on. */
+export type Submission = { repo: string; spec: string; name?: string; draft?: boolean; skills?: PersonalSkill[]; github?: { repo: string; issue: number } };
 
 /** While this file is in Helix's home, no job starts; submissions still queue. `helix upgrade` sets it to drain the machine. */
 export const pauseFile = (home: string) => join(home, 'paused');
@@ -153,7 +154,7 @@ export function supervise(opts: {
       const looked = opts.preflight?.(job.person, theirs, repoDir, job.repo) ?? {};
       if (looked.why) throw new AnimusError(looked.why);
       // What the person set themselves wins over what was looked up.
-      const jobEnv = { ...looked.env, ...theirs, ...credentialEnv(theirs), ANIMUS_USER: job.person, ANIMUS_TRIGGER: 'helix', ANIMUS_BIN: join(PLUGIN, 'bin', 'animus') };
+      const jobEnv = { ...looked.env, ...theirs, ...credentialEnv(theirs), ANIMUS_USER: job.person, ANIMUS_TRIGGER: 'helix', ...(job.github ? { ANIMUS_CLOSES: String(job.github.issue) } : {}), ANIMUS_BIN: join(PLUGIN, 'bin', 'animus') };
       launched = launch(job, repoDir, jobEnv);
       env = { ...process.env, ...jobEnv, ...launched.env };
     } catch (err) {
@@ -276,7 +277,7 @@ export function supervise(opts: {
         // A spec the factory will not run fails in its own time; here it only goes uncounted.
         try { tier = resolvePlan(loadFactory(), spec).implement.tier; } catch { /* no tier */ }
       } catch (err) { throw new Refused(400, (err as Error).message); }
-      const job = store.add({ state: 'queued', person, repo: s.repo, spec: '', title, ...(tier ? { tier } : {}), draft: Boolean(s.draft), submitted: now() });
+      const job = store.add({ state: 'queued', person, repo: s.repo, spec: '', title, ...(tier ? { tier } : {}), draft: Boolean(s.draft), ...(s.github ? { github: s.github } : {}), submitted: now() });
       job.spec = join(home, 'jobs', String(job.id), basename(s.name ?? 'spec.md'));
       mkdirSync(dirname(job.spec), { recursive: true });
       writeFileSync(job.spec, s.spec);

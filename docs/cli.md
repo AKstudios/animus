@@ -197,6 +197,12 @@ Queues a spec on Helix for the project with this checkout's GitHub address
 (or, failing that, the one named after its folder), with your personal
 skills. Returns the job's number at once.
 
+A job can also start from GitHub with no command here: `/animus <what you
+want>` as a comment on an issue in the project gets a draft spec as a comment,
+`/animus submit` queues it, and `/animus discard`, `/animus answer <text>` and
+`/animus cancel` act as their commands here do. See
+[helix.md](helix.md#github-comments).
+
 #### `animus status [<id>] [--all]`
 
 With no id, your jobs on Helix. With one, that job and the end of its log.
@@ -256,7 +262,7 @@ Run on the Helix machine through the `helix` command in the repository's helix/b
 | `helix slack setup` | Turns the Slack bot on: asks for the app's bot token, its app token and the owner's Slack member ID, tries both tokens against Slack, keeps them in `~/.helix/credentials/slack.env`, sets `slack: {enabled: true}` in `config.yaml` and links that Slack user to the owner. Refused while there is no owner. Restart `helix serve` to connect. See [helix-deploy.md](helix-deploy.md#the-slack-bot). |
 | `helix add-person <name> [--env-file <file>]` | Adds a person by hand instead of an invite, and prints their Helix token once. The file holds `KEY=VALUE` lines set for their jobs only (`CLAUDE_CODE_OAUTH_TOKEN`, `GH_TOKEN`). Run again for a new token. |
 | `helix remove-person <name>` | Their token stops working, their queued and running jobs are cancelled, their credentials file and folder are deleted. Prints what is left to revoke on GitHub, Claude and Tailscale. Refused for the owner until another is named. The owner runs the same from their laptop as `animus remove-person`. |
-| `helix check [<name>]` | Tries each person's tokens for real: who the GitHub token is, when it ends, whether it may push to each project, whether the Claude token answers. Exits 1 if anything but a push fails. |
+| `helix check [<name>]` | Tries each person's tokens for real: who the GitHub token is, when it ends, whether it may push to each project, whether the Claude token answers; for the whole Helix, whether some person's token can read each project's GitHub comments. Exits 1 if anything but a push fails. |
 | `helix add-repo <name> <dir>` | Adds a clone made by hand, ready at once. People add theirs with `animus project add` instead. |
 | `helix remove-repo <name>` | Removes any project, whoever added it. Refused while any of its jobs is queued or running. A clone added with `add-repo` stays on disk. |
 | `helix image` | Builds the image jobs run in (`animus-job:<version>`). Used when `config.yaml` has a `container:` entry. |

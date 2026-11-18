@@ -25,6 +25,33 @@ clients with how to update.
   `/helix` is no longer answered. Update the Slack app from
   helix/deploy/slack/manifest.yaml and reinstall it to the workspace. The
   `helix` CLI is unchanged.
+- Start and follow work with GitHub comments: Helix reads each project's issue
+  and pull request comments about once a minute, from the moment it first sees the project. A person's `/animus <text>`
+  on an issue gets a 👀 reaction and a draft spec as a comment (the spec in a
+  `markdown` block, with the replies it understands), written from the issue and
+  the comment, whether or not Slack is set up. A second `/animus <changes>` while
+  the draft is open posts the revised draft as a new comment. A comment more
+  than a day old when first seen is answered as too old; on a pull request,
+  `/animus` replies that `fix` is not available yet. Comments by people not on
+  the Helix, by Animus itself, or on repositories that are not projects are
+  ignored. A person with a Slack link is also DMed a link to each draft or
+  revision posted. `/animus discard` on the issue closes the draft with a
+  comment (the draft's person or the owner may), and a draft untouched for 7
+  days is discarded with a comment on its issue. GitHub and Slack drafts share
+  the limit of 3 open per person and the `draft_slots` queue. `/animus submit`
+  reads the spec block of the latest draft comment as it is on GitHub then, hand
+  edits included, checks it as `animus plan` does and queues it as the draft
+  person's job, with a comment naming the job; an incomplete spec, or a comment
+  with no readable spec block, gets a comment saying so and queues nothing. A
+  job submitted that way comments on its issue when its pull request opens (the
+  pull request says `Closes #<issue>`), when it fails, with the reason, and when
+  it needs input, with the question; stages in between are not commented.
+  `/animus answer <text>` on the issue answers the question and resumes the job,
+  and `/animus cancel` cancels it. `submit`, `discard`, `answer` and `cancel` by
+  anyone but the draft's or job's person, or the owner, get a one-line refusal.
+  `helix check` now flags a project that no person's GitHub token can read
+  comments on, and docs/factory.md, helix.md and cli.md describe `/animus`
+  comments on GitHub.
 
 ## 0.4.7 (2026-11-18)
 
