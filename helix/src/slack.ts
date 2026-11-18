@@ -15,13 +15,14 @@ import type { HelixJob, Store } from './store.ts';
 import { jobIsOver, type Supervisor } from './supervisor.ts';
 import { animusVersion } from '../../plugin/src/version.ts';
 
-const USAGE = 'Usage: /helix draft <what you want, with links>, /helix project <name>, /helix jobs, /helix status, /helix invite @user <github-login>, /helix link @user <person>, /helix notify off|on, or /helix help';
+const USAGE = 'Usage: /helix draft <what you want, with links>, /helix project <name>, /helix jobs, /helix me, /helix status, /helix invite @user <github-login>, /helix link @user <person>, /helix notify off|on, or /helix help';
 /** /helix help, and what an empty or unknown command gets: every command, one line each; the owner's only to the owner. */
 export function helpText(byOwner: boolean): string {
   return [
     '*Helix* turns a written request into a pull request. Commands:',
     '`/helix draft <what you want, with links>`: draft a job\'s spec in a thread. Reply there to change it, then press Submit. `@Helix <text>` in a channel does the same.',
     '`/helix jobs`: your queued, running and waiting jobs, with their threads.',
+    '`/helix me`: what Helix knows about you: your jobs, projects and page.',
     '`/helix status`: how busy Helix is and which version it runs.',
     '`/helix project <name>`: the project drafts in this channel are for.',
     '`/helix notify off|on`: stop or start your jobs posting their progress to you.',
@@ -123,6 +124,7 @@ export function slackBot(transport: Transport, opts: Core & { supervisor?: Jobs;
     }
     const [sub, ...args] = event.text.trim().split(/\s+/);
     if (sub === 'jobs') return reply(jobsCommand(store, person));
+    if (sub === 'me') return reply(await meCommand(store, config, person, byOwner, drafts));
     if (sub === 'status') return reply(statusCommand(store, config));
     if (sub === 'invite') return reply(byOwner ? await inviteCommand(transport, opts, args) : `Only ${owner} invites people to this Helix.`);
     if (sub === 'link') return reply(byOwner ? link(store, args) : `Only ${owner} links Slack users to people on this Helix.`);
@@ -158,6 +160,27 @@ function jobsCommand(store: Store, person: string): string {
     const where = thread ? ` ${threadLink(thread)}` : j.pr ? ` ${j.pr}` : '';
     return `Job ${j.id} ${j.state === 'ended' ? 'needs input' : j.state}: ${j.title} (${j.repo})${where}`;
   }).join('\n');
+}
+
+/** /helix me: what Helix knows about the sender. Never a token or credential. */
+async function meCommand(store: Store, config: Config, name: string, byOwner: boolean, drafts?: Drafts): Promise<string> {
+  const me = store.person(name);
+  const projects = drafts ? await drafts.projects(name) : store.projects().filter((p) => p.state === 'ready').map((p) => p.name);
+  const ended = store.inState('ended').filter((j) => j.person === name && j.outcome !== 'needs-input').sort((a, b) => b.id - a.id).slice(0, 5);
+  const pages = ([[config.url, 'Tailscale'], [config.lan_url, 'office network']] as const)
+    .filter(([base]) => base)
+    .map(([base, label]) => `${label}: ${base!.replace(/\/+$/, '')}/people/${name}`);
+  return [
+    `*${name}*${me?.github ? `, GitHub ${me.github}` : ''}${byOwner ? ', the owner' : ''}`,
+    `Joined: ${me?.joined ?? 'unknown'}`,
+    `Job notifications: ${store.notifies(name) ? 'on' : 'off'}`,
+    `Projects you may submit to: ${projects.join(', ') || 'none'}`,
+    '*Jobs*',
+    jobsCommand(store, name),
+    '*Last ended jobs*',
+    ...(ended.length ? ended.map((j) => `Job ${j.id} ${j.pr ? `opened ${j.pr}` : `failed: ${j.reason ?? j.outcome}`}: ${j.title} (${j.repo})`) : ['none']),
+    ...pages,
+  ].join('\n');
 }
 
 /** /helix status: how busy this Helix is, and its Animus version. */

@@ -14,6 +14,12 @@ clients with how to update.
   **Cancel job** button (back when an answered job resumes); an old button
   pressed for a finished job replies privately and is removed. This needs the
   `chat:write` scope the bot already has.
+- `/helix me` privately shows what Helix knows about the sender: their name,
+  GitHub login, whether they own Helix, when they joined, whether job
+  notifications are on, the projects they may submit to, their queued,
+  running and waiting jobs, their last five ended jobs, and their people
+  page. `/helix help` and the Slack manifest's usage hint list it: update
+  the app from the manifest.
 
 ## 0.4.6 (2026-11-18)
 
