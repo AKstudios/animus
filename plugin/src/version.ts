@@ -15,10 +15,10 @@ export function animusVersion(): string {
 }
 
 /** The release that runs: the plugin's version, with the commit (and -dirty) when it runs from a git checkout. */
-export function factoryVersion(): string {
-  const head = tryGit(PLUGIN_ROOT, ['rev-parse', '--short', 'HEAD']);
+export function factoryVersion(root = PLUGIN_ROOT): string {
+  const head = tryGit(root, ['rev-parse', '--short', 'HEAD']);
   if (!head) return animusVersion();
-  return `${animusVersion()}+${head}${tryGit(PLUGIN_ROOT, ['status', '--porcelain', '--', '.']) ? '-dirty' : ''}`;
+  return `${animusVersion()}+${head}${tryGit(root, ['status', '--porcelain', '--', '.']) ? '-dirty' : ''}`;
 }
 
 /**

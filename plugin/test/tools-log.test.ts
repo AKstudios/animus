@@ -24,6 +24,14 @@ test('reads a transcript into calls with target, failure and duration, never the
   assert.ok(!JSON.stringify(got).includes('SECRET OUTPUT'));
 });
 
+// Protects: a resumed session counts only its own turn. Fails when earlier turns' calls are logged again.
+test('a transcript that already holds earlier calls yields only those made since the turn began', () => {
+  const file = toolTranscript(calls);
+  const since = Date.UTC(2026, 0, 1, 0, 0, 6); // calls 0-2 were made at 0s, 2s and 4s; 3 and 4 at 6s and 8s
+  assert.deepEqual(toolCalls(file, since).map((c) => c.tool), ['WebFetch', 'Bash']);
+  assert.equal(toolCalls(file).length, 5);
+});
+
 // Protects: a job leaves tools.jsonl, the run log counts, and `animus tools` shows them. Fails when any link is missing.
 test('a job writes tools.jsonl and the run log counts; animus tools lists sessions and calls', async () => {
   const { agent } = fakeAgent([

@@ -8,12 +8,12 @@ import { spawnSync } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
 import { appendFileSync, copyFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { userInfo } from 'node:os';
-import { basename, join, resolve } from 'node:path';
+import { basename, dirname, join, resolve } from 'node:path';
 import { resolveAfter, waitForMerged } from './after.ts';
 import type { Agent, AgentResult } from './agent.ts';
 import { describe, failsOnBase, gateReport, jobChecks, LATER_SLICE, runChecks, type CheckResult } from './gates.ts';
 import { commitAll, mainCheckout, matchesAny, touchedFiles } from './git.ts';
-import { appendRun, jobDir, toolsLog, saveProgress, saveState, writeJson, type Cause, type FindingLog, type JobState, type Outcome, type Run, type Stage } from './log.ts';
+import { appendRun, CANCELLED_MARKER, jobDir, toolsLog, saveProgress, saveState, writeJson, type Cause, type FindingLog, type JobState, type Outcome, type Run, type Stage } from './log.ts';
 import { evidenceBranch, findPrByTitle, prBody, prState, type PrFind, type Evidence, type PrLookup, type Publish } from './pr.ts';
 import { admitFile, profileOnBase, refusal, type Admitted } from './admit.ts';
 import { loadProfile } from './profile.ts';
@@ -41,6 +41,8 @@ export type Deps = {
   prState?: PrLookup;
   findPr?: PrFind;
   sleep?: (ms: number) => Promise<void>;
+  /** Ends the process after a signal has been logged; replaced in tests. */
+  exit?: (code: number) => never;
 };
 
 export type RunOptions = {
@@ -99,11 +101,52 @@ function restore(worktree: string): void {
   tryGit(worktree, ['clean', '-fdq']);
 }
 
+function blankRun(p: { job: string; repo: string; opts: RunOptions; spec: Spec; size: string; difficulty: string; type: string; startedAt: number; dir?: string; factory?: Factory }): Run {
+  const { job, repo, opts, spec } = p;
+  return {
+    job, repo, submitter: process.env.ANIMUS_USER ?? tryGit(repo, ['config', 'user.email']) ?? userInfo().username,
+    trigger: opts.trigger ?? (opts.resume ? 'resume' : 'cli'), title: spec.title,
+    size: p.size, difficulty: p.difficulty, type: p.type, labels_defaulted: spec.defaulted, escalations: [],
+    provider: p.factory?.provider ?? 'unknown', factory_version: factoryVersion(), skills: [],
+    started: new Date(p.startedAt).toISOString(), ended: '',
+    ms: { queue: 0, setup: 0, plan: 0, implement: 0, gates: 0, review: 0, evidence: 0, pr: 0, total: 0 },
+    agents: [], cost_usd: 0, turns: 0, tokens: { input: 0, output: 0, cache_read: 0, cache_write: 0 },
+    gates: [], fix_rounds: 0, review: null, outcome: 'failed', branch: '', base: '', protected_touched: [], dir: p.dir ?? '',
+  };
+}
+
 export const uiJobOf = (job: string, spec: Spec): UiJob => ({ id: job, pages: spec.ui.pages, designs: spec.design, ...(spec.ui.target ? { target: spec.ui.target } : {}) });
 
+/**
+ * Runs a job. A SIGINT or SIGTERM leaves the run in the log, `cancelled` when Helix marked the job so and
+ * `interrupted` otherwise, before the process ends.
+ */
 export async function runJob(opts: RunOptions, deps: Deps): Promise<Run> {
+  const live: { run?: Run; startedAt: number } = { startedAt: Date.now() };
+  const stop = (code: number) => () => {
+    const run = live.run;
+    if (run && !run.ended) {
+      const cancelled = opts.specFile !== undefined && existsSync(join(dirname(opts.specFile), CANCELLED_MARKER));
+      Object.assign(run, { outcome: 'failed', cause: cancelled ? 'cancelled' : 'interrupted', reason: cancelled ? 'the job was cancelled' : 'the job was interrupted', ended: new Date().toISOString() });
+      run.ms.total = Date.now() - live.startedAt;
+      appendRun(run);
+    }
+    (deps.exit ?? process.exit)(code);
+  };
+  const [onInt, onTerm] = [stop(130), stop(143)];
+  process.on('SIGINT', onInt);
+  process.on('SIGTERM', onTerm);
+  try {
+    return await runJobWith(opts, deps, live);
+  } finally {
+    process.off('SIGINT', onInt);
+    process.off('SIGTERM', onTerm);
+  }
+}
+
+async function runJobWith(opts: RunOptions, deps: Deps, live: { run?: Run; startedAt: number }): Promise<Run> {
   const { factory, log } = deps;
-  const startedAt = Date.now();
+  const startedAt = live.startedAt;
   // What this job's sessions serve stops when this process ends, however it ends (ui.ts).
   process.env[JOB_PID] = String(process.pid);
   const repo = mainCheckout(opts.repo);
@@ -121,7 +164,12 @@ export async function runJob(opts: RunOptions, deps: Deps): Promise<Run> {
     plan = prior.plan;
   } else {
     admitted = admitFile(factory, opts.specFile!, repo, repoProfile, onBase?.facts);
-    if (admitted.problems.length || !admitted.plan) throw refusal(opts.specFile!, admitted);
+    if (admitted.problems.length || !admitted.plan) {
+      const { spec: s } = admitted;
+      const error = refusal(opts.specFile!, admitted);
+      appendRun({ ...blankRun({ job: newJobId(s.title), repo, opts, spec: s, size: s.size, difficulty: s.difficulty, type: s.type, startedAt, factory }), outcome: 'failed', cause: 'admit', reason: error.message, ended: new Date().toISOString() });
+      throw error;
+    }
     ({ spec, plan } = { spec: admitted.spec, plan: admitted.plan });
   }
   const job = prior?.job ?? newJobId(spec.title);
@@ -138,19 +186,16 @@ export async function runJob(opts: RunOptions, deps: Deps): Promise<Run> {
   if (!prior) saveJobSkills(dir, opts.personal ?? []);
   const personal = loadJobSkills(dir);
 
-  const run: Run = {
-    job, repo, submitter: process.env.ANIMUS_USER ?? tryGit(repo, ['config', 'user.email']) ?? userInfo().username,
-    trigger: opts.trigger ?? (prior ? 'resume' : 'cli'), title: spec.title,
-    size: plan.size, difficulty: plan.difficulty, type: plan.type, labels_defaulted: spec.defaulted, escalations: [],
-    provider: factory.provider, factory_version: factoryVersion(), skills: [],
-    started: new Date(startedAt).toISOString(), ended: '',
-    ms: { queue: 0, setup: 0, plan: 0, implement: 0, gates: 0, review: 0, evidence: 0, pr: 0, total: 0 },
-    agents: [], cost_usd: 0, turns: 0, tokens: { input: 0, output: 0, cache_read: 0, cache_write: 0 },
-    gates: [], fix_rounds: 0, review: null, outcome: 'failed', branch: '', base: '', protected_touched: [], dir,
-  };
+  const run = blankRun({ job, repo, opts, spec, size: plan.size, difficulty: plan.difficulty, type: plan.type, startedAt, dir, factory });
+  live.run = run;
   const timed = async <T>(stage: keyof Run['ms'], fn: () => T | Promise<T>): Promise<T> => {
     const t = Date.now();
-    try { return await fn(); } finally { run.ms[stage] += Date.now() - t; }
+    try {
+      const out = await fn();
+      // A signal is handled between turns of the event loop, which a session running in the foreground blocks: let it through after each stage.
+      await new Promise((done) => setTimeout(done, 5));
+      return out;
+    } finally { run.ms[stage] += Date.now() - t; }
   };
 
   /** Says where the job is, in its folder: what Helix's display shows while it runs. */

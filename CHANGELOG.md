@@ -8,6 +8,10 @@ clients with how to update.
 
 ## Unreleased
 
+- A spec refused at admission, and a job ended by SIGINT, SIGTERM or a Helix
+  cancel, now leave a run line with cause `admit`, `interrupted` or
+  `cancelled`. Helix writes a `cancelled` file beside the job's spec before it
+  kills the job.
 - The run log's `review` gains `log`: every finding as `{ round, severity,
   file, line, fate }` (`fixed`, `open` or `not-acted-on`), the counts as
   before. `factory_version` is the plugin's version plus the commit (and

@@ -53,6 +53,9 @@ export type GateRun = { attempt: number; ok: boolean; ms: number; checks: { name
 
 export type Outcome = 'pr' | 'draft-pr' | 'dry-run' | 'needs-input' | 'failed';
 
+/** Helix leaves this file beside a job's spec before it kills the job, so the job can tell a cancel from an interruption. */
+export const CANCELLED_MARKER = 'cancelled';
+
 /** Why a run that did not end as a pull request stopped, by where it stopped. Script-set, never by a model. */
 export const CAUSES = ['setup', 'admit', 'plan', 'needs-input', 'gates', 'review', 'budget', 'context', 'agent-error', 'cancelled', 'interrupted'] as const;
 export type Cause = (typeof CAUSES)[number];

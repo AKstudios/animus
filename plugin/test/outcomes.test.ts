@@ -1,10 +1,13 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import type { Run } from '../src/log.ts';
-import { describeNumbers, numbers, refreshOutcomes, type Outcomes } from '../src/outcomes.ts';
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { describeNumbers, numbers, outcomesFile, refreshOutcomes, type Outcomes } from '../src/outcomes.ts';
 import { runJob } from '../src/pipeline.ts';
 import type { PrFacts } from '../src/pr.ts';
-import { git } from '../src/proc.ts';
+import { git, tryGit } from '../src/proc.ts';
 import { clean, deps, done, fakeAgent, makeRepo, write, writeSpec } from './helpers.ts';
 
 const DAY = 24 * 60 * 60 * 1000;
@@ -43,6 +46,22 @@ test('a pull request records the lines a person added and removed after the job'
   const o = read({ ...facts, commits: late, head: git(repo, ['rev-parse', 'HEAD']) });
   assert.deepEqual(o.human_lines, { added: 3, removed: 0 });
   assert.deepEqual(read({ ...facts, commits: [run.started] }).human_lines, { added: 0, removed: 0 });
+});
+
+test('a head that is only on the remote is fetched before the lines are counted, and an unreadable head leaves them absent', async () => {
+  const { repo, run, facts, read } = await mergedJob();
+  // A person's push lives on GitHub: a bare remote holds the commit, the clone does not.
+  const person = mkdtempSync(join(tmpdir(), 'animus-person-'));
+  git(repo, ['clone', '-q', repo, person]);
+  write(person, 'src/feature.txt', 'one\ndone\nthree\nfour\n');
+  git(person, ['commit', '-qam', 'a person adds a line']);
+  const head = git(person, ['rev-parse', 'HEAD']);
+  git(repo, ['remote', 'add', 'origin', person]);
+  assert.equal(tryGit(repo, ['cat-file', '-e', head]), undefined);
+  const late = [run.started, new Date(Date.parse(run.ended) + 60_000).toISOString()];
+  assert.deepEqual(read({ ...facts, commits: late, head }).human_lines, { added: 1, removed: 0 });
+  rmSync(outcomesFile());
+  assert.equal(read({ ...facts, commits: late, head: 'f'.repeat(40) }).human_lines, undefined);
 });
 
 test('a later change to the lines a pull request added is rework; a change elsewhere, or after 30 days, is not', async () => {

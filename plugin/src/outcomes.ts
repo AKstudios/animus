@@ -24,8 +24,8 @@ export type PrOutcome = {
   ms_to_merge?: number;
   /** Commits on the pull request made after the job's last run ended. */
   human_commits: number;
-  /** Lines those commits added and removed, read from the clone where it is here (0 when it is not). */
-  human_lines: { added: number; removed: number };
+  /** Lines those commits added and removed; absent when the clone cannot read the pull request's head. */
+  human_lines?: { added: number; removed: number };
   /** Within 30 days of the merge; absent while not merged, or when the repository is not here to read. */
   reverted?: boolean;
   /** Lines the pull request added were changed or removed within 30 days of the merge. */
@@ -45,10 +45,14 @@ function settled(o: PrOutcome): boolean {
   return o.state === 'MERGED' && o.closed !== undefined && o.reverted !== undefined && Date.parse(o.checked) >= Date.parse(o.closed) + WATCH_MS;
 }
 
-/** Lines added and removed from one commit to another; binary files count for none. */
-function linesBetween(repo: string, from: string, to: string): { added: number; removed: number } {
+/** Lines added and removed from one commit to another; binary files count for none. Undefined when either commit cannot be read. */
+function linesBetween(repo: string, from: string, to: string): { added: number; removed: number } | undefined {
+  // Commits a person pushed on GitHub are not in the clone until fetched.
+  if (tryGit(repo, ['cat-file', '-e', `${to}^{commit}`]) === undefined) tryGit(repo, ['fetch', '--quiet', 'origin', to]);
+  const diff = tryGit(repo, ['diff', '--numstat', from, to]);
+  if (diff === undefined) return undefined;
   const total = { added: 0, removed: 0 };
-  for (const line of (tryGit(repo, ['diff', '--numstat', from, to]) ?? '').split('\n')) {
+  for (const line of diff.split('\n')) {
     const [a, r] = line.split('\t');
     total.added += Number(a) || 0;
     total.removed += Number(r) || 0;
@@ -69,9 +73,10 @@ export function refreshOutcomes(facts: (url: string, cwd: string) => PrFacts | u
     const human_commits = f.commits.filter((date) => Date.parse(date) > Date.parse(run.ended)).length;
     const o: PrOutcome = {
       pr, job: run.job, state: f.state, opened: f.createdAt, human_commits,
-      human_lines: human_commits && hasRepo && f.head && run.head ? linesBetween(run.repo, run.head, f.head) : { added: 0, removed: 0 },
       checked: new Date(now).toISOString(),
     };
+    const lines = human_commits ? (hasRepo && f.head && run.head ? linesBetween(run.repo, run.head, f.head) : undefined) : { added: 0, removed: 0 };
+    if (lines) o.human_lines = lines;
     const closed = f.state === 'MERGED' ? f.mergedAt : f.state === 'CLOSED' ? f.closedAt : undefined;
     if (closed) o.closed = closed;
     if (f.state === 'MERGED' && f.mergedAt) {

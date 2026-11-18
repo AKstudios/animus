@@ -5,6 +5,8 @@ import { join } from 'node:path';
 import { test } from 'node:test';
 import { gitFindings, orbitMarketplace } from '../src/doctor.ts';
 import { animusVersion, atLeast, compatible, factoryVersion } from '../src/version.ts';
+import { PLUGIN_ROOT } from '../src/profiles.ts';
+import { git } from '../src/proc.ts';
 import { write } from './helpers.ts';
 
 test('a client and Helix work together on the same major version, and before 1.0 on the same minor', () => {
@@ -39,6 +41,8 @@ test('doctor warns about git hooks and commit signing of the person\'s that woul
   assert.deepEqual(gitFindings(() => ''), []);
 });
 
-test('the factory version is the plugin version, with the commit from a git checkout, never unknown', () => {
-  assert.match(factoryVersion(), new RegExp(`^${animusVersion().replaceAll('.', '\\.')}(\\+[0-9a-f]+(-dirty)?)?$`));
+test('the factory version is the plugin version plus the checkout\'s commit, and the bare version outside git', () => {
+  const head = git(PLUGIN_ROOT, ['rev-parse', '--short', 'HEAD']);
+  assert.match(factoryVersion(), new RegExp(`^${animusVersion().replaceAll('.', '\\.')}\\+${head}(-dirty)?$`));
+  assert.equal(factoryVersion(mkdtempSync(join(tmpdir(), 'plain-'))), animusVersion());
 });

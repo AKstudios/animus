@@ -131,7 +131,7 @@ export function claudeAgent(factory: Factory, command = process.env.ANIMUS_CLAUD
         result.transcript = file;
         const context = contextAtEnd(file);
         if (context !== undefined) result.context = context;
-        result.tools = toolCalls(file);
+        result.tools = toolCalls(file, started);
       }
     }
     return result;
@@ -149,7 +149,8 @@ const targetOf = (input: Record<string, unknown>): string => {
 };
 
 /** The tool calls in a Claude Code transcript, in order. A call with no result (the session ended mid-call) counts as failed. */
-export function toolCalls(transcript: string): ToolCall[] {
+/** Only calls made at or after `since` (ms): a resumed session's transcript also holds the turns before. */
+export function toolCalls(transcript: string, since = 0): ToolCall[] {
   let lines: string[];
   try { lines = readFileSync(transcript, 'utf8').split('\n'); } catch { return []; }
   const calls: (ToolCall & { id: string; start: number })[] = [];
@@ -168,7 +169,7 @@ export function toolCalls(transcript: string): ToolCall[] {
       }
     }
   }
-  return calls.map(({ at, tool, target, ok, ms }) => ({ at, tool, target, ok, ms }));
+  return calls.filter((c) => !(c.start < since)).map(({ at, tool, target, ok, ms }) => ({ at, tool, target, ok, ms }));
 }
 
 /**
