@@ -109,8 +109,17 @@ export function describeLessons(lessons: readonly Lesson[], now: number): string
 
 export const PROMPT_CAP = 10;
 
+/**
+ * A job in a Helix container is given Helix's lessons, mounted read-only
+ * from here, not the ones in its person's home. Helix counts their uses
+ * (supervisor.ts) when the job ends, from the ids on its run line.
+ */
+export const GIVEN_FILE = 'ANIMUS_LESSONS_FILE';
+
+const givenLessons = (): Lesson[] => process.env[GIVEN_FILE] && existsSync(process.env[GIVEN_FILE]) ? (JSON.parse(readFileSync(process.env[GIVEN_FILE], 'utf8')) as Store).lessons : readLessons();
+
 /** The lessons a job's agent is given: kept and unexpired, its project's or the factory's, for that agent, newest first, at most 10. */
-export function lessonsForPrompt(project: string, agent: Lesson['agent'], now: number, lessons: readonly Lesson[] = readLessons()): Lesson[] {
+export function lessonsForPrompt(project: string, agent: Lesson['agent'], now: number, lessons: readonly Lesson[] = givenLessons()): Lesson[] {
   return lessons.filter((l) => stateOf(l, now) === 'kept' && l.agent === agent && inScope(l, project)).sort((a, b) => b.id - a.id).slice(0, PROMPT_CAP);
 }
 

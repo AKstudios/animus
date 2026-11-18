@@ -3,7 +3,7 @@
 // own Animus home, where the lessons it proposes are kept. The project's Slack
 // channel is told how many there are and the command to see them.
 import { spawn } from 'node:child_process';
-import { dirname, join } from 'node:path';
+import { delimiter, dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { Transport } from './slack-api.ts';
 import type { Store } from './store.ts';
@@ -15,12 +15,12 @@ export const RETRO_EVERY_MS = 7 * 24 * 60 * 60 * 1000;
 export const RETRO_CHECK_MS = 60 * 60 * 1000;
 export const RETRO_FIRST_MS = 15 * 60 * 1000;
 
-/** Runs a project's retro and says how many lessons it proposed. Throws why it could not. */
-export type RunRetro = (project: string) => Promise<{ proposed: number }>;
+/** Runs a project's retro, which reads the run records of Helix's own Animus home and of each of `homes`, and says how many lessons it proposed. Throws why it could not. */
+export type RunRetro = (project: string, homes: string[]) => Promise<{ proposed: number }>;
 
 /** `animus retro --json` in a process of its own, as Helix's account: Helix goes on answering meanwhile. */
-export const retroProcess: RunRetro = (project) => new Promise((resolve, reject) => {
-  const child = spawn(process.execPath, ['--disable-warning=ExperimentalWarning', CLI, 'retro', '--project', project, '--json'], { stdio: ['ignore', 'pipe', 'pipe'], timeout: 30 * 60 * 1000 });
+export const retroProcess: RunRetro = (project, homes) => new Promise((resolve, reject) => {
+  const child = spawn(process.execPath, ['--disable-warning=ExperimentalWarning', CLI, 'retro', '--project', project, '--json'], { stdio: ['ignore', 'pipe', 'pipe'], timeout: 30 * 60 * 1000, env: { ...process.env, ANIMUS_RETRO_HOMES: homes.join(delimiter) } });
   let out = '';
   let err = '';
   child.stdout.on('data', (c: Buffer) => { out += c.toString(); });
@@ -42,7 +42,7 @@ export const retroNotice = (project: string, proposed: number) =>
  * or had no runs to read, is not tried again every hour. Nothing is posted
  * when nothing was proposed.
  */
-export async function weeklyRetros(opts: { store: Store; run?: RunRetro; slack?: Pick<Transport, 'post'>; say?: (line: string) => void; now?: number }): Promise<void> {
+export async function weeklyRetros(opts: { store: Store; run?: RunRetro; /** The Animus homes beside Helix's own that jobs write their records to: each person's, with containers. */ homes?: () => string[]; slack?: Pick<Transport, 'post'>; say?: (line: string) => void; now?: number }): Promise<void> {
   const { store } = opts;
   const run = opts.run ?? retroProcess;
   const say = opts.say ?? (() => {});
@@ -52,7 +52,7 @@ export async function weeklyRetros(opts: { store: Store; run?: RunRetro; slack?:
     if (last && now - Date.parse(last) < RETRO_EVERY_MS) continue;
     store.setLastRetro(project.name, new Date(now).toISOString());
     try {
-      const { proposed } = await run(project.name);
+      const { proposed } = await run(project.name, opts.homes?.() ?? []);
       say(`retro of ${project.name}: ${proposed} lesson${proposed === 1 ? '' : 's'} proposed`);
       if (!proposed || !opts.slack) continue;
       for (const channel of store.channelsOf(project.name)) {

@@ -166,8 +166,9 @@ export function saveState(state: JobState): void {
   writeJson(join(jobDir(state.job), 'state.json'), state);
 }
 
-export function loadState(job: string): JobState | undefined {
-  const file = join(jobDir(job), 'state.json');
+/** A job's state; home is the Animus home it ran under, when not this process's (a Helix person's). */
+export function loadState(job: string, home = animusHome()): JobState | undefined {
+  const file = join(home, 'jobs', job, 'state.json');
   return existsSync(file) ? (JSON.parse(readFileSync(file, 'utf8')) as JobState) : undefined;
 }
 

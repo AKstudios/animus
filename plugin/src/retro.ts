@@ -5,10 +5,10 @@
 // the rules and stores the rest as proposed.
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { basename, join } from 'node:path';
+import { basename, delimiter, join } from 'node:path';
 import type { Agent, AgentResult } from './agent.ts';
 import { addProposals, inScope, LESSON_AGENTS, readLessons, SCOPES, seenAgain, stateOf, type Lesson } from './lessons.ts';
-import { loadState, readRuns, type Run } from './log.ts';
+import { animusHome, loadState, readRuns, type Run } from './log.ts';
 import { readOutcomes, type Outcomes } from './outcomes.ts';
 import { modelFor, readPrompt, type Factory } from './profiles.ts';
 import { AnimusError } from './proc.ts';
@@ -32,15 +32,26 @@ export type RetroJob = { job: string; text: string; /** Its pull request was rev
 
 const list = (items: readonly string[]) => items.join(', ');
 
-/** What the retro reads about each job of a project that ran in the window: a few lines from its run log lines, folder and outcome. */
-export function retroJobs(project: string, days: number, now: number, runs: readonly Run[] = readRuns(), outcomes: Outcomes = readOutcomes()): RetroJob[] {
-  const byJob = new Map<string, Run[]>();
-  for (const r of runs) if (basename(r.repo) === project && Date.parse(r.ended) >= now - days * DAY) byJob.set(r.job, [...(byJob.get(r.job) ?? []), r]);
-  return [...byJob].map(([job, ofJob]) => {
+/** The Animus homes a retro reads: this one, and each in ANIMUS_RETRO_HOMES (a Helix with containers lists its people's, where their jobs write). */
+export const retroHomes = (): string[] => [animusHome(), ...(process.env.ANIMUS_RETRO_HOMES?.split(delimiter).filter(Boolean) ?? [])];
+
+/** What the retro reads about each job of a project that ran in the window: a few lines from its run log lines, folder and outcome, each from the home the job ran in. */
+export function retroJobs(project: string, days: number, now: number, homes: readonly string[] = retroHomes()): RetroJob[] {
+  const byJob = new Map<string, { home: string; runs: Run[] }>();
+  for (const home of homes) {
+    for (const r of readRuns(join(home, 'runs.jsonl'))) {
+      if (basename(r.repo) !== project || Date.parse(r.ended) < now - days * DAY) continue;
+      const known = byJob.get(r.job) ?? { home, runs: [] };
+      known.runs.push(r);
+      byJob.set(r.job, known);
+    }
+  }
+  const outcomes: Outcomes = Object.assign({}, ...homes.map((h) => readOutcomes(join(h, 'outcomes.json'))));
+  return [...byJob].map(([job, { home, runs: ofJob }]) => {
     const last = ofJob.at(-1)!;
     const pr = ofJob.findLast((r) => r.pr)?.pr;
     const o = pr ? outcomes[pr] : undefined;
-    const state = loadState(job);
+    const state = loadState(job, home);
     const lines = [
       `## job ${job}: ${last.title}`,
       `${last.size}/${last.difficulty}/${last.type}; ${ofJob.length} run${ofJob.length === 1 ? '' : 's'}; ended ${last.outcome}${last.cause ? ` (cause ${last.cause})` : ''}${last.reason ? `: ${last.reason.split('\n')[0]!.slice(0, 200)}` : ''}; ${last.fix_rounds} fix rounds; $${ofJob.reduce((s, r) => s + r.cost_usd, 0).toFixed(2)}`,

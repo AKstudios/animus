@@ -1,6 +1,8 @@
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { rmSync } from 'node:fs';
+import { copyFileSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { beforeEach, test } from 'node:test';
 import { accept, addProposals, dismiss, describeLessons, expiresAt, lessonsForPrompt, lessonsSection, readLessons, stateOf, lessonsFile, type Lesson } from '../src/lessons.ts';
 import { animusHome, appendRun, runLog, writeJson, type Run } from '../src/log.ts';
@@ -152,7 +154,7 @@ test('animus lessons lists proposed and kept lessons with ids, cites, uses and d
   assert.match(animus('dismiss', '2').stdout, /lesson 2 is dismissed/);
   assert.deepEqual(readLessons().map((l) => [l.id, l.status]), [[1, 'kept'], [2, 'dismissed'], [3, 'dismissed']]);
   const missing = animus('accept', '9');
-  assert.deepEqual([missing.status, missing.stderr], [2, 'animus: no lesson 9: animus lessons lists them\n']);
+  assert.deepEqual([missing.status, missing.stderr], [2, 'lessons on this machine: this machine has not joined a Helix\nanimus: no lesson 9: animus lessons lists them\n']);
 });
 
 // Protects: criteria 3 and 4, the choice of what a prompt carries. Fails when: a lesson of another project, agent or state reaches a prompt, or the cap or the order is wrong.
@@ -175,4 +177,34 @@ test('a prompt gets the kept, unexpired lessons of its project and the factory f
   assert.ok(![old, proposed!].some((l) => given.some((g) => g.id === l.id)));
   assert.equal(lessonsSection([]), '');
   assert.match(lessonsSection(given), /^# Lessons from earlier jobs\n[\s\S]*\n- factory wide\n- kept 11\n/);
+});
+
+// Protects: criterion 1 on a Helix with containers. Fails when: a retro reads only its own home's run log, so jobs that ran in a person's home are never looked back on.
+test('a retro reads the run log and job folder of each home in ANIMUS_RETRO_HOMES, as well as its own', () => {
+  const person = mkdtempSync(join(tmpdir(), 'person-home-'));
+  writeFileSync(join(person, 'runs.jsonl'), `${JSON.stringify(run('theirs'))}\n`);
+  writeJson(join(person, 'jobs', 'theirs', 'state.json'), { job: 'theirs', outcome: 'needs-input', question: 'Which port?', answers: [] });
+  appendRun(run('mine'));
+  process.env.ANIMUS_RETRO_HOMES = person;
+  try {
+    const { go, calls } = retro(answer({ proposals: [proposal('Ask about ports early.', ['mine', 'theirs'])] }));
+    const { proposed } = go();
+
+    assert.match(calls[0]!.prompt, /job theirs: Title of theirs[\s\S]*question: Which port\? answer: \(unanswered\)/);
+    assert.deepEqual(proposed.map((l) => l.cites), [['mine', 'theirs']]);
+  } finally { delete process.env.ANIMUS_RETRO_HOMES; }
+});
+
+// Protects: criterion 3 for a contained job. Fails when: a job given Helix's lessons by ANIMUS_LESSONS_FILE reads its own home's instead.
+test('lessons come from ANIMUS_LESSONS_FILE when it is set', () => {
+  const [l] = addProposals([{ text: 'Close servers.', scope: 'project', project: 'meal-planner', agent: 'implementer', cites: ['a', 'b'] }], NOW);
+  accept(l!.id, Date.now());
+  const helixFile = join(mkdtempSync(join(tmpdir(), 'helix-lessons-')), 'lessons.json');
+  copyFileSync(lessonsFile(), helixFile);
+  rmSync(lessonsFile());
+  process.env.ANIMUS_LESSONS_FILE = helixFile;
+  try {
+    assert.deepEqual(lessonsForPrompt('meal-planner', 'implementer', Date.now()).map((x) => x.text), ['Close servers.']);
+    assert.deepEqual(readLessons(), []);
+  } finally { delete process.env.ANIMUS_LESSONS_FILE; }
 });

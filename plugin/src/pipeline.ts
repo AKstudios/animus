@@ -21,7 +21,7 @@ import { describePlan, escalate, modelFor, PLUGIN_ROOT, raise, readPrompt, type 
 import { animusCommand, git, AnimusError, tryGit } from './proc.ts';
 import { factoryVersion } from './version.ts';
 import { asReport, asReview, blockers, criteriaList, listFindings, REPORT_SCHEMA, REVIEW_SCHEMA, type Finding, type Report, type Review } from './review.ts';
-import { countUses, lessonsForPrompt, lessonsSection, type Lesson } from './lessons.ts';
+import { countUses, GIVEN_FILE, lessonsForPrompt, lessonsSection, type Lesson } from './lessons.ts';
 import { loadJobSkills, saveJobSkills, type PersonalSkill } from './personal.ts';
 import { roleSkills } from './skills.ts';
 import { criteriaSoFar, isPlanned, oneSlice, planSlices, type Slicing } from './slices.ts';
@@ -301,7 +301,7 @@ async function runJobWith(opts: RunOptions, deps: Deps, live: { run?: Run; start
     const given = lessonsForPrompt(basename(repo), role === 'ui-reviewer' ? 'reviewer' : role as Lesson['agent'], Date.now());
     const fresh = given.map((l) => l.id).filter((id) => !run.lessons?.includes(id));
     if (fresh.length) {
-      countUses(fresh);
+      if (!process.env[GIVEN_FILE]) countUses(fresh);
       run.lessons = [...(run.lessons ?? []), ...fresh];
     }
     return lessonsSection(given);

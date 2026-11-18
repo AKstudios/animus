@@ -25,7 +25,11 @@ clients with how to update.
   to the project's Slack channel. New `GET /lessons[?project=<name>]` and
   `POST /lessons/<id>` (`action`: `accept` or `dismiss`) take a person's
   token, and `animus lessons` / `accept` / `dismiss` use them for a checkout
-  of a Helix project (`--local` or `--helix` decides).
+  of a Helix project (`--local` or `--helix` decides), say where they acted,
+  and refuse to `accept` or `dismiss` on this machine when a Helix you are
+  signed in to does not answer. On a Helix with containers the retro also reads
+  each person's Animus home, jobs get Helix's `lessons.json` read-only, and
+  Helix counts their uses from the run line.
 - A spec refused at admission, and a job ended by SIGINT, SIGTERM or a Helix
   cancel, now leave a run line with cause `admit`, `interrupted` or
   `cancelled`. Helix writes a `cancelled` file beside the job's spec before it

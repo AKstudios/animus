@@ -9,7 +9,8 @@ import { uptime } from 'node:os';
 import { basename, dirname, isAbsolute, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { AnimusError } from '../../plugin/src/proc.ts';
-import { animusHome, CANCELLED_MARKER, loadProgress, type Progress } from '../../plugin/src/log.ts';
+import { countUses } from '../../plugin/src/lessons.ts';
+import { animusHome, CANCELLED_MARKER, loadProgress, readRuns, type Progress } from '../../plugin/src/log.ts';
 import type { PersonalSkill } from '../../plugin/src/personal.ts';
 import { loadFactory, resolvePlan, type Tier } from '../../plugin/src/profiles.ts';
 import { parseSpec } from '../../plugin/src/spec.ts';
@@ -220,6 +221,10 @@ export function supervise(opts: {
           ...(result.reason ?? (result.outcome ? undefined : fallback) ? { reason: result.reason ?? fallback } : {}),
         });
         say(`job ${job.id} ended: ${result.outcome ?? 'failed'}${result.pr ? ` ${result.pr}` : ''}`);
+        // A container job was given Helix's lessons read-only and cannot count them: its run line says which.
+        const home = opts.animusHomeOf?.(current.person);
+        const given = home && current.started ? readRuns(join(home, 'runs.jsonl')).findLast((r) => r.job === current.animus_job && Date.parse(r.ended) >= Date.parse(current.started!))?.lessons : undefined;
+        if (given) countUses(given);
       }
       tick();
     };

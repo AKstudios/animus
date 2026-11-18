@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { copyFileSync, existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
@@ -428,4 +428,23 @@ test('a job gives each agent the kept lessons for it, counts one use per lesson,
     assert.deepEqual(readRuns().find((r) => r.job === run.job)!.lessons, run.lessons);
     assert.deepEqual(readLessons().map((l) => [l.id, l.uses]), [[implementer!.id, 1], [factoryWide!.id, 1], [reviewer!.id, 1], [elsewhere!.id, 0]]);
   } finally { rmSync(lessonsFile(), { force: true }); }
+});
+
+// Protects: criterion 3 on a Helix with containers. Fails when: a job given Helix's lessons read-only counts uses itself (it cannot write that file) or leaves their ids off its run line, which Helix counts from.
+test('a job given lessons by ANIMUS_LESSONS_FILE logs their ids and leaves the counting to the file\'s keeper', async () => {
+  const [l] = addProposals([{ text: 'Close the servers your tests start.', scope: 'project', project: 'project', agent: 'implementer', cites: ['a', 'b'] }], Date.now());
+  accept(l!.id, Date.now());
+  const helixFile = join(mkdtempSync(join(tmpdir(), 'helix-lessons-')), 'lessons.json');
+  copyFileSync(lessonsFile(), helixFile);
+  rmSync(lessonsFile());
+  process.env.ANIMUS_LESSONS_FILE = helixFile;
+  try {
+    const { agent, calls } = fakeAgent([say('done'), () => clean()]);
+    const run = await runJob({ repo: makeRepo(), specFile: writeSpec(SMALL) }, deps(agent));
+
+    assert.match(calls[0]!.system!, /- Close the servers your tests start\./);
+    assert.deepEqual(readRuns().find((r) => r.job === run.job)!.lessons, [l!.id]);
+    assert.equal(existsSync(lessonsFile()), false);
+    assert.equal(JSON.parse(readFileSync(helixFile, 'utf8')).lessons[0].uses, 0);
+  } finally { delete process.env.ANIMUS_LESSONS_FILE; }
 });

@@ -396,11 +396,21 @@ async function main(argv: string[]): Promise<number> {
       if (sub && !/^\d+$/.test(id ?? '')) throw new AnimusError(`usage: animus lessons ${sub} <id>`);
       if (values.local && values.helix) throw new AnimusError('--local or --helix, not both');
       // As `animus start` decides: on Helix when this checkout's project is there, else on this machine. Outside a checkout, here.
-      const choice = await whereToRun({ ...(values.local ? { asked: 'local' as const } : values.helix ? { asked: 'helix' as const } : {}), checkout: cwd }).catch(() => ({ where: 'local' as Where, project: undefined as string | undefined }));
+      const asked: Where | undefined = values.local ? 'local' : values.helix ? 'helix' : undefined;
+      const inCheckout = tryGit(cwd, ['rev-parse', '--git-dir']) !== undefined;
+      const mine = inCheckout ? personalFor(cwd) : undefined;
+      let unanswered = false;
+      const choice: { where: Where; why: string; project?: string } = asked || inCheckout
+        ? await whereToRun({ ...(asked ? { asked } : {}), ...(mine?.run ? { config: mine.run } : {}), checkout: cwd, projects: () => helix.projects().catch((err: unknown) => { unanswered = true; throw err; }) })
+        : { where: 'local', why: 'this is not a checkout of a repository' };
       const remote = choice.where === 'helix';
+      const where = remote ? 'on Helix' : 'on this machine';
+      say(`lessons ${where}: ${choice.why}`);
       if (sub) {
+        // Ids are numbered in each Animus home: a lesson kept here for lack of an answer from Helix could be another one.
+        if (unanswered) throw new AnimusError(`${choice.why}, so lesson ${id} was not ${sub === 'accept' ? 'kept' : 'dismissed'} here: try again when Helix answers, or use --local for this machine's own lessons`);
         const l = remote ? await helix.decideLesson(Number(id), sub) : sub === 'accept' ? accept(Number(id), Date.now()) : dismiss(Number(id));
-        console.log(`lesson ${l.id} is ${sub === 'accept' ? 'kept' : 'dismissed'}`);
+        console.log(`lesson ${l.id} is ${sub === 'accept' ? 'kept' : 'dismissed'} ${where}`);
         return 0;
       }
       console.log(describeLessons(remote ? (await helix.lessons(choice.project)).lessons : readLessons(), Date.now()));

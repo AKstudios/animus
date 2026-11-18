@@ -11,7 +11,7 @@ import { CLEANUP_EVERY_MS, CLEANUP_FIRST_MS, helixCleanup } from './cleanup.ts';
 import { KEEP_DAYS } from '../../plugin/src/cleanup.ts';
 import { checkEnv, checkPerson, describeFindings, failing, githubPush, githubToken } from './check.ts';
 import { animusVersion } from '../../plugin/src/version.ts';
-import { containerLaunch, containerProblem, draftLaunch, imageName, personDirs, removeContainer } from './container.ts';
+import { containerLaunch, containerProblem, draftLaunch, imageName, personDirs, personHomes, removeContainer } from './container.ts';
 import { draftRunner } from './drafts.ts';
 import { startAdmit, submissionAdmit } from './admit.ts';
 import { freshBase } from './fresh.ts';
@@ -248,7 +248,7 @@ function main(argv: string[]): number | undefined | Promise<number> {
       const retro = () => {
         if (retroing) return;
         retroing = true;
-        weeklyRetros({ store, say, ...(slack ? { slack } : {}) }).catch((err: unknown) => say(`retro: ${(err as Error).message}`)).finally(() => { retroing = false; });
+        weeklyRetros({ store, say, ...(config.container ? { homes: () => personHomes(home) } : {}), ...(slack ? { slack } : {}) }).catch((err: unknown) => say(`retro: ${(err as Error).message}`)).finally(() => { retroing = false; });
       };
       const firstRetro = setTimeout(retro, RETRO_FIRST_MS);
       const retros = setInterval(retro, RETRO_CHECK_MS);

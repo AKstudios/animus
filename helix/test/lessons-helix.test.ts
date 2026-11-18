@@ -70,7 +70,8 @@ test('animus lessons and accept go to Helix from a checkout of a Helix project',
   const run = (...args: string[]) => promisify(execFile)(process.execPath, ['--disable-warning=ExperimentalWarning', CLI, 'lessons', ...args], { cwd: checkout, env });
 
   assert.match((await run()).stdout, /1  Close servers tests start\.[\s\S]*animus lessons accept 1/);
-  assert.match((await run('accept', '1')).stdout, /lesson 1 is kept/);
+  assert.match((await run()).stderr, /lessons on Helix: Helix has this repository as app/);
+  assert.match((await run('accept', '1')).stdout, /lesson 1 is kept on Helix/);
   assert.equal(readLessons()[0]!.status, 'kept');
   h.stop();
 });
@@ -103,4 +104,37 @@ test('a retro runs for each ready project once a week and its channel is told ho
   await weeklyRetros({ store: h.store, run, slack: slack.transport, now: NOW + RETRO_EVERY_MS + 1000 });
   assert.equal(ran.length, 6);
   h.stop();
+});
+
+// Protects: criterion 5 on a Helix with containers. Fails when: the retro is not told the people's Animus homes, so it reads only Helix's own run log and finds no run.
+test('the weekly retro is given the homes jobs write their records to', async () => {
+  const h = await helix();
+  const given: string[][] = [];
+
+  await weeklyRetros({ store: h.store, run: async (_project, homes) => { given.push(homes); return { proposed: 0 }; }, homes: () => ['/h/people/ana/animus'], now: NOW });
+
+  assert.deepEqual(given, [['/h/people/ana/animus']]);
+  h.stop();
+});
+
+// Protects: criterion 5, `animus lessons accept` never acting on this machine's numbering by mistake. Fails when: Helix not answering makes accept keep the lesson with that number in this machine's own lessons.json.
+test('animus lessons accept refuses, and keeps nothing here, when a Helix project\'s Helix does not answer', async () => {
+  const h = await helix();
+  h.stop();
+  const checkout = mkdtempSync(join(tmpdir(), 'helix-lessons-checkout-'));
+  for (const args of [['init', '-q'], ['remote', 'add', 'origin', 'https://github.com/o/app.git']]) spawnSync('git', args, { cwd: checkout });
+  const laptop = mkdtempSync(join(tmpdir(), 'laptop-home-'));
+  const env = { ...process.env, ANIMUS_HOME: laptop };
+  const run = (...args: string[]) => promisify(execFile)(process.execPath, ['--disable-warning=ExperimentalWarning', CLI, 'lessons', ...args], { cwd: checkout, env });
+  const before = process.env.ANIMUS_HOME;
+  process.env.ANIMUS_HOME = laptop;
+  addProposals([proposal('This machine\'s lesson 1.')], NOW);
+  process.env.ANIMUS_HOME = before;
+
+  await assert.rejects(run('accept', '1'), /Helix did not answer[\s\S]*lesson 1 was not kept here/);
+  const listed = await run();
+  assert.match(listed.stderr, /lessons on this machine: Helix did not answer/);
+  assert.match(listed.stdout, /proposed \(1\)/);
+  const kept = await run('accept', '1', '--local');
+  assert.match(kept.stdout, /lesson 1 is kept on this machine/);
 });
