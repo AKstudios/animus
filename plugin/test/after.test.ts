@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { waitForMerged } from '../src/after.ts';
 import type { PrFind } from '../src/pr.ts';
-import { readFileSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { appendRun, type Run } from '../src/log.ts';
@@ -59,7 +59,9 @@ test('keeps waiting on an earlier spec it cannot read, names it and why, and rea
 });
 
 test('lets a logged pull request through without reading the earlier spec', async () => {
-  const file = join(tmpdir(), 'animus-never-written', 'spec.md');
+  // A directory where the spec should be: reading it throws a plain error, which would end the wait, so passing shows it was never read.
+  const file = join(mkdtempSync(join(tmpdir(), 'animus-after-')), 'spec.md');
+  mkdirSync(file);
   appendRun({ job: 'j', repo: '/repo', spec_file: file, pr: 'https://example.test/pr/8' } as Run);
   const sleeps = { n: 0 };
   const lines: string[] = [];
