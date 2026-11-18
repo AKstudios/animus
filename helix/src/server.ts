@@ -26,7 +26,7 @@ import { openPrs, type ListPrs } from './open-prs.ts';
 import { isOwner, requireOwner } from './owner.ts';
 import { addProject, checkInChild, projectView, removeProject, type StartCheck } from './projects.ts';
 import type { Transport } from './slack-api.ts';
-import { slackInvite } from './slack.ts';
+import { jobLinks, slackInvite } from './slack.ts';
 import type { Store } from './store.ts';
 import { Refused, type Submission, type Supervisor } from './supervisor.ts';
 import { asset, CSP } from '../../plugin/src/assets.ts';
@@ -205,13 +205,14 @@ export function serve(opts: {
           try { skills = parseSkills(b.skills, 'the submission'); } catch (err) { throw new Refused(400, (err as Error).message); }
           const s: Submission = { repo: b.repo, spec: b.spec, ...(typeof b.name === 'string' ? { name: b.name } : {}), ...(b.draft === true ? { draft: true } : {}), ...(skills.length ? { skills } : {}) };
           // The skills it took, so a client can tell them from a Helix that predates them.
-          return send(201, { ...supervisor.submit(person, s), skills: skills.map((k) => k.name) });
+          const submitted = supervisor.submit(person, s);
+          return send(201, { ...submitted, skills: skills.map((k) => k.name), links: jobLinks(config, submitted.id) });
         }
       } else if (/^\d+$/.test(id)) {
         const n = Number(id);
         if (req.method === 'GET' && !action) {
           const job = store.get(n);
-          return job ? send(200, { ...job, log: supervisor.log(n) }) : send(404, { error: `no job ${n}` });
+          return job ? send(200, { ...job, log: supervisor.log(n), links: jobLinks(config, n) }) : send(404, { error: `no job ${n}` });
         }
         // The owner cancels anyone's job as if it were theirs, as the Slack owner's Cancel button does.
         if (req.method === 'POST' && action === 'cancel') return send(200, supervisor.cancel(isOwner(config, person) ? (store.get(n)?.person ?? person) : person, n));
