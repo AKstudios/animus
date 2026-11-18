@@ -78,8 +78,8 @@ type Button = { action_id: string; value: string; text: { text: string } };
 const buttons = (p: Post) => (p.blocks?.at(-1) as { elements: Button[] }).elements;
 
 const STARTS: [string, SlackEvent][] = [
-  ['/helix draft', command('draft Add a login page')],
-  ['@Helix', { kind: 'message', user: 'U0ANA', channel: 'C0TEAM', text: '<@U0HELIX> Add a login page', mentioned: true }],
+  ['/animus draft', command('draft Add a login page')],
+  ['@Animus', { kind: 'message', user: 'U0ANA', channel: 'C0TEAM', text: '<@U0HELIX> Add a login page', mentioned: true }],
 ];
 
 for (const [how, event] of STARTS) {

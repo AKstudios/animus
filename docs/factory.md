@@ -41,7 +41,7 @@ Rules that apply to every trigger:
 - **No inbound ports.** The Slack bot and the GitHub pickup both connect outward. Nothing on the office machine is exposed to the internet.
 - **No mid-run questions.** A job that cannot proceed ends as "needs input" with its question. You answer and resubmit.
 - **Issue jobs suit well-described work.** Nobody interviews you there, so vague requests come back as questions.
-- **A Slack job starts from a draft you confirm, never from the message.** `/helix draft <text>` or `@Helix <text>` gets a draft spec in a thread, from a fast session ($0.50 at most) that reads only the message, the repository and what a script fetched from its links. Reply in the thread (any reply in a DM, one mentioning @Helix in a channel) to have it rewritten. Submit runs the check `animus plan` does and wants a `$ command` under every criterion; a complete draft becomes your job, and its thread the job's. A person has at most 3 open drafts, `draft_slots` (1 by default) run at once, and a draft untouched for 7 days is discarded.
+- **A Slack job starts from a draft you confirm, never from the message.** `/animus draft <text>` or `@Animus <text>` gets a draft spec in a thread, from a fast session ($0.50 at most) that reads only the message, the repository and what a script fetched from its links. Reply in the thread (any reply in a DM, one mentioning @Animus in a channel) to have it rewritten. Submit runs the check `animus plan` does and wants a `$ command` under every criterion; a complete draft becomes your job, and its thread the job's. A person has at most 3 open drafts, `draft_slots` (1 by default) run at once, and a draft untouched for 7 days is discarded.
 
 ## The pipeline
 

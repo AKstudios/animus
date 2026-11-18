@@ -71,7 +71,7 @@ test('a /helix invite without a GitHub login, or from anyone but the owner, is r
 
   store.close();
   assert.deepEqual(slack.sent, [
-    { method: 'respond', url: URL, text: 'An invite sent on Slack names their GitHub login, so only a token that signs in as it is taken: /helix invite @user <github-login>' },
+    { method: 'respond', url: URL, text: 'An invite sent on Slack names their GitHub login, so only a token that signs in as it is taken: /animus invite @user <github-login>' },
     { method: 'respond', url: URL, text: 'Only <@U0OWNER> invites people to this Helix.' },
   ]);
 });

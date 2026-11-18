@@ -116,7 +116,7 @@ apps to the workspace.
    manifest**, and pick the workspace. Paste
    [helix/deploy/slack/manifest.yaml](../helix/deploy/slack/manifest.yaml)
    on the YAML tab, then **Create**. Rename the app if you like; keep the
-   `/helix` command, the scopes, the `message.im` event and Socket Mode as
+   `/animus` command, the scopes, the `message.im` event and Socket Mode as
    they are, since Helix depends on each. Under **Basic Information**,
    **Display Information**, give it the same icon as the GitHub App,
    [helix/deploy/github/logo.png](../helix/deploy/github/logo.png); a
@@ -137,11 +137,11 @@ apps to the workspace.
    true}` to `config.yaml` and links that Slack user to the owner. A token
    Slack refuses is reported with Slack's reason, and nothing is written.
 7. `sudo systemctl restart helix.service`. Its log says `Slack: connected`.
-8. Anywhere in Slack, send `/helix invite @alex alex-gh`; only you see the
+8. Anywhere in Slack, send `/animus invite @alex alex-gh`; only you see the
    bot's reply.
    Alex gets a DM to connect Tailscale, then one line that installs Animus
    and joins. Someone who joined before the bot was there is linked with
-   `/helix link @alex alex`.
+   `/animus link @alex alex`.
 
 To turn the bot off, set `enabled: false` under `slack:` in `config.yaml`
 and restart Helix. To give it a new token, run `helix slack setup` again.

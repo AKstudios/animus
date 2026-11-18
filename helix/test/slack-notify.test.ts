@@ -111,7 +111,7 @@ test('/helix notify off stops a person\'s job posts and /helix notify on starts 
 
   h.stop();
   assert.deepEqual(h.slack.sent.filter((s) => s.method === 'respond'), [
-    { method: 'respond', url: 'https://hooks.slack.com/commands/T0/1/x', text: 'Job notifications are off. /helix notify on starts them again.' },
+    { method: 'respond', url: 'https://hooks.slack.com/commands/T0/1/x', text: 'Job notifications are off. /animus notify on starts them again.' },
     { method: 'respond', url: 'https://hooks.slack.com/commands/T0/1/y', text: 'Job notifications are on: each of your jobs posts its progress to a thread in our DM.' },
   ]);
   assert.deepEqual(h.posts().map((p) => p.text), [`Job ${loud.id} started: loud (app)`, `Job ${loud.id} opened a pull request: https://example.test/pr/loud`]);

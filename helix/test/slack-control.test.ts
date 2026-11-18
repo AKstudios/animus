@@ -246,10 +246,12 @@ test('/helix help, an empty command and an unknown one list the commands, the ow
   const [help, empty, unknown, owners] = h.respondedTo();
   assert.equal(help, helpText(false));
   assert.deepEqual([empty, unknown], [help, help]);
-  for (const c of ['draft', 'jobs', 'job <id>', 'cancel <id>', 'me', 'status', 'project', 'notify', 'help']) assert.match(help!, new RegExp('/helix ' + c));
-  assert.doesNotMatch(help!, /invite|\/helix link/);
-  assert.match(owners!, /\/helix invite @user <github-login>.*owner only/);
-  assert.match(owners!, /\/helix link @user <person>.*owner only/);
+  for (const c of ['draft', 'jobs', 'job <id>', 'cancel <id>', 'me', 'status', 'project', 'notify', 'help']) assert.match(help!, new RegExp('/animus ' + c));
+  assert.doesNotMatch(help!, /invite|\/animus link/);
+  assert.match(owners!, /\/animus invite @user <github-login>.*owner only/);
+  assert.match(owners!, /\/animus link @user <person>.*owner only/);
+  assert.match(help!, /^\*Animus\* turns a written request/);
+  assert.doesNotMatch(owners!, /\/helix|@Helix/);
 });
 
 // Protects: criterion 3. Fails when: an old Cancel button on a finished job errors in public, or leaves its button on the message.

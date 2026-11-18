@@ -1,7 +1,7 @@
 display_information:
-  name: Helix
+  name: Animus
   description: Turns a Slack message into a pull request. Draft a spec in a thread, submit it, and follow the job here.
-  long_description: Helix is the team's software factory. Describe a change in a DM or with /helix draft, with links to the issue or thread it comes from, and Helix drafts a spec with acceptance criteria. Reply in the thread to change it, then press Submit. Helix builds it on the office machine, checks every criterion, and opens a pull request with the proof. While the job runs, its thread shows its progress, asks you when it needs an answer, and lets you cancel it. /helix help lists every command.
+  long_description: Animus is the team's software factory. Describe a change in a DM or with /animus draft, with links to the issue or thread it comes from, and Animus drafts a spec with acceptance criteria. Reply in the thread to change it, then press Submit. Animus builds it on the office machine, checks every criterion, and opens a pull request with the proof. While the job runs, its thread shows its progress, asks you when it needs an answer, and lets you cancel it. /animus help lists every command.
   background_color: "#0a0e11"
 features:
   app_home:
@@ -9,10 +9,10 @@ features:
     messages_tab_enabled: true
     messages_tab_read_only_enabled: false
   bot_user:
-    display_name: Helix
+    display_name: Animus
     always_online: true
   slash_commands:
-    - command: /helix
+    - command: /animus
       description: Draft a job's spec, set a channel's project, see your jobs and Helix's load, invite someone, link a Slack user, or turn job notifications off and on
       usage_hint: help | draft <text> | jobs | job <id> | cancel <id> | me | status | project <name> | notify off|on | invite @user <github-login> | link @user <person>
       should_escape: true

@@ -19,7 +19,7 @@ function home() {
 }
 
 const URL = 'https://hooks.slack.com/commands/T0/1/x';
-const command = (id: string, text: string, url = URL) => ({ envelope_id: id, type: 'slash_commands', accepts_response_payload: true, payload: { command: '/helix', text, user_id: 'U0ALEX', channel_id: 'D0ALEX', response_url: url } });
+const command = (id: string, text: string, url = URL) => ({ envelope_id: id, type: 'slash_commands', accepts_response_payload: true, payload: { command: '/animus', text, user_id: 'U0ALEX', channel_id: 'D0ALEX', response_url: url } });
 const acks = (slack: { received: Record<string, unknown>[] }) => slack.received.map((m) => m.envelope_id);
 
 // Protects: criterion 7, off means off. Fails when: serve opens a Slack connection the owner did not turn on.

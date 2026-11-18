@@ -8,6 +8,12 @@ clients with how to update.
 
 ## Unreleased
 
+- **Breaking:** Slack's command is `/animus` and its bot is Animus, not
+  `/helix` and Helix: every subcommand and `@Animus <text>` work as before, and
+  `/helix` is no longer answered. Update the Slack app from
+  helix/deploy/slack/manifest.yaml and reinstall it to the workspace. The
+  `helix` CLI is unchanged.
+
 ## 0.4.7 (2026-11-18)
 
 - `/helix job <id>` shows one job in Slack: its state, stage and who is working,

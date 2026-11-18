@@ -15,28 +15,28 @@ import type { HelixJob, Store } from './store.ts';
 import { jobIsOver, type Supervisor } from './supervisor.ts';
 import { animusVersion } from '../../plugin/src/version.ts';
 
-const USAGE = 'Usage: /helix draft <what you want, with links>, /helix project <name>, /helix jobs, /helix job <id>, /helix cancel <id>, /helix me, /helix status, /helix invite @user <github-login>, /helix link @user <person>, /helix notify off|on, or /helix help';
-/** /helix help, and what an empty or unknown command gets: every command, one line each; the owner's only to the owner. */
+const USAGE = 'Usage: /animus draft <what you want, with links>, /animus project <name>, /animus jobs, /animus job <id>, /animus cancel <id>, /animus me, /animus status, /animus invite @user <github-login>, /animus link @user <person>, /animus notify off|on, or /animus help';
+/** /animus help, and what an empty or unknown command gets: every command, one line each; the owner's only to the owner. */
 export function helpText(byOwner: boolean): string {
   return [
-    '*Helix* turns a written request into a pull request. Commands:',
-    '`/helix draft <what you want, with links>`: draft a job\'s spec in a thread. Reply there to change it, then press Submit. `@Helix <text>` in a channel does the same.',
-    '`/helix jobs`: your queued, running and waiting jobs, with their threads.',
-    '`/helix job <id>`: what one job is doing, or how it ended.',
-    '`/helix cancel <id>`: cancel a queued or running job.',
-    '`/helix me`: what Helix knows about you: your jobs, projects and page.',
-    '`/helix status`: how busy Helix is and which version it runs.',
-    '`/helix project <name>`: the project drafts in this channel are for.',
-    '`/helix notify off|on`: stop or start your jobs posting their progress to you.',
+    '*Animus* turns a written request into a pull request. Commands:',
+    '`/animus draft <what you want, with links>`: draft a job\'s spec in a thread. Reply there to change it, then press Submit. `@Animus <text>` in a channel does the same.',
+    '`/animus jobs`: your queued, running and waiting jobs, with their threads.',
+    '`/animus job <id>`: what one job is doing, or how it ended.',
+    '`/animus cancel <id>`: cancel a queued or running job.',
+    '`/animus me`: what Helix knows about you: your jobs, projects and page.',
+    '`/animus status`: how busy Helix is and which version it runs.',
+    '`/animus project <name>`: the project drafts in this channel are for.',
+    '`/animus notify off|on`: stop or start your jobs posting their progress to you.',
     ...(byOwner ? [
-      '`/helix invite @user <github-login>`: invite someone (owner only).',
-      '`/helix link @user <person>`: link a Slack user to someone who already joined (owner only).',
+      '`/animus invite @user <github-login>`: invite someone (owner only).',
+      '`/animus link @user <person>`: link a Slack user to someone who already joined (owner only).',
     ] : []),
-    '`/helix help`: this list.',
+    '`/animus help`: this list.',
     'In a job\'s thread: reply to answer its question, or press Cancel.',
   ].join('\n');
 }
-const INVITE_USAGE = 'An invite sent on Slack names their GitHub login, so only a token that signs in as it is taken: /helix invite @user <github-login>';
+const INVITE_USAGE = 'An invite sent on Slack names their GitHub login, so only a token that signs in as it is taken: /animus invite @user <github-login>';
 const INSTALL = `https://raw.githubusercontent.com/${SOURCE.repo}/${SOURCE.ref}/install.sh`;
 
 type Core = { store: Store; config: Config };
@@ -235,7 +235,7 @@ function statusCommand(store: Store, config: Config): string {
 function notifyCommand(store: Store, name: string, args: string[]): string {
   if (args.length !== 1 || (args[0] !== 'on' && args[0] !== 'off')) return USAGE;
   store.setNotify(name, args[0] === 'on');
-  return args[0] === 'on' ? 'Job notifications are on: each of your jobs posts its progress to a thread in our DM.' : 'Job notifications are off. /helix notify on starts them again.';
+  return args[0] === 'on' ? 'Job notifications are on: each of your jobs posts its progress to a thread in our DM.' : 'Job notifications are off. /animus notify on starts them again.';
 }
 
 /** /helix project <name>: the project drafts started in this channel are for, when their message links no issue of another. */
