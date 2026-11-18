@@ -8,25 +8,13 @@ import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node
 import { join } from 'node:path';
 import { fetchReferences, findLinks, GITHUB_ITEM, GITHUB_VARS, type Fetch } from '../../plugin/src/draft.ts';
 import { AnimusError } from '../../plugin/src/proc.ts';
-import { loadFactory, resolvePlan } from '../../plugin/src/profiles.ts';
-import { parseSpec } from '../../plugin/src/spec.ts';
+import { draftProject, refusedWith, type AdmitSubmission } from './admit.ts';
 import { credentialEnv, personEnv, type Config } from './config.ts';
 import { commentAs, commentBody, draftComment, specBlock } from './github-comments.ts';
 import { freshToken, GITHUB, githubRepo, liveTokenFile, reachableRepos, type GitHubUrls } from './github-app.ts';
 import type { Transport } from './slack-api.ts';
 import type { Draft, Store } from './store.ts';
 import { PLUGIN, type Supervisor } from './supervisor.ts';
-
-/**
- * What Submit asks of a draft until Helix admits it against the project's profile: labels that would run, and a `$ command` under every criterion.
- * shortcut: the profile is not read here; replace with admit once drafts know their project.
- */
-function checkDraft(factory: ReturnType<typeof loadFactory>, text: string): void {
-  const spec = parseSpec(text, 'draft.md');
-  resolvePlan(factory, spec);
-  const bare = spec.criteria.flatMap((c, i) => (c.commands.length ? [] : [i + 1]));
-  if (bare.length) throw new AnimusError(`draft.md: criterion ${bare.join(', ')} has no check: put a \`$ command\` line under each criterion`);
-}
 
 /** The buttons a draft's thread carries: the project picked, and what to do with the draft. */
 export const PICK = 'draft_project';
@@ -74,8 +62,10 @@ const button = (action_id: string, value: string, text: string) => ({ type: 'but
 
 /** Slack shows at most 3,000 characters of a section; the .md file holds all of it. */
 const SECTION = 3000;
-const draftBlocks = (id: number, text: string) => [
+const draftBlocks = (id: number, text: string, summary?: string) => [
   { type: 'section', text: { type: 'mrkdwn', text: text.length > SECTION ? `${text.slice(0, SECTION - 40)}\n… the rest is in draft.md` : text } },
+  // What Animus read of the draft against the project, apart from the spec.
+  ...(summary ? [{ type: 'section', text: { type: 'mrkdwn', text: `\`\`\`${summary.slice(0, SECTION - 10)}\`\`\`` } }] : []),
   { type: 'actions', elements: [button(SUBMIT, String(id), 'Submit'), button(DISCARD, String(id), 'Discard')] },
 ];
 
@@ -90,6 +80,8 @@ export function draftRunner(slack: Pick<Transport, 'post' | 'upload' | 'update' 
   store: Store; config: Config; home: string; launch?: DraftLaunch; github?: GitHubUrls;
   /** Brings the project's clone up to date with its base branch on GitHub, with the person's credentials; the commit it is at. Throws why it cannot, which ends the draft. */
   fresh?: (repoDir: string, env: Record<string, string>) => string;
+  /** Admits a draft's spec against its project's base branch on GitHub when Submit is pressed (admit.ts); without it a draft is submitted unchecked, as in tests. */
+  admit?: AdmitSubmission;
   /** The bot's token, which fetches Slack files a message links to. */
   slackToken?: string;
   fetch?: Fetch; say?: (line: string) => void;
@@ -147,6 +139,12 @@ export function draftRunner(slack: Pick<Transport, 'post' | 'upload' | 'update' 
     } catch (err) { say(`draft ${draft.id}: could not comment on ${draft.github.repo}#${draft.github.issue}: ${(err as Error).message}`); }
   };
 
+  /** Why a draft's spec is refused on its project's base branch as GitHub has it now, with the list of problems; nothing when it is admitted. Throws AnimusError when GitHub cannot be read. */
+  const refusal = async (draft: Draft, spec: string): Promise<string | undefined> => {
+    if (!opts.admit) return undefined;
+    return refusedWith('draft.md', await opts.admit(draft.person, draft.project!, spec, 'draft.md'));
+  };
+
   /** Whether a draft is still the one a session started on: Discard or expiry may close it meanwhile. */
   const stillRunning = (draft: Draft) => store.draft(draft.id)?.state === 'running';
 
@@ -166,7 +164,13 @@ export function draftRunner(slack: Pick<Transport, 'post' | 'upload' | 'update' 
       if (opts.fresh) {
         // Helix's own process fetches into the project's clone with the person's token (docs/adr/0003, 0008); the session gets the clone, never the token.
         const theirs = { ...personEnv(person), ...(existsSync(liveTokenFile(draft.person)) ? { ANIMUS_GH_TOKEN_FILE: liveTokenFile(draft.person) } : {}) };
-        base = opts.fresh(project.dir, { ...theirs, ...credentialEnv(theirs) });
+        const env = { ...theirs, ...credentialEnv(theirs) };
+        base = opts.fresh(project.dir, env);
+        // The session is told the project as the base branch has it, and checks its spec against that (plugin/src/draft.ts).
+        const facts = draftProject(project.dir, base, env);
+        if (facts) writeFileSync(join(draft.folder, 'project.json'), JSON.stringify(facts));
+        else rmSync(join(draft.folder, 'project.json'), { force: true });
+        rmSync(join(draft.folder, 'summary.md'), { force: true });
       }
       // shortcut: a revision reads the references the message's links gave; links in a reply are not fetched.
       if (!existsSync(join(draft.folder, 'sources.json'))) {
@@ -195,11 +199,13 @@ export function draftRunner(slack: Pick<Transport, 'post' | 'upload' | 'update' 
       return;
     }
     if (!stillRunning(draft)) return;
+    const summaryFile = join(draft.folder, 'summary.md');
+    const summary = existsSync(summaryFile) ? readFileSync(summaryFile, 'utf8').trimEnd() : undefined;
     if (draft.github) {
       // A revision is a new comment, so the issue shows how the draft changed; the latest one is what submit reads.
       let comment: number;
       try {
-        comment = await commentAs(store, config, github, draft.person, draft.github.repo, draft.github.issue, draftComment(text));
+        comment = await commentAs(store, config, github, draft.person, draft.github.repo, draft.github.issue, draftComment(text, summary));
       } catch (err) {
         // Left running, the draft would count toward the limit and refuse every reply as not posted yet.
         const reason = `the draft comment could not be posted: ${(err as Error).message}`;
@@ -218,7 +224,7 @@ export function draftRunner(slack: Pick<Transport, 'post' | 'upload' | 'update' 
       }
       return;
     }
-    const blocks = draftBlocks(draft.id, text);
+    const blocks = draftBlocks(draft.id, text, summary);
     // A revision replaces the draft's post and its file, so the thread holds one draft.
     const post = draft.post ?? await transport.post(draft.channel, text, draft.ts, blocks);
     if (draft.post) await transport.update(draft.channel, post, text, blocks);
@@ -307,7 +313,8 @@ export function draftRunner(slack: Pick<Transport, 'post' | 'upload' | 'update' 
       if (!spec) return 'the latest draft comment has no spec block I can read';
       let job;
       try {
-        checkDraft(loadFactory(), spec);
+        const refused = await refusal(draft, spec);
+        if (refused) return `Not submitted: ${refused}\nEdit the draft comment or comment \`/animus <what to change>\`.`;
         job = jobs.submit(draft.person, { repo: draft.project!, spec, name: 'draft.md', github: { repo: on.repo, issue: on.number } });
       } catch (err) {
         if (!(err instanceof AnimusError)) throw err;
@@ -372,7 +379,8 @@ export function draftRunner(slack: Pick<Transport, 'post' | 'upload' | 'update' 
       let job;
       try {
         const text = readFileSync(join(draft.folder, 'draft.md'), 'utf8');
-        checkDraft(loadFactory(), text);
+        const refused = await refusal(draft, text);
+        if (refused) { await transport.post(draft.channel, `Not submitted: ${refused}\nReply with what to change.`, draft.ts); return undefined; }
         job = jobs.submit(person, { repo: draft.project!, spec: text, name: 'draft.md' });
       } catch (err) {
         if (!(err instanceof AnimusError)) throw err;

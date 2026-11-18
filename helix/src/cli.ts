@@ -200,7 +200,7 @@ function main(argv: string[]): number | undefined | Promise<number> {
       const contained = config.container && draftLaunch({ home, animusRoot: ROOT, image: imageName(animusVersion()), limits: config.container, uid: uid(), gid: gid() });
       const drafts = draftRunner(slack, {
         store, config, home, say, ...(slack ? { slackToken: envFileVars(slackEnvFile()).SLACK_BOT_TOKEN } : {}),
-        fresh: freshBase,
+        fresh: freshBase, admit: submissionAdmit(store, config),
         ...(contained ? { launch: (draft, repoDir, env, base) => contained({ id: String(draft.id), person: draft.person, folder: draft.folder, mirror: repoDir, base }, env) } : {}),
       });
       if (slack) slackBot(slack, { store, config, supervisor, drafts });

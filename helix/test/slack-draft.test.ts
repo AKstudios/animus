@@ -11,6 +11,7 @@ import type { SlackEvent } from '../src/slack-api.ts';
 import { slackBot } from '../src/slack.ts';
 import { openStore } from '../src/store.ts';
 import { pauseFile, supervise } from '../src/supervisor.ts';
+import { fakeAdmit } from './fake-admit.ts';
 import { fakeGitHub, type FakeGitHub } from './fake-github.ts';
 import { fakeTransport, until, type Sent } from './fake-slack.ts';
 
@@ -65,7 +66,7 @@ async function helix(github?: FakeGitHub, more: Partial<Config> = {}, fetch = no
     refs.push(existsSync(dir) ? readdirSync(dir).sort() : []);
     return { command: process.execPath, args: ['-e', FAKE, draft.folder] };
   };
-  const drafts = draftRunner(slack.transport, { store, config, home, launch, fetch, slackToken: 'xoxb-bot', ...(github ? { github } : {}) });
+  const drafts = draftRunner(slack.transport, { store, config, home, launch, fetch, slackToken: 'xoxb-bot', admit: fakeAdmit(), ...(github ? { github } : {}) });
   slackBot(slack.transport, { store, config, drafts, supervisor: supervise({ store, config, home }) });
   const uploads = () => slack.sent.filter((s) => s.method === 'upload').length;
   const posted = () => uploads() > 0;
@@ -222,7 +223,9 @@ for (const [what, event] of IGNORED) {
 
 const INCOMPLETE = [
   { missing: 'acceptance criteria', text: 'Add a login page', why: /Acceptance criteria/ },
-  { missing: 'a check under a criterion', text: 'Add a login page\n\n## Acceptance criteria\n\n1. A login page.\n   $ npm test\n2. A logout link.\n', why: /criterion 2 has no check/ },
+  { missing: 'a command under any criterion', text: 'Add a login page\n\n## Acceptance criteria\n\n1. A login page.\n2. A logout link.\n', why: /no acceptance criterion has a `\$ command` line/ },
+  { missing: 'a command under a bug\'s criterion', text: '---\ntype: bug\n---\nFix login\n\n## Acceptance criteria\n\n1. Login works.\n', why: /a bug spec needs a `\$ command`/ },
+  { missing: 'a ui target in the profile', text: '---\ntype: ui\n---\nAdd a login page\n\n## Acceptance criteria\n\n1. A login page.\n   $ npm test\n', why: /\[profile\] a ui spec needs a ui target/ },
 ];
 
 for (const c of INCOMPLETE) {
@@ -238,6 +241,16 @@ for (const c of INCOMPLETE) {
     assert.deepEqual(h.store.list(), []);
   });
 }
+
+// Protects: criterion 7. Fails when: a criterion without a command, left to the reviewer, keeps a draft from being queued.
+test('Submit queues a draft whose second criterion has no command', async () => {
+  const h = await helix();
+  const { post } = await posted(h, 'C0TEAM', 'Add a login page\n\n## Acceptance criteria\n\n1. A login page.\n   $ npm test\n2. The page looks like the mock-up.\n');
+
+  await h.slack.deliver(press(buttons(post)[0]!));
+
+  assert.equal(h.store.list().length, 1);
+});
 
 // Protects: criterion 5's queueing. Fails when: a complete draft is not queued as its person's job for its project, or the job's progress would not post to the draft's thread.
 test('Submit queues a complete draft as the person\'s job, and the thread becomes the job\'s thread', async () => {

@@ -73,3 +73,10 @@ export function submissionAdmit(store: Store, config: Config, github?: GitHubUrl
     return admitOnBase(project.dir, fetchEnv(store, person), spec, name, checkout);
   };
 }
+
+/** What a draft session is given of the project (draft.ts, project.json): the profile at the commit Helix fetched, never the clone's working tree. Nothing when that commit has no readable profile; the draft is then written without it, and Submit says why it cannot run. */
+export function draftProject(repoDir: string, commit: string, env: Record<string, string>): { profile: string; read: string; commit: string } | undefined {
+  const shown = git(repoDir, ['show', `${commit}:${PROFILE_PATH}`], env);
+  if (!shown.ok) return undefined;
+  try { return { profile: shown.out, read: `origin/${parseProfile(shown.out).base} on GitHub`, commit }; } catch { return undefined; }
+}

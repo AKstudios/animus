@@ -5,7 +5,7 @@
 // work, so a job never fails at start for a reason admit did not name.
 import { readFileSync } from 'node:fs';
 import { basename } from 'node:path';
-import { checksFor, PROFILE_PATH, type Profile, type UiPage, type UiTarget } from './profile.ts';
+import { checksFor, parseProfile, PROFILE_PATH, type Profile, type UiPage, type UiTarget } from './profile.ts';
 import { resolvePlan, type Factory, type Plan } from './profiles.ts';
 import { AnimusError, tryGit } from './proc.ts';
 import { parseSpec, type Spec } from './spec.ts';
@@ -154,4 +154,33 @@ export function admitFile(factory: Factory, file: string, repo: string, profile:
 /** A refused spec as the error a job ends with. */
 export function refusal(file: string, a: Admitted): AnimusError {
   return new AnimusError(`${basename(file)} is refused; it cannot run on this project:\n${describeAdmit(a)}`);
+}
+
+/** The facts of a project as one commit of a clone has them: the profile's text read from it, the base branch at the commit, other branches as the clone already has them (no network). */
+export function commitFacts(repo: string, profileText: string, commit: string, read: string): Facts {
+  const profile = parseProfile(profileText, `${PROFILE_PATH} on ${read}`);
+  const ref = (b: string) => (b === profile.base ? commit : [`origin/${b}`, b].find((r) => tryGit(repo, ['rev-parse', '--verify', '--quiet', `${r}^{commit}`]) !== undefined));
+  return {
+    profile, read,
+    hasBranch: (b) => ref(b) !== undefined,
+    hasPath: (b, path) => { const r = ref(b); return r !== undefined && tryGit(repo, ['cat-file', '-e', `${r}:${path}`]) !== undefined; },
+  };
+}
+
+/** What a draft session is told of the project, rendered from its profile: the base, the types that run, the gates, and each UI target with its pages. */
+export function describeProject(factory: Factory, facts: Facts): string {
+  const { profile } = facts;
+  const lines = [
+    `The project's profile, as read from ${facts.read}:`,
+    `- base branch: ${profile.base}`,
+    `- types that run: ${Object.entries(factory.types).filter(([, t]) => !t.later).map(([n]) => n).join(', ')}`,
+    `- gates (run on every job): ${Object.entries(profile.commands).map(([n, c]) => `${n}: ${c.run}`).join('; ') || 'none'}`,
+  ];
+  if (!profile.ui.targets.length) lines.push('- ui targets: none, so a `type: ui` spec cannot run here');
+  else {
+    lines.push('- ui targets (a `type: ui` spec shows pages of one; with several, name it in the header as `ui: { target: <name> }`):');
+    for (const t of profile.ui.targets) lines.push(`  - ${t.name} (${t.kind}); pages: ${t.pages.map((p) => `${p.name} ${p.path}`).join(', ') || 'none'}`);
+    lines.push('  A page in the spec\'s `ui: { pages: [...] }` is one of those names, or a path starting with / on a web target.');
+  }
+  return lines.join('\n');
 }

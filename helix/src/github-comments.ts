@@ -112,12 +112,14 @@ export async function checkComments(store: Store, config: Pick<Config, 'github'>
   return findings;
 }
 
-/** A draft as a comment: a line saying Animus drafted it, the spec in a `markdown` fence (longer than any run of backticks in it), and the replies Animus understands. */
-export function draftComment(spec: string): string {
-  const fence = '`'.repeat(Math.max(3, ...(spec.match(/`+/g) ?? []).map((r) => r.length + 1)));
+/** A draft as a comment: a line saying Animus drafted it, the spec in a `markdown` fence (longer than any run of backticks in it), what Animus read of it against the project as a `text` fence after it, and the replies Animus understands. */
+export function draftComment(spec: string, summary?: string): string {
+  const fenceOf = (text: string) => '`'.repeat(Math.max(3, ...(text.match(/`+/g) ?? []).map((r) => r.length + 1)));
+  const fence = fenceOf(spec);
   return [
     'Animus drafted this spec from the issue and your comment. Edit this comment to change it by hand.',
     '', `${fence}markdown`, spec.trimEnd(), fence, '',
+    ...(summary ? ['Animus read it against the project:', '', `${fenceOf(summary)}text`, summary, fenceOf(summary), ''] : []),
     'Reply with a comment:',
     '- `/animus <what to change>` to revise it',
     '- `/animus submit` to queue it as a job',
