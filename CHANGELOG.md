@@ -8,6 +8,20 @@ clients with how to update.
 
 ## Unreleased
 
+- `after:` finds the earlier spec's pull request on GitHub, by the spec's
+  title, when this machine's run log has no job for it, so a spec waiting on
+  one that ran on Helix or another laptop starts once that PR is merged.
+  While it finds none, it says the title it is looking for and how to stop
+  waiting.
+- The local display (`animus ui`) no longer links to people pages it does not
+  have: no PEOPLE link, and `/people` says this display has none. It tags a
+  job with its pull request (`PR #8`, `DRAFT PR #8`) linking to GitHub, and a
+  job page says the job's output went to the terminal it ran in. On both
+  displays, a job with no person or no line yet shows no empty separator or
+  `>` line.
+- The check-project test no longer fails under load: it read the check's log
+  as soon as the project was ready, before the last line was written.
+
 ## 0.4.4 (2026-11-18)
 
 - A Helix job for a repository whose GitHub App installation lacks Contents
