@@ -128,3 +128,14 @@ test('a queued job is admitted again at start and ends as refused, with the list
     assert.equal(spawnSync('test', ['-e', marker]).status, 1);
   } finally { h.stop(); }
 });
+
+// Protects: the answer for a project Helix is still checking. Fails when: admit, which runs ahead of the supervisor, tells the person the project does not exist.
+test('a submit for a project still being checked is answered as still checking, not as unknown', async () => {
+  const gh = github();
+  const h = await helix(gh, never);
+  try {
+    h.store.putProject({ name: 'app', url: 'https://github.com/o/app.git', dir: gh.clone, state: 'checking', added: '' });
+    await assert.rejects(h.submit(uiSpec()), /still checking the project app/);
+    await assert.rejects(client.submit({ repo: 'nope', spec: uiSpec(), name: 'spec.md' }), /no project named nope/);
+  } finally { h.stop(); }
+});

@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
 import { loadProgress, loadState, readRuns } from '../src/log.ts';
@@ -381,4 +382,24 @@ test('a job picked up again starts a fresh session when the one it had ended ove
   assert.equal(again.outcome, 'pr');
   assert.equal(second.calls[0]!.resume, undefined);
   assert.match(second.calls[0]!.prompt, /The feature file should say done\.[\s\S]*already under way[\s\S]*Done, or finished\?[\s\S]*The person's answer: Done\./);
+});
+
+// Protects: a job on Helix reads the profile from origin/<base>, not the clone's working tree (docs/adr/0008). Fails when: a clone left on another branch hands the job its old profile.
+test('a job Helix runs reads the profile from origin/main even when the clone is on another branch', async () => {
+  process.env.ANIMUS_CLOSES = '7';
+  try {
+    const repo = makeRepo();
+    const origin = mkdtempSync(join(tmpdir(), 'animus-origin-'));
+    git(origin, ['init', '-q', '--bare']);
+    git(repo, ['remote', 'add', 'origin', origin]);
+    git(repo, ['push', '-q', 'origin', 'main']);
+    git(repo, ['fetch', '-q', 'origin']);
+    git(repo, ['checkout', '-q', '-b', 'old-work']);
+    write(repo, '.animus/animus.yaml', 'commands:\n  test: grep -q done src/feature.txt\nissue_link: refs\n');
+    git(repo, ['commit', '-qam', 'a profile only this branch has']);
+    const d = deps(fakeAgent([say('done'), () => clean()]).agent);
+    await runJob({ repo, specFile: writeSpec(SMALL), trigger: 'helix' }, d);
+
+    assert.match(d.published[0]!.body, /^Closes #7$/m);
+  } finally { delete process.env.ANIMUS_CLOSES; }
 });

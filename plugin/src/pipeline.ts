@@ -15,7 +15,7 @@ import { describe, failsOnBase, gateReport, jobChecks, LATER_SLICE, runChecks, t
 import { commitAll, mainCheckout, matchesAny, touchedFiles } from './git.ts';
 import { appendRun, jobDir, saveProgress, saveState, writeJson, type JobState, type Outcome, type Run, type Stage } from './log.ts';
 import { evidenceBranch, findPrByTitle, prBody, prState, type PrFind, type Evidence, type PrLookup, type Publish } from './pr.ts';
-import { admitFile, refusal, type Admitted } from './admit.ts';
+import { admitFile, profileOnBase, refusal, type Admitted } from './admit.ts';
 import { loadProfile } from './profile.ts';
 import { describePlan, escalate, modelFor, PLUGIN_ROOT, raise, readPrompt, type Factory, type Plan, type Tier } from './profiles.ts';
 import { animusCommand, git, AnimusError, tryGit } from './proc.ts';
@@ -107,7 +107,9 @@ export async function runJob(opts: RunOptions, deps: Deps): Promise<Run> {
   const repo = mainCheckout(opts.repo);
   const prior = opts.resume?.state;
   if (!prior && !opts.specFile) throw new AnimusError('animus run needs a spec file');
-  const repoProfile = loadProfile(repo);
+  // On Helix the profile is the base branch's as Helix fetched it, not whatever the clone has checked out (docs/adr/0008).
+  const onBase = opts.trigger === 'helix' || process.env.ANIMUS_TRIGGER === 'helix' ? profileOnBase(repo) : undefined;
+  const repoProfile = onBase?.profile ?? loadProfile(repo);
   // A new job is admitted before any work (docs/adr/0007); a resumed one was, when it started.
   let spec: Spec;
   let plan: Plan;
@@ -116,7 +118,7 @@ export async function runJob(opts: RunOptions, deps: Deps): Promise<Run> {
     spec = loadSpec(prior.spec);
     plan = prior.plan;
   } else {
-    admitted = admitFile(factory, opts.specFile!, repo, repoProfile);
+    admitted = admitFile(factory, opts.specFile!, repo, repoProfile, onBase?.facts);
     if (admitted.problems.length || !admitted.plan) throw refusal(opts.specFile!, admitted);
     ({ spec, plan } = { spec: admitted.spec, plan: admitted.plan });
   }

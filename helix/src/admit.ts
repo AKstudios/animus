@@ -10,7 +10,8 @@ import { admit, refusal, type Admitted, type Facts } from '../../plugin/src/admi
 import { loadFactory } from '../../plugin/src/profiles.ts';
 import { AnimusError } from '../../plugin/src/proc.ts';
 import { parseProfile, PROFILE_PATH } from '../../plugin/src/profile.ts';
-import { credentialEnv, personEnv, type Config } from './config.ts';
+import { credentialEnv, personEnv, readyRepos, type Config } from './config.ts';
+import { Refused } from './supervisor.ts';
 import { freshToken, liveTokenFile, type GitHubUrls } from './github-app.ts';
 import { freshBase, git } from './fresh.ts';
 import type { HelixJob, Store } from './store.ts';
@@ -68,7 +69,9 @@ export type AdmitSubmission = (person: string, repo: string, spec: string, name:
 export function submissionAdmit(store: Store, config: Config, github?: GitHubUrls): AdmitSubmission {
   return async (person, repo, spec, name, checkout) => {
     const project = store.project(repo);
-    if (project?.state !== 'ready') throw new AnimusError(`Helix has no project named ${repo}`);
+    // The same answers as the supervisor's submit, which admit now runs ahead of.
+    if (project?.state === 'checking') throw new Refused(409, `Helix is still checking the project ${repo}: animus project list says when it is ready`);
+    if (project?.state !== 'ready') throw new Refused(400, `Helix has no project named ${repo}; it has ${Object.keys(readyRepos(store)).join(', ') || 'none'}. Add it from a checkout of it: animus project add`);
     await freshToken(store, config, person, github);
     return admitOnBase(project.dir, fetchEnv(store, person), spec, name, checkout);
   };

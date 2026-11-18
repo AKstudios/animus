@@ -5,7 +5,7 @@
 // work, so a job never fails at start for a reason admit did not name.
 import { readFileSync } from 'node:fs';
 import { basename } from 'node:path';
-import { checksFor, parseProfile, PROFILE_PATH, type Profile, type UiPage, type UiTarget } from './profile.ts';
+import { checksFor, loadProfile, parseProfile, PROFILE_PATH, type Profile, type UiPage, type UiTarget } from './profile.ts';
 import { resolvePlan, type Factory, type Plan } from './profiles.ts';
 import { AnimusError, tryGit } from './proc.ts';
 import { parseSpec, type Spec } from './spec.ts';
@@ -146,9 +146,9 @@ export function checkoutFacts(repo: string, profile: Profile): Facts {
   };
 }
 
-/** Admits the spec in a file against a checkout. */
-export function admitFile(factory: Factory, file: string, repo: string, profile: Profile): Admitted {
-  return admit(factory, readFileSync(file, 'utf8'), checkoutFacts(repo, profile), basename(file));
+/** Admits the spec in a file against a checkout, or against `facts` when given. */
+export function admitFile(factory: Factory, file: string, repo: string, profile: Profile, facts: Facts = checkoutFacts(repo, profile)): Admitted {
+  return admit(factory, readFileSync(file, 'utf8'), facts, basename(file));
 }
 
 /** A refused spec as the error a job ends with. */
@@ -183,4 +183,30 @@ export function describeProject(factory: Factory, facts: Facts): string {
     lines.push('  A page in the spec\'s `ui: { pages: [...] }` is one of those names, or a path starting with / on a web target.');
   }
   return lines.join('\n');
+}
+
+/**
+ * The project's profile as `origin/<base>` has it in a clone, whatever the clone has checked out
+ * (docs/adr/0008): a job on Helix reads this, not the working tree. The clone's own profile says
+ * which base to look at, then the one found there is followed once more, as Helix's fetch does.
+ * Nothing when the clone has no such branch or profile; the caller then reads the checkout.
+ */
+export function profileOnBase(repo: string): { profile: Profile; facts: Facts } | undefined {
+  const at = (base: string) => {
+    const commit = tryGit(repo, ['rev-parse', '--verify', '--quiet', `origin/${base}^{commit}`]);
+    const text = commit ? tryGit(repo, ['show', `${commit}:${PROFILE_PATH}`]) : undefined;
+    return commit && text !== undefined ? { commit, text } : undefined;
+  };
+  let base = 'main';
+  try { base = loadProfile(repo).base; } catch { /* no readable profile in the working tree: main */ }
+  let found = at(base);
+  for (let tries = 0; found && tries < 2; tries++) {
+    const next = parseProfile(found.text, PROFILE_PATH).base;
+    if (next === base) break;
+    base = next;
+    found = at(base);
+  }
+  if (!found) return undefined;
+  const facts = commitFacts(repo, found.text, found.commit, `origin/${base} on GitHub`);
+  return { profile: facts.profile, facts };
 }
