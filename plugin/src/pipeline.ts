@@ -52,6 +52,8 @@ export type RunOptions = {
   /** Leave the worktree in place when the job ends. */
   keep?: boolean;
   trigger?: string;
+  /** The line saying where the job runs (`animus start`), logged first so the watch line can follow it with the job's id. */
+  runsLine?: string;
   /** The submitter's own skills (personal.ts), copied into the job's folder when it starts; a resumed job reads that copy. */
   personal?: PersonalSkill[];
   /** Pick a job up again, with the person's answer if it asked a question. */
@@ -142,7 +144,11 @@ export async function runJob(opts: RunOptions, deps: Deps): Promise<Run> {
   const source = prior ? prior.source : resolve(opts.specFile!);
   if (source) run.spec_file = source;
 
-  log(`job ${job}: ${spec.title}`);
+  const jobLine = `job ${job}: ${spec.title}`;
+  // On Helix the person watches at Helix's own links.
+  const watch = opts.trigger !== 'helix' && process.env.ANIMUS_TRIGGER !== 'helix' ? [`watch it: animus ui, then open /jobs/${job}`] : [];
+  // The watch line follows the where-it-runs line when there is one, else the job line.
+  for (const line of opts.runsLine ? [opts.runsLine, ...watch, jobLine] : [jobLine, ...watch]) log(line);
   log(describePlan(factory, plan));
   if (personal.length) log(`the submitter's skills: ${personal.map((p) => `${p.name} (${p.roles.join(', ')}${p.types ? `; ${p.types.join(', ')} jobs` : ''})`).join(', ')}`);
   // A spec that builds on another waits for it, then starts from a base that holds it.

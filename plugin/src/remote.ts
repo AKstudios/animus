@@ -17,7 +17,12 @@ export type RemoteJob = {
   animus_job?: string; outcome?: string; pr?: string; reason?: string; question?: string; cost_usd?: number; log?: string; waiting?: string;
   /** On a submission's answer: the submitter's skills Helix took with it. A Helix that predates them leaves this out. */
   skills?: string[];
+  /** The job's page at each address Helix has set, as `Tailscale: <url>` lines; never with a token. A Helix that predates them leaves this out. */
+  links?: string[];
 };
+
+/** Where to watch a job on Helix: one indented line per address. */
+export const describeLinks = (j: RemoteJob): string[] => (j.links?.length ? ['watch it:', ...j.links.map((l) => `  ${l}`)] : []);
 
 /** Where `animus join` keeps the address and token it was given: the owner's eyes only. */
 export const helixFile = (home = animusHome()) => joinPath(home, 'helix.json');
@@ -191,6 +196,7 @@ export function describeJob(j: RemoteJob): string {
     ...(j.waiting ? [`  ${j.waiting}`] : []),
     ...(j.question ? [`  it asks: ${j.question}`, `  answer with: animus answer ${j.id} "<your answer>"`] : []),
     ...(j.reason ? [`  reason: ${j.reason.split('\n')[0]}`] : []),
+    ...describeLinks(j).map((l) => `  ${l}`),
     ...(j.log ? ['', j.log] : []),
   ].join('\n');
 }

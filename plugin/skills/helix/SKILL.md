@@ -17,8 +17,8 @@ Anyone on Helix may submit for any project their GitHub token may push to: there
 
 ## Jobs
 
-- Submit: `animus submit <spec.md>` from a checkout of the project (`--draft` for a draft pull request). It returns at once with the job's number; the job runs on Helix, so this session need not stay open. The person's own skills in `~/.animus/config.yaml` go with it.
-- Follow: `animus status` for the queue, `animus status <id>` for one job and the end of its log.
+- Submit: `animus submit <spec.md>` from a checkout of the project (`--draft` for a draft pull request). It returns at once with the job's number; the job runs on Helix, so this session need not stay open. The person's own skills in `~/.animus/config.yaml` go with it. Give the person both links it prints under `watch it:` (Tailscale and office network, whichever Helix has); for a job started on this machine instead (`animus start --local`), offer to run `animus ui` in the background and, on a yes, do.
+- Follow: `animus status` for the queue, `animus status <id>` for one job, its links and the end of its log.
 - A job that asks a question: tell the person the question, and send their answer with `animus answer <id> "<answer>"`. Never answer for them.
 - Cancel: `animus cancel <id>`, only when the person asks. Only whoever submitted a job may cancel it.
 

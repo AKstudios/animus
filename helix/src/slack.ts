@@ -52,7 +52,7 @@ const openingBlocks = (id: number, text: string, button: boolean) => [
 ];
 
 /** Where a job's page is, at each address Helix has set; never with a token. */
-const jobLinks = (config: Pick<Config, 'url' | 'lan_url'>, id: number): string[] =>
+export const jobLinks = (config: Pick<Config, 'url' | 'lan_url'>, id: number): string[] =>
   ([[config.url, 'Tailscale'], [config.lan_url, 'office network']] as const)
     .filter(([base]) => base)
     .map(([base, label]) => `${label}: ${base!.replace(/\/+$/, '')}/jobs/${id}`);

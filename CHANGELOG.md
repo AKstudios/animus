@@ -8,6 +8,13 @@ clients with how to update.
 
 ## Unreleased
 
+- Every job says where to watch it. `animus start` and `animus run` on this
+  machine print `watch it: animus ui, then open /jobs/<job>`; `animus start
+  --helix`, `animus submit` and `animus status <id>` print the job page on
+  Tailscale and the office network, whichever Helix has set. Helix's submit and
+  status answers gain `links`; older clients ignore it. The to-spec and helix
+  skills offer `animus ui` or give both links.
+
 ## 0.5.0 (2026-11-18)
 
 - **Breaking:** Slack's command is `/animus` and its bot is Animus, not
