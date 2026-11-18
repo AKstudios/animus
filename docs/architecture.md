@@ -106,6 +106,7 @@ A job leaves nothing in the target repository but its branch.
 | `log.ts` | The run log and each job's state |
 | `after.ts` | Waiting for an earlier spec's PR to merge |
 | `outcomes.ts`, `cleanup.ts` | `animus outcomes` and `animus cleanup` |
+| `retro.ts`, `lessons.ts` | `animus retro` (assembles the records, runs the `retro` role, filters its proposals) and `animus lessons` (`~/.animus/lessons.json`) |
 | `init.ts`, `doctor.ts` | `animus init` and `animus doctor` |
 | `remote.ts`, `join.ts`, `project.ts` | The Helix client: jobs, joining and leaving, projects |
 | `git.ts`, `proc.ts` | git and process helpers, and `AnimusError` |

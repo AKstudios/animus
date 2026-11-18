@@ -8,6 +8,14 @@ clients with how to update.
 
 ## Unreleased
 
+- `animus retro [--project <name>] [--days <n>]` runs a read-only `retro`
+  session (standard tier, a new role in profiles.yaml) over a project's runs
+  and proposes at most 5 lessons, each citing at least two jobs or one whose
+  PR was reverted or reworked; the script drops the rest. `animus lessons`
+  lists proposed, kept and expired lessons from the new
+  `ANIMUS_HOME/lessons.json`, and `animus lessons accept <id>` /
+  `dismiss <id>` keep or drop one. A kept lesson expires after 60 days
+  unless a retro sees it again. Lessons are not yet given to jobs.
 - A spec refused at admission, and a job ended by SIGINT, SIGTERM or a Helix
   cancel, now leave a run line with cause `admit`, `interrupted` or
   `cancelled`. Helix writes a `cancelled` file beside the job's spec before it
