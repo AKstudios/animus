@@ -9,9 +9,9 @@ import { join } from 'node:path';
 import { checkDraft, fetchReferences, findLinks, GITHUB_ITEM, GITHUB_VARS, type Fetch } from '../../plugin/src/draft.ts';
 import { AnimusError } from '../../plugin/src/proc.ts';
 import { loadFactory } from '../../plugin/src/profiles.ts';
-import { personEnv, type Config } from './config.ts';
+import { credentialEnv, personEnv, type Config } from './config.ts';
 import { commentAs, commentBody, draftComment, specBlock } from './github-comments.ts';
-import { freshToken, GITHUB, githubRepo, reachableRepos, type GitHubUrls } from './github-app.ts';
+import { freshToken, GITHUB, githubRepo, liveTokenFile, reachableRepos, type GitHubUrls } from './github-app.ts';
 import type { Transport } from './slack-api.ts';
 import type { Draft, Store } from './store.ts';
 import { PLUGIN, type Supervisor } from './supervisor.ts';
@@ -21,8 +21,8 @@ export const PICK = 'draft_project';
 export const SUBMIT = 'submit_draft';
 export const DISCARD = 'discard_draft';
 
-/** How a draft session starts, on the project's clone at repoDir, with env: the person's Claude sign-in and nothing of GitHub. */
-export type DraftLaunch = (draft: Draft, repoDir: string, env: Record<string, string>) => { command: string; args: string[]; env?: Record<string, string>; cwd?: string };
+/** How a draft session starts, on the project's clone at repoDir, with env: the person's Claude sign-in and nothing of GitHub. base: the commit the base branch is at on GitHub, which a container's clone is checked out at. */
+export type DraftLaunch = (draft: Draft, repoDir: string, env: Record<string, string>, base: string) => { command: string; args: string[]; env?: Record<string, string>; cwd?: string };
 
 /** `animus draft` on this machine, as Helix's account. */
 const animusDraft: DraftLaunch = (draft, repoDir) => ({
@@ -76,6 +76,8 @@ const noSlack = { post: refuse, upload: refuse, update: refuse, deleteFile: refu
 
 export function draftRunner(slack: Pick<Transport, 'post' | 'upload' | 'update' | 'deleteFile' | 'dm'> | undefined, opts: {
   store: Store; config: Config; home: string; launch?: DraftLaunch; github?: GitHubUrls;
+  /** Brings the project's clone up to date with its base branch on GitHub, with the person's credentials; the commit it is at. Throws why it cannot, which ends the draft. */
+  fresh?: (repoDir: string, env: Record<string, string>) => string;
   /** The bot's token, which fetches Slack files a message links to. */
   slackToken?: string;
   fetch?: Fetch; say?: (line: string) => void;
@@ -109,8 +111,8 @@ export function draftRunner(slack: Pick<Transport, 'post' | 'upload' | 'update' 
   };
 
   /** Runs the draft session; draft.md as it wrote it, or why there is none. */
-  const session = (draft: Draft, repoDir: string, env: Record<string, string>): Promise<string> => {
-    const launched = launch(draft, repoDir, env);
+  const session = (draft: Draft, repoDir: string, env: Record<string, string>, base: string): Promise<string> => {
+    const launched = launch(draft, repoDir, env, base);
     // Helix's own GitHub token, if its account has one, stays out too.
     const child = spawn(launched.command, launched.args, { cwd: launched.cwd ?? repoDir, env: { ...withoutGitHub(process.env), ...env, ...launched.env }, stdio: ['ignore', 'ignore', 'pipe'] });
     let err = '';
@@ -147,16 +149,22 @@ export function draftRunner(slack: Pick<Transport, 'post' | 'upload' | 'update' 
       if (project?.state !== 'ready') throw new AnimusError(`Helix no longer has the project ${draft.project}`);
       const person = store.person(draft.person);
       if (!person) throw new AnimusError(`${draft.person} is no longer on Helix`);
+      const token = await freshToken(store, config, draft.person, github);
+      let base = 'HEAD';
+      if (opts.fresh) {
+        // Helix's own process fetches into the project's clone with the person's token (docs/adr/0003, 0008); the session gets the clone, never the token.
+        const theirs = { ...personEnv(person), ...(existsSync(liveTokenFile(draft.person)) ? { ANIMUS_GH_TOKEN_FILE: liveTokenFile(draft.person) } : {}) };
+        base = opts.fresh(project.dir, { ...theirs, ...credentialEnv(theirs) });
+      }
       // shortcut: a revision reads the references the message's links gave; links in a reply are not fetched.
       if (!existsSync(join(draft.folder, 'sources.json'))) {
-        const token = await freshToken(store, config, draft.person, github);
         await fetchReferences(readFileSync(join(draft.folder, 'message.md'), 'utf8'), draft.folder, {
           ...(token ? { github: { token, api: github.api } } : {}),
           ...(opts.slackToken ? { slack: { token: opts.slackToken } } : {}),
           ...(opts.fetch ? { fetch: opts.fetch } : {}),
         });
       }
-      text = await session(draft, project.dir, { ...withoutGitHub(personEnv(person)), ANIMUS_USER: draft.person });
+      text = await session(draft, project.dir, { ...withoutGitHub(personEnv(person)), ANIMUS_USER: draft.person }, base);
     } catch (err) {
       if (!stillRunning(draft)) return;
       const reason = (err as Error).message;

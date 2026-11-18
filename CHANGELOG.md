@@ -8,6 +8,8 @@ clients with how to update.
 
 ## Unreleased
 
+- Helix jobs and drafts read the project's base branch as GitHub has it. Before a job starts or a draft is written, Helix fetches the base branch (the profile's `base`, `main` when unset) with the person's token, so a profile fixed on GitHub is the one the next job reads, even from an older clone. A fetch that fails (token refused, GitHub unreachable) ends the job or draft before any work, with the reason. A person's own branches and uncommitted work in a clone are left alone.
+
 ## 0.5.1 (2026-11-18)
 
 - The display's RECENT is now FINISHED: the 30 newest jobs that ended or were

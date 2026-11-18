@@ -108,6 +108,8 @@ export function supervise(opts: {
   store: Store; config: Config; home: string; launch?: Launch; preflight?: Preflight; say?: (line: string) => void;
   /** Runs before each job, ahead of preflight, while the job holds its slot: a fresh GitHub token (github-app.ts beforeJob). Throws why the job cannot run. */
   prepare?: (person: string, repo: string) => Promise<void>;
+  /** Brings the clone the job runs in up to date with its base branch on GitHub, with the job's environment; throws why it cannot. Left out with containers, which do it inside (container.ts jobCommand). */
+  fresh?: (repoDir: string, env: Record<string, string>) => unknown;
   /** Ends what a job leaves running outside its process tree (its container). */
   reap?: (id: number) => void;
   /** The Animus home a person's jobs write their state to, when it is not Helix's own. */
@@ -155,6 +157,8 @@ export function supervise(opts: {
       if (looked.why) throw new AnimusError(looked.why);
       // What the person set themselves wins over what was looked up.
       const jobEnv = { ...looked.env, ...theirs, ...credentialEnv(theirs), ANIMUS_USER: job.person, ANIMUS_TRIGGER: 'helix', ...(job.github ? { ANIMUS_CLOSES: String(job.github.issue) } : {}), ANIMUS_BIN: join(PLUGIN, 'bin', 'animus') };
+      // The profile is read from the base branch as GitHub has it now, with the person's token as their pushes use.
+      opts.fresh?.(repoDir, jobEnv);
       launched = launch(job, repoDir, jobEnv);
       env = { ...process.env, ...jobEnv, ...launched.env };
     } catch (err) {
@@ -203,7 +207,7 @@ export function supervise(opts: {
     child.on('close', (code, signal) => {
       // Animus says why on its last line when it refuses to start a job.
       const last = existsSync(logFile(job.id)) ? readFileSync(logFile(job.id), 'utf8').trimEnd().split('\n').pop() : undefined;
-      end(`animus ended with ${signal ?? `exit ${code}`} and no result${last ? `: ${last.replace(/^animus: /, '')}` : ''}`);
+      end(`animus ended with ${signal ?? `exit ${code}`} and no result${last ? `: ${last.replace(/^(animus|helix): /, '')}` : ''}`);
     });
   }
 
