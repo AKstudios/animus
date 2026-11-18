@@ -19,7 +19,26 @@ line with it), `name` (what the
 display calls the machine), `owner` ([The owner](#the-owner)), `container`
 and `slack` ([Slack](#slack)). Helix reads it again when it changes, for the
 slots and the owner; host, port and slack need a restart. People and projects are
-in `helix.db`, so changing either needs no restart. A `config.yaml` from
+in `helix.db`, so changing either needs no restart.
+
+`slots` is the most jobs that ever run at once; before starting each queued
+job Helix also checks for room, and a job that does not fit stays queued while
+later ones that do fit start. Three keys set the room, and are read again
+without a restart:
+
+- `reserve_memory` (default `2g`): memory kept free beyond what a job needs.
+- `job_memory` (default `4g`): what a job needs when `container.memory` is not
+  set. A job starts only when free memory covers its memory plus
+  `reserve_memory` and the 1-minute load average is under the core count (load
+  is not checked where the system reports none, as on Windows).
+- `tier_limits` (default none): the most jobs at once whose implementer runs on
+  a tier, such as `deep: 1`, counted from the spec's labels.
+
+Helix checks again every 30 seconds and when a job ends. With nothing running
+the first queued job starts whatever the machine reports. A held job says why
+(`waiting for memory: 3.1 GB free, needs 6 GB plus 2 GB kept free`, `waiting
+for the deep tier: 1 of 1 running`) in `animus status <id>` and on the display.
+A wrong value is refused with its key named. A `config.yaml` from
 before 0.3.3 that names `people` and `repos` has them moved into `helix.db`
 the first time a `helix` command runs.
 
