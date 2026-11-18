@@ -15,13 +15,15 @@ import type { HelixJob, Store } from './store.ts';
 import { jobIsOver, type Supervisor } from './supervisor.ts';
 import { animusVersion } from '../../plugin/src/version.ts';
 
-const USAGE = 'Usage: /helix draft <what you want, with links>, /helix project <name>, /helix jobs, /helix me, /helix status, /helix invite @user <github-login>, /helix link @user <person>, /helix notify off|on, or /helix help';
+const USAGE = 'Usage: /helix draft <what you want, with links>, /helix project <name>, /helix jobs, /helix job <id>, /helix cancel <id>, /helix me, /helix status, /helix invite @user <github-login>, /helix link @user <person>, /helix notify off|on, or /helix help';
 /** /helix help, and what an empty or unknown command gets: every command, one line each; the owner's only to the owner. */
 export function helpText(byOwner: boolean): string {
   return [
     '*Helix* turns a written request into a pull request. Commands:',
     '`/helix draft <what you want, with links>`: draft a job\'s spec in a thread. Reply there to change it, then press Submit. `@Helix <text>` in a channel does the same.',
     '`/helix jobs`: your queued, running and waiting jobs, with their threads.',
+    '`/helix job <id>`: what one job is doing, or how it ended.',
+    '`/helix cancel <id>`: cancel a queued or running job.',
     '`/helix me`: what Helix knows about you: your jobs, projects and page.',
     '`/helix status`: how busy Helix is and which version it runs.',
     '`/helix project <name>`: the project drafts in this channel are for.',
@@ -40,7 +42,7 @@ const INSTALL = `https://raw.githubusercontent.com/${SOURCE.repo}/${SOURCE.ref}/
 type Core = { store: Store; config: Config };
 
 /** What answering, cancelling and submitting a job go through, the same calls `animus answer`, `animus cancel` and `animus run` reach on Helix. */
-type Jobs = Pick<Supervisor, 'answer' | 'cancel' | 'submit'>;
+type Jobs = Pick<Supervisor, 'answer' | 'cancel' | 'submit' | 'progress'>;
 
 const CANCEL = 'cancel_job';
 /** A thread's opening post: its text, and the Cancel button while the job can still be cancelled. */
@@ -103,28 +105,18 @@ export function slackBot(transport: Transport, opts: Core & { supervisor?: Jobs;
         return said ? reply(said) : undefined;
       }
       if (event.action !== CANCEL || !supervisor) return;
-      const job = store.get(Number(event.value));
-      if (!job) return reply(`There is no job ${event.value}.`);
-      if (!byOwner && job.person !== person) return reply(`Only ${job.person} or ${owner} may cancel job ${job.id}.`);
-      if (jobIsOver(job)) {
-        // A button left on an old message: say so privately and take the button off.
-        const thread = store.slackThread(job.id);
-        if (thread) { const text = progress(job) ?? `Job ${job.id} has ended.`; await transport.update(thread.channel, thread.ts, text, openingBlocks(job.id, text, false)); }
-        return reply(`Job ${job.id} has already ended.`);
-      }
-      try {
-        supervisor.cancel(job.person, job.id);
-      } catch (err) {
-        if (err instanceof AnimusError) return reply(err.message);
-        throw err;
-      }
-      const thread = store.slackThread(job.id);
-      if (thread) await transport.post(thread.channel, `Job ${job.id} was cancelled by <@${event.user}>.`, thread.ts);
-      return;
+      const said = await cancelJob(transport, store, supervisor, owner, byOwner, person, event.user, Number(event.value), event.value);
+      return said ? reply(said) : undefined;
     }
     const [sub, ...args] = event.text.trim().split(/\s+/);
     if (sub === 'jobs') return reply(jobsCommand(store, person));
     if (sub === 'me') return reply(await meCommand(store, config, person, byOwner, drafts));
+    if (sub === 'job') return reply(jobCommand(store, supervisor, owner, byOwner, person, args[0]));
+    if (sub === 'cancel') {
+      if (!supervisor) return;
+      const said = await cancelJob(transport, store, supervisor, owner, byOwner, person, event.user, jobNumber(args[0]), args[0] ?? '');
+      return reply(said ?? `Job ${jobNumber(args[0])} was cancelled.`);
+    }
     if (sub === 'status') return reply(statusCommand(store, config));
     if (sub === 'invite') return reply(byOwner ? await inviteCommand(transport, opts, args) : `Only ${owner} invites people to this Helix.`);
     if (sub === 'link') return reply(byOwner ? link(store, args) : `Only ${owner} links Slack users to people on this Helix.`);
@@ -149,6 +141,57 @@ async function answer(transport: Transport, store: Store, supervisor: Jobs, even
   if (!job || job.person !== person || job.state !== 'ended' || job.outcome !== 'needs-input' || !text) return;
   supervisor.answer(person, job.id, text);
   await transport.post(event.channel, `Got your answer: job ${job.id} resumes.`, event.thread);
+}
+
+/** A job number as typed, with or without a leading #; undefined for anything else. */
+const jobNumber = (word = ''): number | undefined => /^#?\d+$/.test(word) ? Number(word.replace('#', '')) : undefined;
+
+/**
+ * What the Cancel button and /helix cancel share: cancels the job when `by` may
+ * and tells its thread. Returns what to tell the sender when it did not,
+ * nothing when it did.
+ */
+async function cancelJob(transport: Transport, store: Store, supervisor: Jobs, owner: string, byOwner: boolean, person: string, user: string, id: number | undefined, typed: string): Promise<string | undefined> {
+  const job = id === undefined ? undefined : store.get(id);
+  if (!job) return `There is no job ${typed}.`;
+  if (!byOwner && job.person !== person) return `Only ${job.person} or ${owner} may cancel job ${job.id}.`;
+  if (jobIsOver(job)) {
+    // A button left on an old message, or a command for a finished job: say so and take the thread's button off.
+    const thread = store.slackThread(job.id);
+    if (thread) { const text = progress(job) ?? `Job ${job.id} has ended.`; await transport.update(thread.channel, thread.ts, text, openingBlocks(job.id, text, false)); }
+    return `Job ${job.id} has already ended.`;
+  }
+  try {
+    supervisor.cancel(job.person, job.id);
+  } catch (err) {
+    if (err instanceof AnimusError) return err.message;
+    throw err;
+  }
+  const thread = store.slackThread(job.id);
+  if (thread) await transport.post(thread.channel, `Job ${job.id} was cancelled by <@${user}>.`, thread.ts);
+  return undefined;
+}
+
+/** /helix job <id>: one job of the sender's (any, for the owner) as the display shows it. */
+function jobCommand(store: Store, supervisor: Jobs | undefined, owner: string, byOwner: boolean, person: string, word?: string): string {
+  const id = jobNumber(word);
+  const job = id === undefined ? undefined : store.get(id);
+  if (!job || (!byOwner && job.person !== person)) return `There is no such job of yours: ${word ?? ''}`.trim();
+  const lines = [`Job ${job.id}: ${job.title}`, `Project ${job.repo}, person ${job.person}`, `State: ${job.state}`];
+  if (job.state === 'running') {
+    const p = supervisor?.progress(job);
+    if (p && job.started && p.at >= job.started) lines.push(`Stage ${p.stage}, ${p.who} working`);
+  }
+  if (job.state === 'queued' && job.waiting) lines.push(`Waiting: ${job.waiting}`);
+  if (job.state === 'ended') {
+    lines.push(`Outcome: ${job.outcome}`);
+    if (job.outcome === 'needs-input') lines.push(`Question: ${job.question}`);
+    else if (!job.pr) lines.push(`Reason: ${job.reason ?? job.outcome}`);
+  }
+  if (job.pr) lines.push(`Pull request: ${job.pr}`);
+  const thread = store.slackThread(job.id);
+  if (thread) lines.push(`Thread: ${threadLink(thread)}`);
+  return lines.join('\n');
 }
 
 /** /helix jobs: the person's jobs that are not over or wait for an answer, each with where to follow it. */

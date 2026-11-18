@@ -8,6 +8,11 @@ clients with how to update.
 
 ## Unreleased
 
+- `/helix job <id>` shows one job in Slack: its state, stage and who is working,
+  why it waits, or how it ended, with links to its thread and pull request.
+  `/helix cancel <id>` cancels a queued or running job as the thread's Cancel
+  button does. Both appear in `/helix help`; the manifest's usage hint names
+  them: update the Slack app from it.
 - A job's Slack start and resume posts link its page at `url` (Tailscale) and
   `lan_url` (office network), whichever are set. When a job ends or is
   cancelled, its thread's opening post is edited to say how, without the

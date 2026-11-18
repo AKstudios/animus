@@ -14,7 +14,7 @@ features:
   slash_commands:
     - command: /helix
       description: Draft a job's spec, set a channel's project, see your jobs and Helix's load, invite someone, link a Slack user, or turn job notifications off and on
-      usage_hint: help | draft <text> | jobs | me | status | project <name> | notify off|on | invite @user <github-login> | link @user <person>
+      usage_hint: help | draft <text> | jobs | job <id> | cancel <id> | me | status | project <name> | notify off|on | invite @user <github-login> | link @user <person>
       should_escape: true
 oauth_config:
   scopes:
