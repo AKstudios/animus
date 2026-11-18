@@ -109,7 +109,9 @@ export type Sent =
   | { method: 'dm'; user: string }
   | { method: 'ephemeral'; channel: string; user: string; text: string }
   | { method: 'respond'; url: string; text: string }
-  | { method: 'upload'; channel: string; thread: string; filename: string; content: string };
+  | { method: 'upload'; channel: string; thread: string; filename: string; content: string }
+  | { method: 'update'; channel: string; ts: string; text: string; blocks?: unknown[] }
+  | { method: 'deleteFile'; file: string };
 
 /** A transport for the bot's core that records what it sends; deliver hands it an event as Slack would. */
 export function fakeTransport() {
@@ -121,7 +123,9 @@ export function fakeTransport() {
     dm: async (user) => { sent.push({ method: 'dm', user }); return `D-${user}`; },
     ephemeral: async (channel, user, text) => { sent.push({ method: 'ephemeral', channel, user, text }); },
     respond: async (url, text) => { sent.push({ method: 'respond', url, text }); },
-    upload: async (channel, thread, filename, content) => { sent.push({ method: 'upload', channel, thread, filename, content }); },
+    upload: async (channel, thread, filename, content) => { sent.push({ method: 'upload', channel, thread, filename, content }); return `F-${sent.length}`; },
+    update: async (channel, ts, text, blocks) => { sent.push({ method: 'update', channel, ts, text, ...(blocks ? { blocks } : {}) }); },
+    deleteFile: async (file) => { sent.push({ method: 'deleteFile', file }); },
   };
   return { transport, sent, deliver: (event: SlackEvent) => handle!(event) };
 }

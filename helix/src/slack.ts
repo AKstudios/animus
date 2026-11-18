@@ -7,7 +7,7 @@
 import { AnimusError } from '../../plugin/src/proc.ts';
 import { SOURCE } from '../../plugin/src/setup.ts';
 import type { Config } from './config.ts';
-import { PICK, type Drafts } from './drafts.ts';
+import { DISCARD, OPEN, PICK, SUBMIT, type Drafts } from './drafts.ts';
 import { INVITE_HOURS, invite } from './join.ts';
 import { isOwner } from './owner.ts';
 import { SLACK_USER, type SlackEvent, type Transport } from './slack-api.ts';
@@ -21,8 +21,8 @@ const INSTALL = `https://raw.githubusercontent.com/${SOURCE.repo}/${SOURCE.ref}/
 
 type Core = { store: Store; config: Config };
 
-/** What answering and cancelling a job go through, the same calls `animus answer` and `animus cancel` reach on Helix. */
-type Jobs = Pick<Supervisor, 'answer' | 'cancel'>;
+/** What answering, cancelling and submitting a job go through, the same calls `animus answer`, `animus cancel` and `animus run` reach on Helix. */
+type Jobs = Pick<Supervisor, 'answer' | 'cancel' | 'submit'>;
 
 const CANCEL = 'cancel_job';
 const cancelBlocks = (id: number, text: string) => [
@@ -55,13 +55,26 @@ export function slackBot(transport: Transport, opts: Core & { supervisor?: Jobs;
       if (said) await reply(said);
     };
     if (event.kind === 'message') {
-      // A mention outside a thread asks for a draft; one in a thread may answer a job.
-      if (event.mentioned && !event.thread) return draft(event.text.replace(/<@[A-Z0-9]+>/g, '').trim());
+      const text = event.text.replace(/<@[A-Z0-9]+>/g, '').trim();
+      // A mention outside a thread asks for a draft; one in an open draft's thread revises it, in a job's may answer it.
+      if (event.mentioned && !event.thread) return draft(text);
+      const open = event.thread && drafts ? store.draftOfThread(event.channel, event.thread) : undefined;
+      if (open && drafts && OPEN.includes(open.state)) {
+        // As with a job's thread: any reply in a DM, in a channel only one to the bot.
+        if (!(event.mentioned || event.channel.startsWith('D'))) return;
+        const said = await drafts.reply(person, open, text);
+        return said ? reply(said) : undefined;
+      }
       return supervisor && answer(transport, store, supervisor, event, person);
     }
     if (event.kind === 'action') {
       if (event.action === PICK && drafts) {
         const said = await drafts.pick(person, event.value);
+        return said ? reply(said) : undefined;
+      }
+      if ((event.action === SUBMIT || event.action === DISCARD) && drafts) {
+        const said = event.action === DISCARD ? await drafts.discard(person, event.user, event.value)
+          : supervisor ? await drafts.submit(person, event.value, supervisor) : 'Helix takes no jobs from this Slack bot.';
         return said ? reply(said) : undefined;
       }
       if (event.action !== CANCEL || !supervisor) return;

@@ -197,6 +197,7 @@ function main(argv: string[]): number | undefined | Promise<number> {
           ...(contained ? { launch: (draft, repoDir, env) => contained({ id: String(draft.id), person: draft.person, folder: draft.folder, mirror: repoDir, base: tryGit(repoDir, ['rev-parse', 'HEAD']) ?? 'HEAD' }, env) } : {}),
         });
         slackBot(slack, { store, config, supervisor, drafts });
+        setInterval(() => { drafts.expire().catch((err: unknown) => say(`drafts: ${(err as Error).message}`)); }, 60 * 60 * 1000).unref();
       }
       const server = serve({ config, store, supervisor, home, startCheck: checkInChild(store, home, say, (person) => freshToken(store, config, person)),...(config.container ? { reap: removeContainer } : {}), ...(slack ? { slack } : {}) });
       server.listen(config.port, config.host, () => console.error(`helix ${animusVersion()}: listening on http://${config.host}:${config.port}, ${config.slots} job(s) at once${config.container ? ', each in a container' : ''}, projects: ${Object.keys(readyRepos(store)).join(', ') || 'none yet'}`));

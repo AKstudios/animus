@@ -25,6 +25,7 @@ What will be true when this is done, in a few sentences.
 1. One behaviour a person could see work.
    $ the command in this repository that checks it
 2. Another.
+   $ its command
 
 ## Decisions
 
@@ -35,4 +36,4 @@ Choices the message or its references settle, and the ones you made where they d
 What this job leaves alone.
 ```
 
-Write criteria by behaviour, not by layer. Put a `$ command` under a criterion only when it is a command this repository already runs (its test runner on a file, a script in package.json); otherwise leave the criterion without one. Pick the labels from the work: size by how much changes, `risky` for anything touching auth, payments, migrations or data deletion, `bug` when something that worked is broken. Where the message is unclear, choose the sensible reading and say so under Decisions; do not ask.
+Write criteria by behaviour, not by layer. Put a `$ command` under every criterion, since a draft without one cannot be submitted: a command this repository already runs (its test runner on a file, a script in package.json), naming the test file the job will add when there is none yet. Pick the labels from the work: size by how much changes, `risky` for anything touching auth, payments, migrations or data deletion, `bug` when something that worked is broken. Where the message is unclear, choose the sensible reading and say so under Decisions; do not ask.

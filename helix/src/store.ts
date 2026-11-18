@@ -55,7 +55,7 @@ export type Person = { token_sha256: string; env_file?: string; github?: string;
  * theirs). detail: what the kind adds: the job and repo, an answer's text, a
  * project's name.
  */
-export type ActivityKind = 'submitted' | 'answered' | 'cancelled' | 'joined' | 'left' | 'project-added' | 'project-removed' | 'drafted' | 'channel-project';
+export type ActivityKind = 'submitted' | 'answered' | 'cancelled' | 'joined' | 'left' | 'project-added' | 'project-removed' | 'drafted' | 'draft-revised' | 'draft-discarded' | 'channel-project';
 export type Activity = { id: number; who: string; at: string; kind: ActivityKind; detail?: Record<string, string | number> };
 
 /**
@@ -86,13 +86,15 @@ export type SlackThread = { channel: string; ts: string };
  * A draft spec being written from a Slack message (drafts.ts), in the thread
  * at channel and ts. picking: its person has yet to choose the project;
  * queued and running: waiting for, then holding, one of draft_slots; ready:
- * its draft.md is posted; failed: why is in reason. folder: message.md,
- * references/ and draft.md (plugin/src/draft.ts).
+ * its draft.md is posted, as the message post with the file file; failed:
+ * why is in reason; submitted: queued as job; discarded: by its person, or
+ * after 7 days untouched. folder: message.md, references/, draft.md and the
+ * reply.md to revise it with (plugin/src/draft.ts), gone once it is closed.
  */
 export type Draft = {
-  id: number; state: 'picking' | 'queued' | 'running' | 'ready' | 'failed';
+  id: number; state: 'picking' | 'queued' | 'running' | 'ready' | 'failed' | 'submitted' | 'discarded';
   person: string; channel: string; ts: string; project?: string; folder: string;
-  created: string; touched: string; reason?: string;
+  created: string; touched: string; reason?: string; post?: string; file?: string; job?: number;
 };
 
 export type Store = {
@@ -142,6 +144,8 @@ export type Store = {
   addDraft(draft: Omit<Draft, 'id'>): Draft;
   draft(id: number): Draft | undefined;
   draftsIn(state: Draft['state']): Draft[];
+  /** The draft whose thread this is. */
+  draftOfThread(channel: string, ts: string): Draft | undefined;
   saveDraft(draft: Draft): void;
   /** The project a channel's drafts are for when their message links no issue: /helix project. */
   channelProject(channel: string): string | undefined;
@@ -234,6 +238,10 @@ export function openStore(file: string): Store {
     },
     draft: (id) => { const r = db.prepare('select * from drafts where id = ?').get(id) as { id: number; data: string } | undefined; return r ? { ...data<Draft>(r), id: r.id } : undefined; },
     draftsIn: (state) => db.prepare('select * from drafts where state = ? order by id').all(state).map((r) => ({ ...data<Draft>(r), id: (r as { id: number }).id })),
+    draftOfThread(channel, ts) {
+      const r = db.prepare("select * from drafts where json_extract(data, '$.channel') = ? and json_extract(data, '$.ts') = ?").get(channel, ts) as { id: number; data: string } | undefined;
+      return r ? { ...data<Draft>(r), id: r.id } : undefined;
+    },
     saveDraft(d) { db.prepare('update drafts set state = ?, data = ? where id = ?').run(d.state, JSON.stringify(d), d.id); },
     channelProject: (channel) => (db.prepare('select project from channel_projects where channel = ?').get(channel) as { project: string } | undefined)?.project,
     setChannelProject(channel, project) { db.prepare('insert or replace into channel_projects (channel, project) values (?, ?)').run(channel, project); },

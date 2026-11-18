@@ -38,8 +38,12 @@ export type Transport = {
   ephemeral(channel: string, user: string, text: string): Promise<void>;
   /** A private reply to a command, at the response_url Slack gave it, which works in any channel. */
   respond(responseUrl: string, text: string): Promise<void>;
-  /** Shares a text file into a thread (files:write). */
-  upload(channel: string, thread: string, filename: string, content: string): Promise<void>;
+  /** Shares a text file into a thread (files:write); returns the file's id. */
+  upload(channel: string, thread: string, filename: string, content: string): Promise<string>;
+  /** Replaces the text and blocks of a message the bot posted. */
+  update(channel: string, ts: string, text: string, blocks?: unknown[]): Promise<void>;
+  /** Deletes a file the bot uploaded (files:write). */
+  deleteFile(file: string): Promise<void>;
 };
 
 /** Calls a Web API method, with a JSON body or, for the methods that take only that, a form; Slack's refusal, such as invalid_auth, is the error's message. */
@@ -72,7 +76,10 @@ export const slackWeb = (bot: string, api = SLACK_API): Omit<Transport, 'onEvent
     try { res = await fetch(String(at.upload_url), { method: 'POST', body: bytes }); } catch (err) { throw new AnimusError(`Slack could not be reached: ${(err as Error).message}`); }
     if (!res.ok) throw new AnimusError(`Slack refused the file: HTTP ${res.status}`);
     await slackCall(bot, 'files.completeUploadExternal', new URLSearchParams({ files: JSON.stringify([{ id: at.file_id, title: filename }]), channel_id: channel, thread_ts: thread }), api);
+    return String(at.file_id);
   },
+  update: async (channel, ts, text, blocks) => { await slackCall(bot, 'chat.update', { channel, ts, text, ...(blocks ? { blocks } : {}) }, api); },
+  deleteFile: async (file) => { await slackCall(bot, 'files.delete', { file }, api); },
 });
 
 /** The owner, whose Slack user setup links; refused before anything is asked when there is none. */

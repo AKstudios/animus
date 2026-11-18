@@ -86,6 +86,18 @@ test('animus draft writes draft.md from a files-only fast session that reads the
   assert.match(req.prompt, /https:\/\/example\.com\/guide: .*references[/\\]1-example\.com-guide/);
 });
 
+// Protects: criterion 4's revision. Fails when: a session run again with a reply is not given the draft so far and the reply.
+test('a revision gives the session the draft so far and the person\'s reply', () => {
+  const folder = draftFolder('Sort by aisle.');
+  write(folder, 'draft.md', '# Sort by aisle, the earlier draft');
+  write(folder, 'reply.md', 'Empty aisles go last');
+  const { agent, calls } = fakeAgent([() => ({ output: { spec: '# Sort by aisle\n' } })]);
+
+  writeDraft({ ...deps(agent), folder, cwd: makeRepo(), env: {} });
+
+  assert.match(calls[0]!.prompt, /Sort by aisle\.[\s\S]*the earlier draft[\s\S]*Empty aisles go last/);
+});
+
 // Protects: the draft a person already has when a session fails. Fails when: a session that stopped (at its $0.50, or any other way) overwrites or deletes draft.md.
 test('a draft session that stops keeps the draft that was there and says why', () => {
   const folder = draftFolder('Sort by aisle.');
