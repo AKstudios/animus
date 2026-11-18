@@ -20,6 +20,7 @@ import { parseSkills, type PersonalSkill } from '../../plugin/src/personal.ts';
 import { hashToken, helixHome, type Config } from './config.ts';
 import { RESULTS, type Result } from '../../plugin/display/job-list.ts';
 import { display, jobList, jobPage, jobShot, peoplePage, personPage } from './display.ts';
+import { refusedWith, type AdmitSubmission } from './admit.ts';
 import { freshToken } from './github-app.ts';
 import { invite, inviteDetails, joinHelix, loginDevice, relogin, startDevice, StillWaiting, takeOff, verifyInChild, type JoinGitHub, type Verify } from './join.ts';
 import { openPrs, type ListPrs } from './open-prs.ts';
@@ -64,6 +65,8 @@ export function serve(opts: {
   home?: string;
   /** The Slack bot, when it runs: how the owner's animus invite --slack is sent. */
   slack?: Pick<Transport, 'dm' | 'post'>;
+  /** Admits a submitted spec against its project's base branch on GitHub (admit.ts); without it a spec is queued unchecked, as in tests. */
+  admit?: AdmitSubmission;
   /** How a project's open PRs are listed on GitHub, with a person's token; by default GitHub's API. */
   listPrs?: ListPrs;
   /** Lists a project's closed PRs; tests pass a fake. */
@@ -204,9 +207,23 @@ export function serve(opts: {
           let skills: PersonalSkill[];
           try { skills = parseSkills(b.skills, 'the submission'); } catch (err) { throw new Refused(400, (err as Error).message); }
           const s: Submission = { repo: b.repo, spec: b.spec, ...(typeof b.name === 'string' ? { name: b.name } : {}), ...(b.draft === true ? { draft: true } : {}), ...(skills.length ? { skills } : {}) };
+          // Admitted against the project as GitHub has it: the person gets the whole list now, not a failed job later (docs/adr/0007).
+          let warnings: string[] = [];
+          if (opts.admit) {
+            const name = typeof b.name === 'string' ? b.name : 'spec.md';
+            try {
+              const read = await opts.admit(person, b.repo, b.spec, name, typeof b.profile === 'string' ? b.profile : undefined);
+              const refused = refusedWith(name, read);
+              if (refused) throw new Refused(400, refused);
+              warnings = read.warnings;
+            } catch (err) {
+              if (err instanceof AnimusError && !(err instanceof Refused)) throw new Refused(400, err.message);
+              throw err;
+            }
+          }
           // The skills it took, so a client can tell them from a Helix that predates them.
           const submitted = supervisor.submit(person, s);
-          return send(201, { ...submitted, skills: skills.map((k) => k.name), links: jobLinks(config, submitted.id) });
+          return send(201, { ...submitted, skills: skills.map((k) => k.name), links: jobLinks(config, submitted.id), ...(warnings.length ? { warnings } : {}) });
         }
       } else if (/^\d+$/.test(id)) {
         const n = Number(id);

@@ -36,23 +36,59 @@ export function loadSpec(file: string): Spec {
   return parseSpec(readFileSync(file, 'utf8'), basename(file));
 }
 
-export function parseSpec(text: string, name = 'spec.md'): Spec {
-  const bad = (what: string) => new AnimusError(`${name}: ${what}`);
+const HEADER_KEYS = ['title', 'size', 'difficulty', 'type', 'base', 'ui', 'after', 'design'];
+const UI_KEYS = ['target', 'pages'];
+
+/** The word in `known` closest to `key`, when it is a likely misspelling of it. */
+function nearest(key: string, known: readonly string[]): string | undefined {
+  const distance = (a: string, b: string) => {
+    let row = Array.from({ length: b.length + 1 }, (_, j) => j);
+    for (let i = 1; i <= a.length; i++) {
+      const next = [i];
+      for (let j = 1; j <= b.length; j++) next[j] = Math.min(row[j]! + 1, next[j - 1]! + 1, row[j - 1]! + (a[i - 1] === b[j - 1] ? 0 : 1));
+      row = next;
+    }
+    return row[b.length]!;
+  };
+  const best = known.map((k) => ({ k, d: distance(key.toLowerCase(), k) })).sort((x, y) => x.d - y.d)[0];
+  return best && best.d <= 2 ? best.k : undefined;
+}
+
+/**
+ * Reads a spec. A spec that is wrong throws; given `problems`, every
+ * problem is collected there instead and a stand-in used, and the header is
+ * also held to its keys: that is how a spec being admitted is read (admit.ts).
+ * Without it a header is read leniently, as for the earlier specs `after:` names.
+ */
+export function parseSpec(text: string, name = 'spec.md', problems?: string[]): Spec {
+  const fail = (what: string): void => {
+    if (!problems) throw new AnimusError(`${name}: ${what}`);
+    problems.push(what);
+  };
   let header: Record<string, unknown> = {};
   let body = text;
   const m = /^---\r?\n([\s\S]*?)\r?\n---\r?\n?/.exec(text);
   if (m) {
-    let raw: unknown;
-    try { raw = parse(m[1]!) ?? {}; } catch (err) { throw bad(`its header is not YAML: ${(err as Error).message}`); }
-    if (!isRecord(raw)) throw bad('its header must be a mapping (size, difficulty, type)');
-    header = raw;
     body = text.slice(m[0].length);
+    let raw: unknown = {};
+    try { raw = parse(m[1]!) ?? {}; } catch (err) { fail(`its header is not YAML: ${(err as Error).message}`); }
+    if (isRecord(raw)) header = raw; else fail('its header must be a mapping (size, difficulty, type)');
+  }
+  if (problems) {
+    const unknown = (keys: readonly string[], found: Record<string, unknown>, where: string) => {
+      for (const key of Object.keys(found).filter((k) => !keys.includes(k))) {
+        const hint = nearest(key, keys);
+        fail(`${where}${key} is not a key of a spec's header${hint ? `: did you mean ${where}${hint}?` : ''} (it takes ${keys.map((k) => `${where}${k}`).join(', ')})`);
+      }
+    };
+    unknown(HEADER_KEYS, header, '');
+    if (isRecord(header.ui)) unknown(UI_KEYS, header.ui, 'ui.');
   }
   const defaulted: string[] = [];
   const label = <T extends string>(key: string, allowed: readonly T[] | undefined, fallback: T): T => {
     const v = header[key];
     if (v === undefined) { defaulted.push(key); return fallback; }
-    if (typeof v !== 'string' || (allowed && !allowed.includes(v as T))) throw bad(`${key} must be ${allowed ? `one of ${allowed.join(', ')}` : 'a word'}`);
+    if (typeof v !== 'string' || (allowed && !allowed.includes(v as T))) { fail(`${key} must be ${allowed ? `one of ${allowed.join(', ')}` : 'a word'}`); return fallback; }
     return v as T;
   };
   const size = label<Size>('size', SIZES, 'medium');
@@ -60,32 +96,35 @@ export function parseSpec(text: string, name = 'spec.md'): Spec {
   const type = label<string>('type', undefined, 'feature');
 
   const heading = /^#\s+(.+)$/m.exec(body)?.[1]?.trim();
-  const title = typeof header.title === 'string' ? header.title.trim() : heading;
-  if (!title) throw bad('needs a title: `title:` in the header, or a first-level heading');
+  let title = typeof header.title === 'string' ? header.title.trim() : heading;
+  if (!title) { fail('needs a title: `title:` in the header, or a first-level heading'); title = 'untitled'; }
 
   const spec: Spec = { title, size, difficulty, type, ui: { pages: [] }, after: [], design: [], criteria: criteria(body), text, defaulted };
   if (header.base !== undefined) {
-    if (typeof header.base !== 'string') throw bad('base must be a branch name');
-    spec.base = header.base;
+    if (typeof header.base !== 'string') fail('base must be a branch name');
+    else spec.base = header.base;
   }
   if (header.ui !== undefined) {
-    if (!isRecord(header.ui)) throw bad('ui must be a mapping: { target, pages }');
-    if (typeof header.ui.target === 'string') spec.ui.target = header.ui.target;
-    const pages = typeof header.ui.pages === 'string' ? [header.ui.pages] : header.ui.pages ?? [];
-    if (!isStrings(pages)) throw bad('ui.pages must list page names from the profile');
-    spec.ui.pages = pages;
+    if (!isRecord(header.ui)) fail('ui must be a mapping: { target, pages }');
+    else {
+      if (header.ui.target !== undefined && typeof header.ui.target !== 'string') fail('ui.target must be the name of a ui target in the profile');
+      if (typeof header.ui.target === 'string') spec.ui.target = header.ui.target;
+      const pages = typeof header.ui.pages === 'string' ? [header.ui.pages] : header.ui.pages ?? [];
+      if (!isStrings(pages)) fail('ui.pages must list page names from the profile, or paths starting with /');
+      else spec.ui.pages = pages;
+    }
   }
   if (header.after !== undefined) {
     const after = typeof header.after === 'string' ? [header.after] : header.after;
-    if (!isStrings(after)) throw bad('after must name the spec file (or files) this one runs after');
-    spec.after = after;
+    if (!isStrings(after)) fail('after must name the spec file (or files) this one runs after');
+    else spec.after = after;
   }
   if (header.design !== undefined) {
     const design = typeof header.design === 'string' ? [header.design] : header.design;
-    if (!isStrings(design)) throw bad('design must list files or folders in the repo');
-    spec.design = design;
+    if (!isStrings(design)) fail('design must list files or folders in the repo');
+    else spec.design = design;
   }
-  if (!spec.criteria.length) throw bad('needs an "Acceptance criteria" heading with a list under it; each item is one criterion, and a `$ command` line under it is its check');
+  if (!spec.criteria.length) fail('needs an "Acceptance criteria" heading with a list under it; each item is one criterion, and a `$ command` line under it is its check');
   return spec;
 }
 

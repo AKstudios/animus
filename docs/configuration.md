@@ -38,8 +38,16 @@ ui:
 | `base` | The branch jobs start from and their PRs target. Default `main`. |
 | `worktrees` | Where job worktrees go. Default `../.worktrees/<repo name>`. |
 | `notes` | What every agent is told about the project, beyond its own CLAUDE.md. |
+| `issue_link` | `closes` (default) or `refs`. A job started from a GitHub issue opens its PR with `Closes #N`, or with `Refs #N` for a project whose issues a person closes. A spec cannot override it. |
 | `ui.targets` | What a UI job can show. A web target has `serve` and `url` (with `$PORT`) and is screenshot by agent-browser at each viewport; an app target has a `capture` command that writes PNGs into `$ANIMUS_SHOTS`. Each has `pages`, and optionally `paths`, `ready`, `viewports` and design `references`. |
 | `ui.human_review` | Read but not used yet. Default true. |
+
+A spec is admitted against this file before it runs ([specs.md](specs.md#checking-a-spec)):
+its pages must be pages of the target or paths, its target must exist, its
+base branch must exist. Each profile problem comes with the YAML to add. On
+your machine the profile is read from your checkout; on Helix, from the
+project's base branch as GitHub has it, so a profile fix counts once it is
+pushed.
 
 ## Task profiles
 

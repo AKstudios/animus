@@ -3,7 +3,9 @@ import { chmodSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { delimiter, join } from 'node:path';
 import { test } from 'node:test';
-import { publish } from '../src/pr.ts';
+import { prBody, publish } from '../src/pr.ts';
+import { loadFactory, resolvePlan } from '../src/profiles.ts';
+import { parseSpec } from '../src/spec.ts';
 import { git } from '../src/proc.ts';
 import { makeRepo } from './helpers.ts';
 
@@ -68,4 +70,17 @@ test('on Helix, each gh call uses the token in the live token file as it is at t
   publish(input(repo, false));
 
   assert.deepEqual([...new Set(tokens())], ['ghu_renewed']);
+});
+
+// Protects: criterion 9 of the admit spec. Fails when: issue_link: refs is ignored and merging the PR closes an issue a person wanted to close, or the default stops closing.
+test('a pull request names its issue as Refs when the profile says refs, as Closes otherwise', () => {
+  const spec = parseSpec('# Say done\n\n## Acceptance criteria\n\n1. It says done.\n   $ true\n');
+  const body = (issueLink?: 'closes' | 'refs') => prBody({
+    job: 'j', spec, plan: resolvePlan(loadFactory(), spec), summary: 's', gates: [], gateAttempts: 1, fixRounds: 0, reviewRounds: 0, open: [],
+    protectedTouched: [], escalations: [], models: 'fake', cost_usd: 0, closes: 7, ...(issueLink ? { issueLink } : {}),
+  });
+
+  assert.match(body('refs'), /^Refs #7$/m);
+  assert.doesNotMatch(body('refs'), /Closes #7/);
+  assert.match(body(), /^Closes #7$/m);
 });

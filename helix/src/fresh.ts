@@ -11,7 +11,7 @@ import { parseProfile, PROFILE_PATH } from '../../plugin/src/profile.ts';
 
 const FETCH_MS = 120_000;
 
-const git = (dir: string, args: string[], env: Record<string, string>) => {
+export const git = (dir: string, args: string[], env: Record<string, string>) => {
   const r = spawnSync('git', args, { cwd: dir, encoding: 'utf8', timeout: FETCH_MS, env: { ...process.env, ...env, GIT_TERMINAL_PROMPT: '0' } });
   const text = `${r.stderr ?? ''}${r.stdout ?? ''}`.trim();
   return { ok: r.status === 0, out: r.stdout?.trim() ?? '', why: text.split('\n').pop() || r.error?.message || 'git did not answer' };

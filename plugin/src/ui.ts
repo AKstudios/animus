@@ -8,7 +8,7 @@ import { closeSync, copyFileSync, existsSync, mkdirSync, openSync, readdirSync, 
 import { createServer } from 'node:net';
 import { extname, join } from 'node:path';
 import { git, AnimusError } from './proc.ts';
-import type { Profile, UiTarget } from './profile.ts';
+import type { Profile, UiPage, UiTarget } from './profile.ts';
 
 /** What a UI job shows: from the spec's `ui` and `design` header fields. */
 export type UiJob = { id: string; target?: string; pages: string[]; designs: string[] };
@@ -25,6 +25,15 @@ export function uiTarget(profile: Pick<Profile, 'ui'>, job: Pick<UiJob, 'target'
   return targets.length === 1 ? targets[0] : undefined;
 }
 
+/** A page the spec gives as a path rather than by a name in the profile. */
+export const isLiteralPage = (page: string) => page.startsWith('/');
+
+/** The pages a job shows: those it names (a name from the profile, or a path, shown as named from the path), else all of the target's. */
+export function pagesOf(target: UiTarget, job: Pick<UiJob, 'pages'>): UiPage[] {
+  if (!job.pages.length) return target.pages;
+  return job.pages.flatMap((p) => (isLiteralPage(p) ? [{ name: slug(p), path: p }] : target.pages.filter((x) => x.name === p)));
+}
+
 /** Why a UI job cannot be shown with this profile, if it cannot. */
 export function uiProblem(profile: Pick<Profile, 'ui'>, job: UiJob): string | undefined {
   const names = profile.ui.targets.map((t) => t.name);
@@ -33,7 +42,7 @@ export function uiProblem(profile: Pick<Profile, 'ui'>, job: UiJob): string | un
     if (!names.length) return 'a ui spec needs a ui target in .animus/animus.yaml (ui.targets), and the profile has none';
     return job.target ? `ui.target ${job.target} is not a ui target in .animus/animus.yaml (${names.join(', ')})` : `the profile has several ui targets (${names.join(', ')}): name one in the spec header, ui: { target: <name> }`;
   }
-  const unknown = job.pages.filter((p) => !target.pages.some((x) => x.name === p));
+  const unknown = job.pages.filter((p) => !isLiteralPage(p) && !target.pages.some((x) => x.name === p));
   return unknown.length ? `${unknown.join(', ')} is not a page of ui target ${target.name} (${target.pages.map((p) => p.name).join(', ')})` : undefined;
 }
 
@@ -42,7 +51,7 @@ export type Design = { status: 'given' | 'missing'; files: string[] };
 /** A UI job's design references, repo-relative: the spec's own; else its pages' references; else the target's. Folders are listed. */
 export function designOf(repo: string, profile: Pick<Profile, 'ui'>, job: UiJob): Design {
   const target = uiTarget(profile, job);
-  const pages = target?.pages.filter((p) => !job.pages.length || job.pages.includes(p.name)) ?? [];
+  const pages = target ? pagesOf(target, job) : [];
   const named = job.designs.length ? job.designs : pages.flatMap((p) => (p.reference ? [p.reference] : []));
   const paths = named.length ? named : target?.references ?? [];
   const files = paths.flatMap((p) => expand(repo, p));
@@ -285,7 +294,7 @@ export async function takeShots(cwd: string, job: UiJob, profile: Profile, dir: 
   const buildDir = join(dir, 'build');
   rmSync(buildDir, { recursive: true, force: true });
   mkdirSync(buildDir, { recursive: true });
-  const pages = target.pages.filter((p) => !job.pages.length || job.pages.includes(p.name));
+  const pages = pagesOf(target, job);
   const session = `animus-${slug(job.id)}-${process.pid}`;
   const wasUp = upState(cwd);
   const up = await uiUp(cwd, target);

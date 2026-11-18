@@ -1,6 +1,6 @@
 // The animus command.
 import { spawn } from 'node:child_process';
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { parseArgs } from 'node:util';
 import { claudeAgent } from './agent.ts';
@@ -19,8 +19,9 @@ import { describeNumbers, numbers, refreshOutcomes } from './outcomes.ts';
 import { prFacts, publish, pushEvidence } from './pr.ts';
 import { personalFor, readSkillsFile, skillsForRole, snapshotSkills, whereToRun, type PersonalSkill, type Where } from './personal.ts';
 import { listenLocal, localServer } from './local-display.ts';
-import { loadProfile } from './profile.ts';
+import { loadProfile, PROFILE_PATH } from './profile.ts';
 import { describePlan, loadFactory, resolvePlan } from './profiles.ts';
+import { admitFile, describeAdmit } from './admit.ts';
 import { git, tryGit, AnimusError, GitError } from './proc.ts';
 import * as helix from './remote.ts';
 import { describeSkills, grantsFor } from './skills.ts';
@@ -167,7 +168,12 @@ async function submitSpec(file: string, checkout: string, draft: boolean, known?
     repo = list.find((p) => p.url === url)?.name ?? basename(root);
   }
   const skills = snapshotSkills(personalFor(root).skills);
-  const j = await helix.submit({ repo, spec: readFileSync(file, 'utf8'), name: basename(file), ...(draft ? { draft: true } : {}), ...(skills.length ? { skills: skills.map(({ sha: _sha, ...s }) => s) } : {}) });
+  const profileFile = join(root, PROFILE_PATH);
+  const j = await helix.submit({
+    repo, spec: readFileSync(file, 'utf8'), name: basename(file), ...(draft ? { draft: true } : {}), ...(skills.length ? { skills: skills.map(({ sha: _sha, ...s }) => s) } : {}),
+    ...(existsSync(profileFile) ? { profile: readFileSync(profileFile, 'utf8') } : {}),
+  });
+  for (const w of j.warnings ?? []) say(`warning: ${w}`);
   if (skills.length && !j.skills) say(`this Helix predates personal skills: the job runs without ${skills.map((s) => s.name).join(', ')}`);
   console.log(`job ${j.id} is ${j.state} on Helix: ${j.title}${j.skills?.length ? `\nwith your skills: ${j.skills.join(', ')}` : ''}\nfollow it with: animus status ${j.id}${helix.describeLinks(j).map((l) => `\n${l}`).join('')}`);
   return j;
@@ -225,10 +231,16 @@ async function main(argv: string[]): Promise<number> {
     }
     case 'plan': {
       if (!positionals[0]) throw new AnimusError('usage: animus plan <spec.md>');
-      const spec = loadSpec(resolve(positionals[0]));
       const factory = loadFactory();
-      const plan = resolvePlan(factory, spec);
-      console.log(`${spec.title}\n${describePlan(factory, plan)}`);
+      const specFile = resolve(positionals[0]);
+      const repoDir = mainCheckout(resolve(values.repo ?? cwd));
+      const admitted = admitFile(factory, specFile, repoDir, loadProfile(repoDir));
+      if (admitted.problems.length || !admitted.plan) {
+        console.log(`${admitted.spec.title}\n${describeAdmit(admitted)}`);
+        return 1;
+      }
+      const { spec, plan } = { spec: admitted.spec, plan: admitted.plan };
+      console.log(`${spec.title}\n${describePlan(factory, plan)}\n${describeAdmit(admitted)}`);
       const yours = personalFor(resolve(values.repo ?? cwd)).skills;
       const asCarried = yours.map((e) => ({ ...e, text: '', sha: '' }));
       for (const role of ['implementer', ...(plan.review ? [plan.review.role] : [])]) console.log(`  skills     ${role}: ${[...grantsFor(factory, role, spec.type).map((g) => g.name), ...skillsForRole(asCarried, role, spec.type).map((s) => `${s.name} (yours)`)].join(', ') || 'none'}`);

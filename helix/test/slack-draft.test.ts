@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { execFileSync } from 'node:child_process';
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { basename, join } from 'node:path';
@@ -11,6 +12,7 @@ import type { SlackEvent } from '../src/slack-api.ts';
 import { slackBot } from '../src/slack.ts';
 import { openStore } from '../src/store.ts';
 import { pauseFile, supervise } from '../src/supervisor.ts';
+import { fakeAdmit } from './fake-admit.ts';
 import { fakeGitHub, type FakeGitHub } from './fake-github.ts';
 import { fakeTransport, until, type Sent } from './fake-slack.ts';
 
@@ -21,7 +23,11 @@ const FAKE = `
 const fs = process.getBuiltinModule('fs');
 const [folder] = process.argv.slice(1);
 const reply = fs.existsSync(folder + '/reply.md') ? '\\nRevised: ' + fs.readFileSync(folder + '/reply.md', 'utf8') : '';
-fs.writeFileSync(folder + '/draft.md', '# Draft\\n\\n' + fs.readFileSync(folder + '/message.md', 'utf8') + reply);
+const message = fs.readFileSync(folder + '/message.md', 'utf8');
+// A message with a header is already a whole spec.
+fs.writeFileSync(folder + '/draft.md', message.startsWith('---') ? message : '# Draft\\n\\n' + message + reply);
+// A session given the project writes what it found beside the spec.
+if (fs.existsSync(folder + '/project.json')) fs.writeFileSync(folder + '/summary.md', 'gates: test\\n');
 `;
 
 /**
@@ -35,7 +41,7 @@ fs.writeFileSync(folder + '/draft.md', '# Draft\\n\\n' + fs.readFileSync(folder 
 // No test reaches GitHub or the web.
 const notFound: Fetch = async () => new Response('{}', { status: 404 });
 
-async function helix(github?: FakeGitHub, more: Partial<Config> = {}, fetch = notFound) {
+async function helix(github?: FakeGitHub, more: Partial<Config> = {}, fetch = notFound, fresh?: (dir: string) => string) {
   const home = mkdtempSync(join(tmpdir(), 'helix-slack-draft-'));
   process.env.HELIX_HOME = home;
   const config: Config = { host: '127.0.0.1', port: 0, slots: 1, owner: 'ana', slack: { enabled: true }, ...(github ? { github: { client_id: 'Iv23liGood' } } : {}), ...more };
@@ -65,7 +71,7 @@ async function helix(github?: FakeGitHub, more: Partial<Config> = {}, fetch = no
     refs.push(existsSync(dir) ? readdirSync(dir).sort() : []);
     return { command: process.execPath, args: ['-e', FAKE, draft.folder] };
   };
-  const drafts = draftRunner(slack.transport, { store, config, home, launch, fetch, slackToken: 'xoxb-bot', ...(github ? { github } : {}) });
+  const drafts = draftRunner(slack.transport, { store, config, home, launch, fetch, slackToken: 'xoxb-bot', admit: fakeAdmit(), ...(fresh ? { fresh } : {}), ...(github ? { github } : {}) });
   slackBot(slack.transport, { store, config, drafts, supervisor: supervise({ store, config, home }) });
   const uploads = () => slack.sent.filter((s) => s.method === 'upload').length;
   const posted = () => uploads() > 0;
@@ -102,6 +108,30 @@ for (const [how, event] of STARTS) {
     assert.equal(h.store.activity('ana')[0]?.kind, 'drafted');
   });
 }
+
+// Protects: criterion 6. Fails when: the session is not given the profile as the base branch has it, or the summary is missing from the post, or it is mixed into the spec's file.
+test('a draft is written given the profile on the base branch, and posted with a summary beside the spec, not in its file', async () => {
+  const profile = 'commands:\n  test: npm test\n';
+  const h = await helix(undefined, {}, notFound, (dir) => {
+    const git = (...args: string[]) => execFileSync('git', ['-C', dir, '-c', 'user.name=t', '-c', 'user.email=t@t', ...args], { encoding: 'utf8' });
+    git('init', '-q', '-b', 'main');
+    mkdirSync(join(dir, '.animus'));
+    writeFileSync(join(dir, '.animus', 'animus.yaml'), profile);
+    git('add', '.');
+    git('commit', '-q', '-m', 'profile');
+    return git('rev-parse', 'HEAD').trim();
+  });
+
+  await posted(h, 'C0TEAM', 'Add a login page');
+
+  const given = JSON.parse(readFileSync(join(h.store.draft(1)!.folder, 'project.json'), 'utf8'));
+  assert.deepEqual([given.profile.trim(), given.read], [profile.trim(), 'origin/main on GitHub']);
+  const post = h.slack.sent.find((s): s is Post => s.method === 'post' && Boolean(s.blocks))!;
+  const blocks = post.blocks as { type: string; text?: { text: string } }[];
+  assert.deepEqual(blocks.map((b) => b.type), ['section', 'section', 'actions']);
+  assert.match(blocks[1]!.text!.text, /gates: test/);
+  assert.equal((h.slack.sent.find((s) => s.method === 'upload') as { content: string }).content, '# Draft\n\nAdd a login page\n');
+});
 
 const DEFAULTS = [
   { from: 'the linked issue\'s repository, over the channel\'s default', text: 'draft Fix https://github.com/o/api/issues/7', ran: 'api' },
@@ -222,7 +252,9 @@ for (const [what, event] of IGNORED) {
 
 const INCOMPLETE = [
   { missing: 'acceptance criteria', text: 'Add a login page', why: /Acceptance criteria/ },
-  { missing: 'a check under a criterion', text: 'Add a login page\n\n## Acceptance criteria\n\n1. A login page.\n   $ npm test\n2. A logout link.\n', why: /criterion 2 has no check/ },
+  { missing: 'a command under any criterion', text: 'Add a login page\n\n## Acceptance criteria\n\n1. A login page.\n2. A logout link.\n', why: /no acceptance criterion has a `\$ command` line/ },
+  { missing: 'a command under a bug\'s criterion', text: '---\ntype: bug\n---\nFix login\n\n## Acceptance criteria\n\n1. Login works.\n', why: /a bug spec needs a `\$ command`/ },
+  { missing: 'a ui target in the profile', text: '---\ntype: ui\n---\nAdd a login page\n\n## Acceptance criteria\n\n1. A login page.\n   $ npm test\n', why: /\[profile\] a ui spec needs a ui target/ },
 ];
 
 for (const c of INCOMPLETE) {
@@ -238,6 +270,16 @@ for (const c of INCOMPLETE) {
     assert.deepEqual(h.store.list(), []);
   });
 }
+
+// Protects: criterion 7. Fails when: a criterion without a command, left to the reviewer, keeps a draft from being queued.
+test('Submit queues a draft whose second criterion has no command', async () => {
+  const h = await helix();
+  const { post } = await posted(h, 'C0TEAM', 'Add a login page\n\n## Acceptance criteria\n\n1. A login page.\n   $ npm test\n2. The page looks like the mock-up.\n');
+
+  await h.slack.deliver(press(buttons(post)[0]!));
+
+  assert.equal(h.store.list().length, 1);
+});
 
 // Protects: criterion 5's queueing. Fails when: a complete draft is not queued as its person's job for its project, or the job's progress would not post to the draft's thread.
 test('Submit queues a complete draft as the person\'s job, and the thread becomes the job\'s thread', async () => {

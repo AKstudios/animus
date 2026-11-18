@@ -86,6 +86,56 @@ test('animus draft writes draft.md from a files-only fast session that reads the
   assert.match(req.prompt, /https:\/\/example\.com\/guide: .*references[/\\]1-example\.com-guide/);
 });
 
+const UI_SPEC = '---\ntype: ui\n---\n# A page\n\n## Acceptance criteria\n\n1. A page.\n   $ npm test\n';
+const FEATURE_SPEC = '---\ntype: feature\n---\n# A page\n\n## Acceptance criteria\n\n1. A page.\n   $ npm test\n';
+/** A draft folder with the project Helix read: a profile with one gate and no ui target. */
+function projectFolder(): string {
+  const folder = draftFolder('Add a page.');
+  write(folder, 'project.json', JSON.stringify({ profile: 'commands:\n  test: npm test\n', read: 'origin/main on GitHub', commit: 'abc' }));
+  return folder;
+}
+
+// Protects: criterion 6. Fails when: the session is not told the project's gates, base and runnable types, or admit's problems do not go back to it once, in its own session, within what is left of the $0.50.
+test('a draft session is given the project, and the problems admit finds go back to it once within the cap', () => {
+  const folder = projectFolder();
+  const { agent, calls } = fakeAgent([() => ({ output: { spec: UI_SPEC } }), () => ({ output: { spec: FEATURE_SPEC } })]);
+
+  writeDraft({ ...deps(agent), folder, cwd: makeRepo(), env: {} });
+
+  assert.match(calls[0]!.prompt, /test: npm test/);
+  assert.match(calls[0]!.prompt, /base branch: main/);
+  assert.equal(calls.length, 2);
+  assert.equal(calls[1]!.resume, 'session-1');
+  assert.equal(calls[1]!.maxUsd, 0.49);
+  assert.match(calls[1]!.prompt, /a ui spec needs a ui target/);
+  assert.equal(readFileSync(join(folder, 'draft.md'), 'utf8'), FEATURE_SPEC);
+  assert.doesNotMatch(readFileSync(join(folder, 'summary.md'), 'utf8'), /problem/i);
+});
+
+// Protects: criterion 6's once. Fails when: a retry that fails loses the first draft, or the draft is posted without its problems, or the session is asked a third time.
+test('a retry that fails leaves the first draft, with its problems in the summary', () => {
+  const folder = projectFolder();
+  const { agent, calls } = fakeAgent([() => ({ output: { spec: UI_SPEC } }), () => ({ ok: false, status: 'error_max_budget_usd' })]);
+
+  writeDraft({ ...deps(agent), folder, cwd: makeRepo(), env: {} });
+
+  assert.equal(calls.length, 2);
+  assert.equal(readFileSync(join(folder, 'draft.md'), 'utf8'), UI_SPEC);
+  assert.match(readFileSync(join(folder, 'summary.md'), 'utf8'), /a ui spec needs a ui target/);
+});
+
+// Protects: criterion 6's "outside its spec". Fails when: a draft with no problems is asked again, or a draft with no project writes a summary.
+test('a draft admit finds nothing wrong with is not asked again, and one with no project has no summary', () => {
+  const folder = projectFolder();
+  const { agent, calls } = fakeAgent([() => ({ output: { spec: FEATURE_SPEC } })]);
+  writeDraft({ ...deps(agent), folder, cwd: makeRepo(), env: {} });
+  assert.equal(calls.length, 1);
+
+  const bare = draftFolder('Add a page.');
+  writeDraft({ ...deps(fakeAgent([() => ({ output: { spec: UI_SPEC } })]).agent), folder: bare, cwd: makeRepo(), env: {} });
+  assert.throws(() => readFileSync(join(bare, 'summary.md')), /ENOENT/);
+});
+
 // Protects: criterion 4's revision. Fails when: a session run again with a reply is not given the draft so far and the reply.
 test('a revision gives the session the draft so far and the person\'s reply', () => {
   const folder = draftFolder('Sort by aisle.');

@@ -15,15 +15,16 @@ import { describe, failsOnBase, gateReport, jobChecks, LATER_SLICE, runChecks, t
 import { commitAll, mainCheckout, matchesAny, touchedFiles } from './git.ts';
 import { appendRun, jobDir, saveProgress, saveState, writeJson, type JobState, type Outcome, type Run, type Stage } from './log.ts';
 import { evidenceBranch, findPrByTitle, prBody, prState, type PrFind, type Evidence, type PrLookup, type Publish } from './pr.ts';
+import { admitFile, profileOnBase, refusal, type Admitted } from './admit.ts';
 import { loadProfile } from './profile.ts';
-import { describePlan, escalate, modelFor, PLUGIN_ROOT, raise, readPrompt, resolvePlan, type Factory, type Tier } from './profiles.ts';
+import { describePlan, escalate, modelFor, PLUGIN_ROOT, raise, readPrompt, type Factory, type Plan, type Tier } from './profiles.ts';
 import { animusCommand, git, AnimusError, tryGit } from './proc.ts';
 import { asReport, asReview, blockers, criteriaList, listFindings, REPORT_SCHEMA, REVIEW_SCHEMA, type Finding, type Report, type Review } from './review.ts';
 import { loadJobSkills, saveJobSkills, type PersonalSkill } from './personal.ts';
 import { roleSkills } from './skills.ts';
 import { criteriaSoFar, isPlanned, oneSlice, planSlices, type Slicing } from './slices.ts';
 import { loadSpec, type Spec } from './spec.ts';
-import { describeShots, designOf, JOB_PID, takeShots, uiProblem, uiTarget, type UiJob } from './ui.ts';
+import { describeShots, designOf, JOB_PID, pagesOf, takeShots, uiProblem, uiTarget, type UiJob } from './ui.ts';
 import { baseCommit, createWorkspace, ensureSetup, removeWorkspace, reopenWorkspace, type Workspace } from './workspace.ts';
 
 export type Deps = {
@@ -106,12 +107,24 @@ export async function runJob(opts: RunOptions, deps: Deps): Promise<Run> {
   const repo = mainCheckout(opts.repo);
   const prior = opts.resume?.state;
   if (!prior && !opts.specFile) throw new AnimusError('animus run needs a spec file');
-  const spec = loadSpec(prior ? prior.spec : opts.specFile!);
-  let plan = prior?.plan ?? resolvePlan(factory, spec);
-  const repoProfile = loadProfile(repo);
+  // On Helix the profile is the base branch's as Helix fetched it, not whatever the clone has checked out (docs/adr/0008).
+  const onBase = opts.trigger === 'helix' || process.env.ANIMUS_TRIGGER === 'helix' ? profileOnBase(repo) : undefined;
+  const repoProfile = onBase?.profile ?? loadProfile(repo);
+  // A new job is admitted before any work (docs/adr/0007); a resumed one was, when it started.
+  let spec: Spec;
+  let plan: Plan;
+  let admitted: Admitted | undefined;
+  if (prior) {
+    spec = loadSpec(prior.spec);
+    plan = prior.plan;
+  } else {
+    admitted = admitFile(factory, opts.specFile!, repo, repoProfile, onBase?.facts);
+    if (admitted.problems.length || !admitted.plan) throw refusal(opts.specFile!, admitted);
+    ({ spec, plan } = { spec: admitted.spec, plan: admitted.plan });
+  }
   const job = prior?.job ?? newJobId(spec.title);
   const ui = plan.type === 'ui' ? uiJobOf(job, spec) : undefined;
-  if (ui) {
+  if (ui && prior) {
     const problem = uiProblem(repoProfile, ui);
     if (problem) throw new AnimusError(problem);
   }
@@ -157,6 +170,7 @@ export async function runJob(opts: RunOptions, deps: Deps): Promise<Run> {
     const files = resolveAfter(repo, source!, spec.after);
     await timed('queue', () => waitForMerged({ repo, files, lookup: deps.prState ?? prState, find: deps.findPr ?? findPrByTitle, log, ...(deps.sleep ? { sleep: deps.sleep } : {}) }));
   }
+  for (const w of admitted?.warnings ?? []) log(`warning: ${w}`);
   if (spec.defaulted.length) log(`the spec's header has no ${spec.defaulted.join(', ')}: the default ran`);
 
   // ---------------------------------------------------------------- setup
@@ -592,7 +606,7 @@ export async function runJob(opts: RunOptions, deps: Deps): Promise<Run> {
       protectedTouched: run.protected_touched, escalations: run.escalations, models, cost_usd: run.cost_usd,
       ...(notes ? { notes } : {}), ...(review ? { review } : {}), ...(shots ? { shots } : {}), ...(caughtUp ? { caughtUp: { branch: ws.baseBranch, commit: caughtUp, resolved } } : {}), ...(failed && reason ? { failure: reason } : {}),
       // Helix sets it for a job submitted from an issue; a failure report is a draft, which should not close the issue when merged.
-      ...(!failed && /^\d+$/.test(process.env.ANIMUS_CLOSES ?? '') ? { closes: Number(process.env.ANIMUS_CLOSES) } : {}),
+      ...(!failed && /^\d+$/.test(process.env.ANIMUS_CLOSES ?? '') ? { closes: Number(process.env.ANIMUS_CLOSES), issueLink: repoProfile.issue_link } : {}),
     });
     writeFileSync(join(dir, 'pr-body.md'), `${body}\n`);
     if (!opts.dryRun) {
@@ -627,7 +641,7 @@ export async function runJob(opts: RunOptions, deps: Deps): Promise<Run> {
 function uiBrief(worktree: string, profile: ReturnType<typeof loadProfile>, ui: UiJob): string {
   const target = uiTarget(profile, ui)!;
   const design = designOf(worktree, profile, ui);
-  const pages = target.pages.filter((p) => !ui.pages.length || ui.pages.includes(p.name)).map((p) => p.name);
+  const pages = pagesOf(target, ui).map((p) => p.name);
   return [
     `This is a UI job on the ${target.name} target (pages: ${pages.join(', ')}).`,
     design.files.length ? `The design to match: ${design.files.join(', ')}. Read each file.` : 'No design reference was given: make it fit the rest of the app.',

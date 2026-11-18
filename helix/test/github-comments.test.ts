@@ -11,6 +11,7 @@ import { openStore } from '../src/store.ts';
 import { pauseFile, supervise, type Launch } from '../src/supervisor.ts';
 import { fakeGitHub, type FakeGitHub } from './fake-github.ts';
 import { fakeTransport, until } from './fake-slack.ts';
+import { fakeAdmit } from './fake-admit.ts';
 
 // Stands in for `animus draft <folder>`: draft.md is the message, the issue fetched as a reference, and the reply when revising.
 const FAKE = `
@@ -20,6 +21,8 @@ const read = (f) => fs.existsSync(f) ? fs.readFileSync(f, 'utf8') : '';
 const refs = fs.existsSync(folder + '/references') ? fs.readdirSync(folder + '/references').sort().map((f) => read(folder + '/references/' + f)).join('\\n') : '';
 const reply = fs.existsSync(folder + '/reply.md') ? '\\nRevised: ' + read(folder + '/reply.md') : '';
 fs.writeFileSync(folder + '/draft.md', '# Draft\\n\\n' + read(folder + '/message.md') + '\\nIssue: ' + refs + reply);
+// A session given the project writes what it found beside the spec; here, when the message asks.
+if (read(folder + '/message.md').includes('summarise')) fs.writeFileSync(folder + '/summary.md', 'gates: test\\n');
 `;
 
 // Stands in for `animus run` and `animus resume`: the job's title says how it ends.
@@ -71,7 +74,7 @@ async function helix(opts: { slack?: boolean; owner?: string; run?: boolean } = 
   await signIn('bob', 'bob-gh', bobEnv);
   const slack = fakeTransport();
   if (opts.slack) store.linkSlack('ana', 'U1');
-  const drafts = draftRunner(opts.slack ? slack.transport : undefined, { store, config, home, launch, github });
+  const drafts = draftRunner(opts.slack ? slack.transport : undefined, { store, config, home, launch, github, admit: fakeAdmit() });
   const lines: string[] = [];
   const closes: (string | undefined)[] = [];
   const launchJob: Launch = (job, _dir, env) => { closes.push(env.ANIMUS_CLOSES); return { command: process.execPath, args: ['-e', JOB, job.title, job.answer ?? ''] }; };
@@ -309,15 +312,41 @@ test('queues the spec of the draft comment as edited by hand as the person\'s jo
   assert.equal(h.github.posted.at(-1)!.body, `Submitted as job ${job!.id}: Passkey sign-in (app).\n\n${MARKER}`);
 });
 
-// Protects: criterion 6. Fails when: a spec missing its checks is queued, or the person is not told what is missing.
-test('replies with what is missing and queues nothing when the spec is incomplete', async () => {
+// Protects: criterion 6 and 7. Fails when: a spec with no command anywhere is queued, or the person is not told what is wrong.
+test('replies with what is wrong and queues nothing when no criterion has a command', async () => {
   const h = await draftEditedTo((body) => body.replace(/```markdown[\s\S]*?\n```/, '```markdown\n# Passkey sign-in\n\n## Acceptance criteria\n\n1. A person signs in.\n```'));
 
   await h.poll();
 
   assert.deepEqual(h.store.list(), []);
   assert.equal(h.store.draftsIn('ready').length, 1);
-  assert.match(h.github.posted.at(-1)!.body, /^Not submitted: draft\.md: criterion 1 has no check/);
+  assert.match(h.github.posted.at(-1)!.body, /^Not submitted: .*no acceptance criterion has a `\$ command` line/s);
+});
+
+// Protects: criterion 6. Fails when: the summary is missing from the draft comment, or is inside the spec's fence, so submit would queue it as part of the spec.
+test('the draft comment has the summary outside the spec\'s fence, and submitting it queues the spec alone', async () => {
+  const h = await helix();
+  h.github.addComment('o/app', 7, 'ana-gh', '/animus add passkey sign-in, summarise', at(30));
+  await h.poll();
+  await until('the draft comment', () => h.github.posted.length > 0);
+
+  assert.match(h.github.posted[0]!.body, /```markdown\n[\s\S]*?\n```\n\nAnimus read it against the project:\n\n```text\ngates: test\n```\n/);
+  const draft = h.github.comments.find((c) => c.body.startsWith('Animus drafted'))!;
+  draft.body = draft.body.replace(/```markdown[\s\S]*?\n```/, `\`\`\`markdown\n${SPEC}\`\`\``);
+  h.github.addComment('o/app', 7, 'ana-gh', '/animus submit', at(90));
+  h.clock.at(120);
+  await h.poll();
+
+  assert.equal(h.store.list().length, 1);
+});
+
+// Protects: criterion 7. Fails when: a criterion left to the reviewer, beside one with a command, keeps a spec from being queued.
+test('queues a spec one of whose criteria has no command', async () => {
+  const h = await draftEditedTo((body) => body.replace(/```markdown[\s\S]*?\n```/, `\`\`\`markdown\n${SPEC}2. The button looks right.\n\`\`\``));
+
+  await h.poll();
+
+  assert.equal(h.store.list().length, 1);
 });
 
 // Protects: criterion 6. Fails when: a comment edited to have no spec block queues a job or gets another answer.

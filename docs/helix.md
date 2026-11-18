@@ -175,11 +175,15 @@ with the person's own token, so they show as that person with the app's badge.
   and the 7-day expiry, after which the draft is discarded with a comment. A
   person with a Slack link is DMed a link to each draft and revision.
 - `/animus submit` reads the spec block of the latest draft comment as it is on
-  GitHub then, hand edits included, checks it as `animus plan` does and queues
-  it as your job on that project, with a comment naming the job. An incomplete
-  spec, or a comment with no readable spec block, gets a comment saying so and
-  queues nothing.
+  GitHub then, hand edits included, admits it as below and queues
+  it as your job on that project, with a comment naming the job. A spec that
+  is refused gets a comment with the list of problems, an incomplete
+  spec, or a comment with no readable spec block, gets a comment saying so, and
+  nothing is queued.
 - `/animus discard` closes the draft with a comment.
+- The pull request says `Closes #<issue>`, or `Refs #<issue>` when the
+  project's profile has `issue_link: refs`
+  ([configuration.md](configuration.md#the-project-profile)).
 - The job comments on the issue when its pull request opens (the pull request
   says `Closes #<issue>`), when it fails, with the reason, and when it needs
   input, with the question. `/animus answer <text>` answers it and resumes the
@@ -192,6 +196,42 @@ with the person's own token, so they show as that person with the app's badge.
 
 `helix check` flags a project that no person's GitHub token can read comments
 on: it is never watched, so a `/animus` there goes unanswered.
+
+### Drafts know the project
+
+A draft session is given the project's profile as text a script rendered from
+it: the base branch, the gates, the types that run, and each UI target with its
+pages. It still reaches nothing itself
+([ADR 0003](adr/0003-draft-sessions-see-only-fetched-references.md)). When the
+draft's spec has problems, admit's list goes back to the same session once, as
+one more turn under the draft's $0.50 cap; a draft that still has problems is
+posted with them listed. The posted draft, on GitHub and on Slack, carries
+outside its spec a summary of the target, pages, gates, problems and warnings.
+Submit is refused with the problems while any remain. A draft's criterion may
+have no command, to be judged by the reviewer, but a `bug` spec, or a spec
+where no criterion has one, is refused.
+
+## Admit
+
+Helix is where a spec is admitted for `POST /jobs`, Slack and GitHub
+([ADR 0007](adr/0007-one-admit-for-every-entry-point.md),
+[ADR 0008](adr/0008-helix-reads-the-profile-from-the-base-branch.md)). It
+fetches the base branch (the spec's `base`, else the profile's) with the
+person's token and reads `.animus/animus.yaml` from `origin/<base>` itself,
+never from what the clone has checked out, so a clone left on another branch
+cannot give a job an old profile.
+
+- `POST /jobs` answers 400 with the whole list of problems for a spec that is
+  refused, and queues nothing. A spec with `after:` is refused with a pointer
+  to `animus start --local`, since Helix cannot follow an earlier job yet.
+- A submit that carries the checkout's profile gets back `warnings` when it
+  differs from the base branch's; `animus start --helix` prints them.
+- A queued job is admitted again when it starts, since the profile may have
+  changed while it waited. One that no longer passes ends as `refused`, before
+  any work, with the list, and reports it where it reports (Slack, the issue).
+  A job that is resumed was admitted when it first started.
+- A base branch GitHub cannot be reached for, or one with no profile, ends the
+  job or draft before any work, with the reason.
 
 ## Projects
 
@@ -346,7 +386,7 @@ the display's own request for a job page's data sends none.
 | `GET /projects/<name>` | One project, with its check's log |
 | `DELETE /projects/<name>` | Remove a project you added, or any for the owner |
 | `GET /jobs` | The slots and your jobs; `?all`, every person's, for the owner only |
-| `POST /jobs` | Submit: `repo`, `spec`, and optionally `name`, `draft`, `skills` |
+| `POST /jobs` | Submit: `repo`, `spec`, and optionally `name`, `draft`, `skills`, `profile` (the checkout's profile text, to warn when it differs from the base branch's). The spec is admitted first: 400 with the list of problems when it is refused; the answer's `warnings` when it is admitted with any |
 | `GET /jobs/<id>` | One job, with the end of its log |
 | `POST /jobs/<id>/answer` | Answer its question (`answer`); it is queued again |
 | `POST /jobs/<id>/cancel` | Cancel your job, or anyone's for the owner |

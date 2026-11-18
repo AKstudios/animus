@@ -38,6 +38,8 @@ export type PrInput = {
   failure?: string;
   /** The issue the job was submitted from: merging the pull request closes it. */
   closes?: number;
+  /** How the pull request names that issue (the profile's issue_link); `Closes` when absent. */
+  issueLink?: 'closes' | 'refs';
   models: string;
   cost_usd: number;
 };
@@ -60,7 +62,7 @@ export function prBody(p: PrInput): string {
     p.slices.forEach((x, i) => out.push(`${i + 1}. **${cell(x.title)}**: ${x.summary ? cell(x.summary) : '*not finished*'}`));
     out.push('');
   } else if (p.summary) out.push(p.summary, '');
-  if (p.closes) out.push(`Closes #${p.closes}`, '');
+  if (p.closes) out.push(`${p.issueLink === 'refs' ? 'Refs' : 'Closes'} #${p.closes}`, '');
 
   const here: string[] = [];
   if (p.failure && p.failure.includes('\n')) here.push(`- The failure in full:\n\n\`\`\`\n${tail(p.failure)}\n\`\`\``);
