@@ -36,20 +36,53 @@ test('a running job with no person or line yet has neither, and only Helix links
   assert.deepEqual([local.people, helix.people], [false, true]);
 });
 
-test('waiting lists the jobs that ask first, then the queue in order with each job\'s place and why it is there again', () => {
-  const v = view(shown([
+// Protects: a waiting question is a card with its command, and the queue is its own short list. Fails when: the command is the wrong one for the source, the question is lost, or queued jobs keep the asking ones' heading.
+test('a job waiting for an answer is a card with its question and the command that answers it; the queue is separate with places and reasons', () => {
+  const jobs = [
     job({ id: 1, state: 'queued', submitted: ago(4) }),
-    job({ id: 2, state: 'ended', outcome: 'needs-input', question: 'Which column?', title: 'CSV order' }),
+    job({ id: 2, state: 'ended', outcome: 'needs-input', question: 'Which column?', title: 'CSV order', ended: ago(15) }),
     job({ id: 3, state: 'queued', submitted: ago(300), queued: ago(0.5), animus_job: 'a-1', resumed: 'answer' }),
     job({ id: 4, state: 'queued', submitted: ago(90), queued: ago(75), animus_job: 'a-2', resumed: 'restart' }),
-  ]), null, NOW);
-  assert.deepEqual(v.waiting.map((w) => [w.id, w.tag, w.note]), [
-    [2, 'NEEDS INPUT', 'Which column?'],
+  ];
+  const v = view(shown(jobs), null, NOW);
+  assert.deepEqual(v.needs, [{ id: 2, page: '/jobs/2', question: 'Which column?', title: 'CSV order', repo: 'app', person: 'ana', personPage: '/people/ana', waited: '15m', command: 'animus answer 2 "…"' }]);
+  assert.deepEqual(v.line.map((w) => [w.id, w.tag, w.note]), [
     [1, 'QUEUED', 'Position 1 in the queue, waiting 4m.'],
     [3, 'QUEUED AGAIN', 'Has its answer and carries on from where it stopped. Position 2 in the queue, waiting less than a minute.'],
     [4, 'QUEUED AGAIN', 'Helix stopped while it ran, so it carries on from where it stopped. Position 3 in the queue, waiting 1h 15m.'],
   ]);
   assert.deepEqual([v.queued, v.asks], [3, 1]);
+  assert.equal(view({ ...shown(jobs), local: true }, null, NOW).needs[0]!.command, 'animus resume 2 --answer "…"');
+});
+
+// Protects: the headline sentence, its ask-coloured part and the last-finished tag. Fails when: a count or plural is wrong, the quiet words show while a job needs the person, or the last finished job's tag is missing.
+test('the headline is built from the counts and names the last job that finished', () => {
+  const ask = job({ state: 'ended', outcome: 'needs-input', question: '?', ended: ago(50) });
+  const run = () => job({ state: 'running', started: ago(1) });
+  const merged = job({ id: 19, state: 'ended', outcome: 'pr', pr: 'https://github.com/o/r/pull/19', ended: ago(8) });
+  const d = { ...shown([ask, run(), run(), run(), merged]), closed: [{ job: 19, number: 19, merged: true, at: ago(2) }] };
+  assert.deepEqual(view(d, null, NOW).headline, { needs: '1 job needs you.', rest: '3 agents at work.', last: { when: 'Last finished 8m ago', tag: 'MERGED #19', tone: 'merged' } });
+  assert.deepEqual(view(shown([run(), run()]), null, NOW).headline, { needs: '', rest: '2 agents at work.' });
+  assert.deepEqual(view(shown([]), null, NOW).headline, { needs: '', rest: 'All quiet. Nothing needs you.' });
+  assert.deepEqual(view(shown([ask, job({ state: 'ended', outcome: 'needs-input', question: '?' })]), null, NOW).headline, { needs: '2 jobs need you.', rest: '' });
+  // A picked project counts only its own jobs.
+  assert.equal(view({ ...d, jobs: [...d.jobs, job({ repo: 'site', state: 'running', started: ago(1) })] }, 'site', NOW).headline.rest, '1 agent at work.');
+});
+
+// Protects: THIS WEEK counts only the last 7 days, and merged only closed PRs that merged. Fails when: an older job or an unmerged PR is counted, or the median is the mean.
+test('this week counts merged PRs, finished jobs, money and the median finished job over 7 days', () => {
+  const day = 24 * 60;
+  const done = (took: number, cost: number, endedAgo: number) => job({ state: 'ended', outcome: 'pr', started: ago(endedAgo + took), ended: ago(endedAgo), cost_usd: cost });
+  const jobs = [done(10, 1, 60), done(30, 2.5, day), done(20, 4, 6 * day), done(99, 50, 8 * day), job({ state: 'ended', outcome: 'needs-input', question: '?', ended: ago(5) })];
+  const d = { ...shown(jobs), closed: [
+    { job: jobs[0]!.id as number, number: 1, merged: true, at: ago(30) },
+    { job: jobs[1]!.id as number, number: 2, merged: false, at: ago(30) },
+    { job: jobs[3]!.id as number, number: 3, merged: true, at: ago(8 * day) },
+  ] };
+  assert.deepEqual(view(d, null, NOW).week, { merged: '1', finished: '3', spent: '$7.50', median: '20m' });
+  assert.deepEqual(view(shown([]), null, NOW).week, { merged: '0', finished: '0', spent: '$0.00', median: '–' });
+  // A merged PR's tick is in the merged colour.
+  assert.deepEqual(view(d, null, NOW).projects[0]!.ticks.slice(0, 2), ['merged', 'ended']);
 });
 
 // Protects: FINISHED lists every job that is over, tagged with what became of it. Fails when: a merged or closed PR is not told apart, a PR GitHub has not answered about is guessed, an open PR or a waiting job is listed twice, or a failure loses its reason.
@@ -76,7 +109,7 @@ test('finished lists the jobs that ended, newest first, with the PR\'s fate from
     [4, 'CANCELLED', 'mute', 'app', 'ben', '/people/ben', '45s', undefined],
     [3, 'FAILED', 'fail', 'app', 'ana', '/people/ana', '', 'the GitHub token in the env file does not work'],
     [2, 'PR #31', 'ink', 'app', 'ana', '/people/ana', '', undefined],
-    [1, 'MERGED #112', 'ink', 'app', 'ana', '/people/ana', '22m', undefined],
+    [1, 'MERGED #112', 'merged', 'app', 'ana', '/people/ana', '22m', undefined],
   ]);
   assert.deepEqual(v.prs.map((p) => p.id), [7]);
 });
@@ -84,7 +117,7 @@ test('finished lists the jobs that ended, newest first, with the PR\'s fate from
 // Protects: a section with nothing in it is not drawn. Fails when: WAITING, OPEN PRS or FINISHED keeps a heading with no rows.
 test('a section with no rows is empty for the display to leave out', () => {
   const v = view(shown([job({ state: 'running', started: ago(1) })]), null, NOW);
-  assert.deepEqual([v.waiting.length, v.prs.length, v.finished.length], [0, 0, 0]);
+  assert.deepEqual([v.needs.length, v.line.length, v.prs.length, v.finished.length], [0, 0, 0, 0]);
 });
 
 test('each project is summed up from its own jobs, and picking one narrows every section to it', () => {
@@ -102,13 +135,13 @@ test('each project is summed up from its own jobs, and picking one narrows every
     { id: 'app', summary: '1 running · 1 queued · 1 ask', on: false, busy: true, ticks: ['ended', 'failed', 'ask', 'running', 'queued', 'queued'] },
     { id: 'site', summary: '1 queued', on: false, busy: false, ticks: ['queued'] },
   ]);
-  assert.deepEqual([all.title, all.sel, all.live.length, all.waiting.length, all.finished.length], ['All projects', undefined, 1, 3, 3]);
+  assert.deepEqual([all.title, all.sel, all.live.length, all.needs.length + all.line.length, all.finished.length], ['All projects', undefined, 1, 3, 3]);
 
   const app = view(d, 'app', NOW);
   assert.deepEqual(app.sel, { id: 'app', base: 'main', gates: 'test, typecheck', prs: 1, spent: '$1.75' });
-  assert.deepEqual([app.title, app.projects[0]!.on, app.waiting.map((w) => w.id)], ['app', true, [3, 6]]);
+  assert.deepEqual([app.title, app.projects[0]!.on, [...app.needs, ...app.line].map((w) => w.id)], ['app', true, [3, 6]]);
   // The queue's order is the machine's, not the project's.
-  assert.match(app.waiting[1]!.note, /^Position 2 in the queue/);
+  assert.match(app.line[0]!.note, /^Position 2 in the queue/);
   // A project Helix no longer has is the same as none picked.
   assert.equal(view(d, 'gone', NOW).sel, undefined);
 });

@@ -8,6 +8,12 @@ clients with how to update.
 
 ## Unreleased
 
+- The display's overview leads with what needs you: a headline from the counts
+  ("1 job needs you. 3 agents at work.") and the last job that finished, an
+  amber card for each question waiting (with the `animus answer` or
+  `animus resume --answer` command), the work in progress, then a short QUEUED
+  list. A THIS WEEK panel and the PROJECTS list sit beside the main column, a
+  merged PR's tick in violet, and the header has tabs.
 - The display's RECENT is now FINISHED: the 30 newest jobs that ended or were
   cancelled, with a delivered one tagged `MERGED #n`, `CLOSED #n` or, when
   GitHub has not answered about it, `PR #n`. Helix asks GitHub once a minute

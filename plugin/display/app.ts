@@ -8,7 +8,7 @@ import { atEnd, jobView, type JobPageView } from './job-view.ts';
 import { keepOlder, peopleView, personView } from './people-view.ts';
 import { filterOf, jobListView, queryOf, RESULTS } from './job-list.ts';
 import type { Display, JobListPage, JobPage, PeoplePage, PersonPage } from './shape.ts';
-import { view, type Live, type Pr, type Project, type Recent, type View, type Waiting } from './view.ts';
+import { view, type Live, type Pr, type Project, type Need, type Recent, type View, type Waiting } from './view.ts';
 
 const POLL_MS = 2000;
 const RETRY_MS = 5000;
@@ -100,19 +100,17 @@ function header(v: View | undefined): string {
   const squares = v && v.slots <= 16 ? `<div class="squares">${Array.from({ length: v.slots }, (_, i) => `<span${i < v.running ? ' class="on"' : ''}></span>`).join('')}</div>` : '';
   const slots = v ? `${v.running}/${v.slots}` : 'connecting';
   return `<header class="head">
-    <div class="brand">${LOGO}<div class="wordmark">HELIX</div>${v ? `<div class="machine">${esc(v.name)}</div>` : ''}</div>
+    <div class="brand">${LOGO}<div class="machine">${esc(v?.name ?? 'Helix')}</div></div>
+    <nav class="tabs" aria-label="Pages">
+      ${[['Overview', '/', 'overview'], ['Jobs', '/jobs', 'jobs'], ...(v?.people === false ? [] : [['People', '/people', 'people']])].map(([name, href, key]) => `<a href="${href}"${at.page === key || (key === 'overview' && at.page === 'job') ? ' aria-current="page"' : ''}>${name}</a>`).join('')}
+    </nav>
     <div class="stats">
-      ${v?.local ? `<div><span class="k">RUNNING</span> <span class="b">${v.running}</span></div>`
-        : `<div class="stat-slots"><span class="k">SLOTS</span>${squares}<span class="b">${slots}</span></div>
-      <div><span class="k">QUEUED</span> <span class="b">${v?.queued ?? 0}</span></div>`}
-      <div><span class="k">NEEDS INPUT</span> <span class="asks">${v?.asks ?? 0}</span></div>
-      <a class="k" href="/jobs">JOBS</a>
-      ${v?.people === false ? '' : '<a class="k" href="/people">PEOPLE</a>'}
+      ${v?.local ? `<div><span class="k">running</span> <span class="b">${v.running}</span></div>`
+        : `<div class="stat-slots"><span class="k">slots</span>${squares}<span class="b">${slots}</span></div>`}
       <div class="time">${wall(new Date())}</div>
       ${readToken(storage) && !v?.local ? '<button type="button" class="sign-out" data-sign-out>SIGN OUT</button>' : ''}
     </div>
-  </header>
-  <div class="rule"><span></span></div>`;
+  </header>`;
 }
 
 const offline = () => `<div class="offline" role="status">
@@ -125,17 +123,19 @@ const project = (p: Project) => `<button type="button" class="project${p.busy ? 
   <span class="ticks" aria-hidden="true">${p.ticks.map((t) => `<span class="tick ${t}"></span>`).join('')}<span class="rest"></span></span>
 </button>`;
 
-const nav = (v: View) => `<nav class="nav" aria-label="Projects">
-  <div class="nav-head label"><span>PROJECTS</span><span>${v.projects.length}</span></div>
-  <button type="button" class="all" data-pick="" aria-pressed="${!v.sel}">ALL PROJECTS</button>
+const week = (v: View) => `<section class="panel week" data-key="week">
+  <h2>This week</h2>
+  <dl>
+    <div><dt>PRs merged</dt><dd>${v.week.merged}</dd></div><div><dt>Jobs finished</dt><dd>${v.week.finished}</dd></div>
+    <div><dt>Spent</dt><dd>${v.week.spent}</dd></div><div><dt>Median job</dt><dd>${v.week.median}</dd></div>
+  </dl>
+</section>`;
+
+const nav = (v: View) => `<aside class="side">${week(v)}<nav class="panel projects" aria-label="Projects">
+  <h2>Projects <span class="count">${v.projects.length}</span></h2>
+  <button type="button" class="all" data-pick="" aria-pressed="${!v.sel}">All projects</button>
   ${v.projects.map(project).join('')}
-  <div class="legend">
-    <div><span class="tick running"></span>running</div>
-    <div><span class="tick ended"></span>ended</div>
-    <div><span class="tick ask"></span>needs input</div>
-    <div><span class="tick queued"></span>queued</div>
-  </div>
-</nav>`;
+</nav></aside>`;
 
 const track = (v: View, j: Live) => `<span class="track" aria-hidden="true">${Array.from({ length: v.stages }, (_, i) => `<span class="seg${i < j.stage ? ' done' : i === j.stage ? ' on' : ''}"></span>`).join('')}</span>`;
 
@@ -155,10 +155,16 @@ const row = (v: View, j: Live) => `<div class="row" data-key="j-${j.id}">
   ${track(v, j)}<span class="stage">${esc(j.stageText)} <span class="step">${esc(j.stepShort)}</span></span><span class="elapsed">${j.elapsed}</span>
 </div>`;
 
-const waiting = (j: Waiting) => `<div class="wait${j.ask ? ' ask' : ''}" data-key="j-${j.id}">
+const queued = (j: Waiting) => `<div class="wait" data-key="j-${j.id}">
   <span class="id">${ref(j.id)}</span><span class="tag">${j.tag}</span><a class="title" href="${esc(j.page)}">${esc(j.title)}</a>
   <span class="by">${esc(j.repo)} · ${who(j)}</span><span class="note">${esc(j.note)}</span>
 </div>`;
+
+const need = (j: Need) => `<article class="ask-card" data-key="j-${j.id}">
+  <p class="question">${esc(j.question)}</p>
+  <div class="by"><span class="id">${ref(j.id)}</span> ${esc(j.repo)} · <a href="${esc(j.page)}">${esc(j.title)}</a> · waiting <span class="mono">${esc(j.waited)}</span></div>
+  <div class="ask-act"><code>${esc(j.command)}</code><a class="ask-btn" href="${esc(j.page)}">Open job</a></div>
+</article>`;
 
 const recent = (j: Recent) => `<div class="done-row" data-key="j-${j.id}">
   <span class="id">${ref(j.id)}</span>
@@ -174,13 +180,15 @@ const openPr = (p: Pr) => `<div class="done-row" data-key="pr-${esc(p.href)}">
 </div>`;
 
 const section = (name: string, title: string, body: string, pulse = false) => `<section class="section ${name}">
-  <div class="section-head label">${pulse ? '<span class="pulse"></span>' : ''}<h2>${title}</h2><span class="to-edge"></span></div>
+  <div class="section-head">${pulse ? '<span class="pulse"></span>' : ''}<h2>${title}</h2><span class="to-edge"></span></div>
   ${body}
 </section>`;
 
 function main(v: View): string {
+  const h = v.headline;
   const scope = `<div class="scope">
-    <div><div class="label">${v.sel ? 'PROJECT' : 'OVERVIEW'}</div><h1>${esc(v.title)}</h1></div>
+    <div>${v.sel ? `<div class="project-title">${esc(v.title)}</div>` : ''}<h1 class="headline">${h.needs ? `<span class="needs">${esc(h.needs)}</span> ` : ''}${esc(h.rest)}</h1>
+      ${h.last ? `<div class="last">${esc(h.last.when)} · <span class="tag tone-${h.last.tone}">${esc(h.last.tag)}</span></div>` : ''}</div>
     ${v.sel ? `<div class="facts" data-key="facts-${esc(v.sel.id)}">
       ${v.sel.base ? `<div><span class="mute">base</span> ${esc(v.sel.base)}</div>` : ''}
       ${v.sel.gates ? `<div><span class="mute">gates</span> ${esc(v.sel.gates)}</div>` : ''}
@@ -198,12 +206,13 @@ function main(v: View): string {
     : v.live.length > DENSE ? `<div class="rows">${v.live.map((j) => row(v, j)).join('')}</div>`
     : `<div class="cards${v.live.length > MANY ? ' many' : ''}">${v.live.map((j) => card(v, j)).join('')}</div>`;
   const lists = v.local
-    ? v.byProject.map((g) => section('recent', `${esc(g.project.toUpperCase())} · ${g.jobs.length}`, g.jobs.map(recent).join(''))).join('')
-    : `${v.prs.length ? section('prs', `OPEN PRS · ${v.prs.length}`, v.prs.map(openPr).join('')) : ''}
-    ${v.finished.length ? section('recent', `FINISHED · ${v.finished.length}`, v.finished.map(recent).join('')) : ''}`;
+    ? v.byProject.map((g) => section('recent', `${esc(g.project)} <span class="count">${g.jobs.length}</span>`, g.jobs.map(recent).join(''))).join('')
+    : `${v.prs.length ? section('prs', `Open PRs <span class="count">${v.prs.length}</span>`, v.prs.map(openPr).join('')) : ''}
+    ${v.finished.length ? section('recent', `Finished <span class="count">${v.finished.length}</span>`, v.finished.map(recent).join('')) : ''}`;
   return `<main class="main">${scope}
-    ${section('live', `AGENTS WORKING NOW · ${v.live.length}`, live, true)}
-    ${v.waiting.length ? section('waiting', `WAITING · ${v.waiting.length}`, v.waiting.map(waiting).join('')) : ''}
+    ${v.needs.length ? section('needs', `Needs you <span class="count">${v.needs.length}</span>`, v.needs.map(need).join('')) : ''}
+    ${section('live', `Working now <span class="count">${v.live.length}</span>`, live, true)}
+    ${v.line.length ? section('waiting', `Queued <span class="count">${v.queued}</span>`, v.line.map(queued).join('')) : ''}
     ${lists}
   </main>`;
 }
@@ -307,7 +316,7 @@ function page(): string {
   const now = (state.offline && state.heard ? state.heard.getTime() : Date.now()) + state.skew;
   const v = state.display ? view(state.display, picked(), now) : undefined;
   // A job page waits for the display: whether it needs a sign-in depends on the source it answers.
-  const body = at.page === 'job' ? (state.display ? jobMain(at.id, now, state.display.local === true) : '') : at.page === 'jobs' ? (state.display ? jobsMain(state.display.local === true) : '') : at.page === 'people' ? (state.display ? peopleMain(state.display.local === true, at.name) : '') : v ? `${nav(v)}${main(v)}` : '';
+  const body = at.page === 'job' ? (state.display ? jobMain(at.id, now, state.display.local === true) : '') : at.page === 'jobs' ? (state.display ? jobsMain(state.display.local === true) : '') : at.page === 'people' ? (state.display ? peopleMain(state.display.local === true, at.name) : '') : v ? `${main(v)}${nav(v)}` : '';
   return [
     header(v),
     state.offline ? offline() : '',
