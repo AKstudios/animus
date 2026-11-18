@@ -229,9 +229,13 @@ const pre = (text: string, attrs = '') => `<pre class="text"${attrs}>${esc(text)
 const none = (text: string) => `<div class="none">${esc(text)}</div>`;
 
 function jobSections(v: JobPageView): string {
-  const stages = `<div class="steps">${v.stages.map((s) => `<div class="step-row${s.on ? ' on' : ''}"><span>${esc(s.name)}</span><span class="mute">${s.on ? 'now' : esc(s.took)}</span></div>`).join('')}</div>`;
+  const stages = v.bar.length ? `<div class="timebar" role="img" aria-label="Where the time went">${v.bar.map((s, i) => `<span class="seg-${i % 7}" style="width:${s.pct}%"></span>`).join('')}</div>
+    <div class="timekey">${v.bar.map((s, i) => `<span class="${s.on ? 'on' : ''}"><i class="seg-${i % 7}"></i>${esc(s.name)} <code>${s.on ? 'now' : esc(s.took)}</code></span>`).join('')}</div>` : '';
+  const fold = (name: string, title: string, body: string, open = false) => `<details class="fold ${name}" data-key="fold-${name}"${open ? ' open' : ''}><summary>${title}</summary>${body}</details>`;
+  const criteria = v.criteria.map((c) => `<div class="criterion"><span class="tag tone-${c.tone}">${esc(c.tag)}</span><span class="what">${esc(c.text)}</span>${c.command ? `<code>${esc(c.command)}</code>` : ''}${c.output ? `<details class="out"><summary>Output</summary>${pre(c.output)}</details>` : ''}</div>`).join('');
+  const pills = v.pills.map((c) => c.output ? `<details class="pill tone-${c.tone}"><summary>${esc(c.name)} ${esc(c.tag)}</summary>${pre(c.output)}</details>` : `<span class="pill tone-${c.tone}" title="${esc(c.command)}">${esc(c.name)} ${esc(c.tag)}</span>`).join('');
+  const checks = `${criteria}${pills ? `<div class="pills">${pills}</div>` : ''}`;
   const slices = v.slices.length ? `<ol class="slices">${v.slices.map((s) => `<li${s.done ? ' class="done"' : ''}><span class="b">${esc(s.title)}</span> <span class="mute">${s.done ? 'done' : ''}</span><div class="mute">${esc(s.delivers)}</div></li>`).join('')}</ol>` : '';
-  const checks = v.checks.map((c) => `<div class="check"><span class="tag tone-${c.tone}">${esc(c.tag)}</span><span class="b">${esc(c.name)}</span><code>${esc(c.command)}</code><span class="mute">${esc(c.detail)}</span>${c.output !== undefined ? pre(c.output) : ''}</div>`).join('');
   const reviews = v.reviews.map((r) => `<div class="round"><div class="label">${esc(r.title.toUpperCase())}</div><p>${esc(r.summary)}</p>
     ${r.findings.map((f) => `<div class="finding"><span class="tag tone-${f.tone}">${esc(f.tag)}</span>${f.where ? `<code>${esc(f.where)}</code>` : ''}<p>${esc(f.problem)}</p>${f.fix ? `<p class="mute">${esc(f.fix)}</p>` : ''}</div>`).join('') || none('No findings.')}</div>`).join('');
   const shots = v.shots.map((s) => {
@@ -241,21 +245,22 @@ function jobSections(v: JobPageView): string {
   const questions = v.questions.map((q) => `<div class="qa"><p><span class="label">ASKED</span> ${esc(q.question)}</p><p${q.answered ? '' : ' class="tone-ask"'}><span class="label">ANSWERED</span> ${esc(q.answer)}</p></div>`).join('');
   return [
     v.reason ? `<pre class="text why">${esc(v.reason)}</pre>` : '',
-    section('stages', 'STAGES', `${stages}${slices}`),
-    section('checks', 'CHECKS', checks || none('No checks have run yet.')),
-    section('review', 'REVIEW', reviews || none('Not reviewed yet.')),
-    shots ? section('screenshots', 'SCREENSHOTS', `<div class="shots">${shots}</div>`) : '',
-    section('questions', 'QUESTIONS', questions || none('It has asked nothing.')),
-    section('spec', 'SPEC', v.spec ? pre(v.spec) : none('Helix no longer has the spec.')),
-    section('log', 'LOG', v.log ? pre(v.log, ' data-log') : none(v.noLog), v.follow),
+    `<div class="numbers">${v.numbers.map((n) => `<div><code class="num">${esc(n.v)}</code><span class="mute">${esc(n.k)}</span></div>`).join('')}</div>`,
+    section('stages', 'Where the time went', `${stages || none('No stage has taken time yet.')}${slices}`),
+    section('checks', 'Checks', checks || none('No checks have run yet.')),
+    section('review', 'Review', reviews || none('Not reviewed yet.')),
+    shots ? section('screenshots', 'Screenshots', `<div class="shots">${shots}</div>`) : '',
+    fold('questions', 'Questions', questions || none('It has asked nothing.')),
+    fold('spec', 'Spec', v.spec ? pre(v.spec) : none('Helix no longer has the spec.')),
+    fold('log', 'Log', v.log ? pre(v.log, ' data-log') : none(v.noLog), v.follow),
   ].join('');
 }
 
 function jobMain(id: number | string, now: number, local: boolean): string {
   const notice = jobNotice(id, readToken(storage) !== null, state.jobStatus, local);
-  const v = state.job?.job.id === id ? jobView(state.job, now, local) : undefined;
-  const facts = v ? `<div class="facts">${v.facts.map((f) => `<div><span class="mute">${esc(f.k)}</span> ${f.href ? `<a href="${esc(f.href)}" target="_blank" rel="noopener noreferrer">${esc(f.v)}</a>` : f.page ? `<a href="${esc(f.page)}">${esc(f.v)}</a>` : esc(f.v)}</div>`).join('')}</div>` : '';
-  const scope = `<div class="scope"><div><div class="label">JOB${typeof id === 'number' ? ` #${id}` : ''}</div><h1>${esc(v?.title ?? `Job ${ref(id) || id}`)}</h1></div>${notice ? '' : facts}</div>`;
+  const v = state.job?.job.id === id ? jobView(state.job, now, local, state.display?.closed?.find((c) => c.job === id)) : undefined;
+  const lead = v && !notice ? `<div class="tag-row"><span class="tag tone-${v.tag.tone}">${esc(v.tag.text)}</span><span class="mute">${esc(v.line)}</span></div>` : '';
+  const scope = `<div class="scope"><div><div class="label">JOB${typeof id === 'number' ? ` #${id}` : ''}</div><h1>${esc(v?.title ?? `Job ${ref(id) || id}`)}</h1>${lead}</div></div>`;
   const body = notice ? `<div class="none boxed">${esc(notice.text)}</div>${notice.signIn ? signIn : ''}` : v ? jobSections(v) : '';
   return `<main class="main">${back}${scope}${body}</main>`;
 }
@@ -335,8 +340,10 @@ const keyOf = (n: Node) => (n instanceof Element ? n.getAttribute('data-key') : 
  * data-key are matched by it; the rest by position.
  */
 function morph(from: Element, to: Element): void {
-  for (const a of [...from.attributes]) if (!to.hasAttribute(a.name)) from.removeAttribute(a.name);
-  for (const a of [...to.attributes]) if (from.getAttribute(a.name) !== a.value) from.setAttribute(a.name, a.value);
+  // A folded part is opened and closed by the person, never by a redraw.
+  const kept = (n: string) => n === 'open' && from.nodeName === 'DETAILS';
+  for (const a of [...from.attributes]) if (!to.hasAttribute(a.name) && !kept(a.name)) from.removeAttribute(a.name);
+  for (const a of [...to.attributes]) if (!kept(a.name) && from.getAttribute(a.name) !== a.value) from.setAttribute(a.name, a.value);
   const keyed = new Map<string, ChildNode>();
   for (const n of from.childNodes) { const k = keyOf(n); if (k) keyed.set(k, n); }
   let cursor = from.firstChild;

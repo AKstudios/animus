@@ -3,12 +3,23 @@
 // No DOM here, so the wording is tested without a browser
 // (helix/test/job-page.test.ts), as view.ts is.
 import { personPage } from './pages.ts';
-import type { JobPage } from './shape.ts';
-import { clock, span, type Tone } from './view.ts';
+import type { DisplayClosed, JobPage } from './shape.ts';
+import { clock, recent, span, type Tone } from './view.ts';
 
 export type JobPageView = {
   id: number | string;
   title: string;
+  /** The result tag, and the one line under the title: project, person, when it started, and how long a merged PR took to merge. */
+  tag: { text: string; tone: Tone };
+  line: string;
+  /** Time taken, cost, gate runs, and slices passed or review rounds. */
+  numbers: { k: string; v: string }[];
+  /** Each stage that took time, its width the share of the time, with its time beneath. */
+  bar: { name: string; took: string; pct: number; on: boolean }[];
+  /** The spec's acceptance criteria in its words, each with its `acceptance-<n>` check; empty when the spec cannot be read that way. */
+  criteria: { text: string; tag: string; tone: Tone; command: string; output?: string }[];
+  /** The checks that are not a criterion's, as small tags; a failed one has its output. */
+  pills: { name: string; tag: string; tone: Tone; command: string; output?: string }[];
   /** The header's facts, in order: only the ones the job has. */
   facts: { k: string; v: string; href?: string; /** Another page of the display. */ page?: string }[];
   /** Why it failed or stopped, when it said. */
@@ -33,11 +44,25 @@ export const OUTCOMES: Record<string, string> = { pr: 'pull request', 'draft-pr'
 const CHECK: Record<string, [string, Tone]> = { ok: ['ok', 'ink'], fail: ['FAIL', 'fail'], skip: ['skip', 'mute'] };
 const SEVERITY: Record<string, Tone> = { blocker: 'fail', 'should-fix': 'ask', note: 'mute' };
 
+/** The items of the spec's "Acceptance criteria" list, in its words (the `$ command` lines left out). */
+export function criteriaOf(spec: string): string[] {
+  const items: string[] = [];
+  let on = false;
+  for (const line of spec.split('\n')) {
+    if (/^#+\s/.test(line)) { on = /^#+\s*acceptance criteria\s*$/i.test(line); continue; }
+    if (!on) continue;
+    const item = /^\s*\d+[.)]\s+(.*)$/.exec(line);
+    if (item) items.push(item[1]!.trim());
+    else if (items.length && line.trim() && !line.trim().startsWith('$')) items[items.length - 1] += ` ${line.trim()}`;
+  }
+  return items;
+}
+
 /** A time as the page shows it: in UTC, so every screen that shows the job says the same. */
 export const when = (iso: string) => `${iso.slice(0, 10)} ${iso.slice(11, 16)} UTC`;
 
 /** The job page for one moment: `now` is Helix's clock in ms; `local` for the local display, which has no people pages. */
-export function jobView(p: JobPage, now: number, local = false): JobPageView {
+export function jobView(p: JobPage, now: number, local = false, closed?: DisplayClosed): JobPageView {
   const j = p.job;
   const pr = j.pr ? /(\d+)\/?$/.exec(j.pr)?.[1] : undefined;
   const facts = [
@@ -52,16 +77,43 @@ export function jobView(p: JobPage, now: number, local = false): JobPageView {
     ...(j.started && j.ended ? [{ k: 'took', v: span(Date.parse(j.ended) - Date.parse(j.started)) }]
       : j.started && j.state === 'running' ? [{ k: 'running for', v: clock(now - Date.parse(j.started)) }] : []),
   ];
+  const checks = (p.checks ?? []).map((c) => {
+    const [tag, tone] = CHECK[c.status]!;
+    return { name: c.name, command: c.command, tag, tone, detail: c.detail, ...(c.output !== undefined ? { output: c.output } : {}) };
+  });
+  const wanted = criteriaOf(p.spec ?? '');
+  const byName = new Map(checks.map((c) => [c.name, c]));
+  const readable = wanted.length > 0 && checks.some((c) => /^acceptance-\d+$/.test(c.name));
+  const criteria = readable ? wanted.map((text, i) => {
+    const c = byName.get(`acceptance-${i + 1}`);
+    return c ? { text, tag: c.tag, tone: c.tone, command: c.command, ...(c.output !== undefined ? { output: c.output } : {}) } : { text, tag: 'not run', tone: 'mute' as Tone, command: '' };
+  }) : [];
+  const used = new Set(readable ? wanted.map((_, i) => `acceptance-${i + 1}`) : []);
+  const took = j.started && j.ended ? span(Date.parse(j.ended) - Date.parse(j.started)) : j.started && j.state === 'running' ? clock(now - Date.parse(j.started)) : '–';
+  const total = Object.values(p.ms ?? {}).reduce((a, b) => a + b, 0);
+  const merged = closed?.merged && j.ended ? Math.max(0, Date.parse(closed.at) - Date.parse(j.ended)) : undefined;
+  const done = (p.slices ?? []).filter((s) => s.done).length;
+  const { tag, tone } = recent(j, local, closed);
   return {
     id: j.id, title: j.title, facts,
+    tag: { text: tag, tone },
+    line: [j.repo, j.person, j.started ? `started ${when(j.started)}` : `submitted ${when(j.submitted)}`, ...(merged !== undefined ? [`merged after ${span(merged)}`] : [])].join(' · '),
+    numbers: [
+      { k: 'time taken', v: took }, { k: 'cost', v: j.cost_usd !== undefined ? `$${j.cost_usd.toFixed(2)}` : '–' },
+      { k: 'gate runs', v: String(p.gate_runs ?? 0) },
+      p.slices?.length ? { k: 'slices passed', v: `${done} of ${p.slices.length}` } : { k: 'review rounds', v: String(p.reviews?.length ?? 0) },
+    ],
+    bar: p.stages.flatMap((name) => {
+      const ms = p.ms?.[name] ?? 0;
+      return ms > 0 ? [{ name, took: span(ms), pct: Math.round((ms / total) * 1000) / 10, on: j.state === 'running' && j.progress?.stage === name }] : [];
+    }),
+    criteria,
+    pills: checks.filter((c) => !used.has(c.name)).map(({ detail: _d, ...c }) => c),
     ...(j.reason ? { reason: j.reason } : {}),
     spec: p.spec ?? '',
     stages: p.stages.map((name) => ({ name, took: p.ms?.[name] !== undefined ? span(p.ms[name]) : '', on: j.state === 'running' && j.progress?.stage === name })),
     slices: p.slices ?? [],
-    checks: (p.checks ?? []).map((c) => {
-      const [tag, tone] = CHECK[c.status]!;
-      return { name: c.name, command: c.command, tag, tone, detail: c.detail, ...(c.output !== undefined ? { output: c.output } : {}) };
-    }),
+    checks,
     reviews: (p.reviews ?? []).map((r, i) => ({
       title: `Review ${i + 1}`, summary: r.summary,
       findings: r.findings.map((f) => ({

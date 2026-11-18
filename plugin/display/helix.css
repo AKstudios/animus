@@ -226,6 +226,29 @@ a.title:hover, a.card-title:hover, .back:hover { text-decoration: underline; }
 .step-row.on { color: var(--acc-ink); font-weight: 700; }
 .slices { margin: 0; padding-left: 24px; display: flex; flex-direction: column; gap: 8px; font-size: 15px; }
 .slices .done { color: var(--mute); }
+.tag-row { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 12px; margin-top: 8px; font-size: 14px; }
+.tag-row .tag, .criterion .tag { font-family: var(--mono); font-size: 12px; font-weight: 700; padding: 2px 8px; border-radius: 999px; border: 1px solid currentColor; }
+.numbers { display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 12px; }
+.numbers > div { display: flex; flex-direction: column; gap: 2px; padding: 12px 16px; background: var(--panel); border: 1px solid var(--line); border-radius: 12px; }
+.numbers .num { font-family: var(--mono); font-size: 22px; font-weight: 600; }
+.timebar { display: flex; height: 14px; border-radius: 7px; overflow: hidden; background: var(--soft); }
+.timebar span { min-width: 2px; }
+.timekey { display: flex; flex-wrap: wrap; gap: 6px 18px; font-size: 14px; }
+.timekey i { display: inline-block; width: 10px; height: 10px; border-radius: 3px; margin-right: 6px; }
+.timekey code { font-family: var(--mono); color: var(--mute); }
+.timekey .on { font-weight: 600; }
+.seg-0 { background: var(--accent); } .seg-1 { background: #6b3fc4; } .seg-2 { background: #1a7f37; } .seg-3 { background: #b86e00; }
+.seg-4 { background: #b3261e; } .seg-5 { background: #55636c; } .seg-6 { background: #7d8a92; }
+.criterion { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 12px; padding: 10px 4px; border-bottom: 1px solid var(--line); font-size: 14px; }
+.criterion .what { flex: 1 1 320px; overflow-wrap: anywhere; }
+.criterion code { font-family: var(--mono); font-size: 13px; color: var(--mute); overflow-wrap: anywhere; }
+.criterion .out, .pill[open] { flex-basis: 100%; }
+.pills { display: flex; flex-wrap: wrap; gap: 8px; padding-top: 10px; }
+.pill { font-family: var(--mono); font-size: 12px; padding: 2px 10px; border-radius: 999px; border: 1px solid currentColor; }
+.pill summary { cursor: pointer; }
+.fold { border: 1px solid var(--line); border-radius: 12px; background: var(--panel); padding: 10px 16px; }
+.fold > summary { cursor: pointer; font-size: 15px; font-weight: 600; }
+.fold[open] > summary { margin-bottom: 10px; }
 .check, .finding { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 16px; padding: 8px 4px; border-bottom: 1px solid var(--line); font-size: 15px; }
 .check .tag, .finding .tag { font-family: var(--mono); font-size: 13px; letter-spacing: 0.08em; font-weight: 700; width: 100px; }
 .check code, .finding code { font-family: var(--mono); font-size: 13px; color: var(--mute); overflow-wrap: anywhere; }

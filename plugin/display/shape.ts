@@ -57,6 +57,8 @@ export type JobPage = {
   /** When it was cut into more than one slice: each in order, and whether its gates passed. */
   slices?: { title: string; delivers: string; done: boolean }[];
   checks?: JobCheck[];
+  /** How many times its gates ran: the job folder's gate run files. */
+  gate_runs?: number;
   /** Every review round, first to last. */
   reviews?: Pick<Review, 'summary' | 'findings'>[];
   /** Every question the job asked, with the answer it was given; the one it waits on has none. */
