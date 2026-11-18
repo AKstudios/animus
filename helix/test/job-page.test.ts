@@ -169,7 +169,7 @@ test('a merged job page leads with its tag and line, four numbers and a bar of e
     reviews: [{ summary: 'ok', findings: [] }], slices: [{ title: 'a', delivers: '', done: true }, { title: 'b', delivers: '', done: false }],
   });
   const v = jobView(p, NOW, false, { job: 9, number: 4, merged: true, at: '2026-11-17T12:00:30Z' });
-  assert.deepEqual([v.tag, v.line], [{ text: 'MERGED #4', tone: 'merged' }, 'app · ana · started 2026-11-17 10:05 UTC · merged after 1h 20m']);
+  assert.deepEqual([v.tag, v.line], [{ text: 'Merged #4', tone: 'merged' }, 'app · ana · started 2026-11-17 10:05 UTC · merged after 1h 20m']);
   assert.deepEqual(v.numbers, [{ k: 'time taken', v: '35m' }, { k: 'cost', v: '$3.40' }, { k: 'gate runs', v: '3' }, { k: 'slices passed', v: '1 of 2' }]);
   assert.deepEqual(v.bar, [
     { name: 'plan', took: '2m', pct: 20, on: false }, { name: 'implement', took: '6m', pct: 60, on: false }, { name: 'review', took: '2m', pct: 20, on: false },

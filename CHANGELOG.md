@@ -8,6 +8,7 @@ clients with how to update.
 
 ## Unreleased
 
+- The display's overview is the same on `animus ui` and on Helix: Needs you, Working now, Queued, Open pull requests, Finished. Result tags are in sentence case, a Finished row says how long its PR took to merge, and the Projects panel has ticks and a key in place of the "All projects" button.
 - **Breaking:** a spec's header is held to its keys. A key other than `title`,
   `size`, `difficulty`, `type`, `base`, `ui`, `after` and `design` (or, under
   `ui`, other than `target` and `pages`) is refused with "did you mean", where

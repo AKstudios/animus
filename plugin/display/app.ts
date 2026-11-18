@@ -133,8 +133,8 @@ const week = (v: View) => `<section class="panel week" data-key="week">
 
 const nav = (v: View) => `<aside class="side">${week(v)}<nav class="panel projects" aria-label="Projects">
   <h2>Projects <span class="count">${v.projects.length}</span></h2>
-  <button type="button" class="all" data-pick="" aria-pressed="${!v.sel}">All projects</button>
   ${v.projects.map(project).join('')}
+  <div class="key"><span><i class="merged"></i>merged</span><span><i class="running"></i>running</span><span><i class="ask"></i>asks</span><span><i class="failed"></i>failed</span></div>
 </nav></aside>`;
 
 const track = (v: View, j: Live) => `<span class="track" aria-hidden="true">${Array.from({ length: v.stages }, (_, i) => `<span class="seg${i < j.stage ? ' done' : i === j.stage ? ' on' : ''}"></span>`).join('')}</span>`;
@@ -176,8 +176,8 @@ const openPr = (p: Pr) => `<div class="done-row" data-key="pr-${esc(p.href)}">
   <a class="title" href="${esc(p.page)}">${esc(p.title)}</a><span class="by">#${p.id} · ${esc(p.repo)} · ${who(p)}</span>
 </div>`;
 
-const section = (name: string, title: string, body: string, pulse = false) => `<section class="section ${name}">
-  <div class="section-head">${pulse ? '<span class="pulse"></span>' : ''}<h2>${title}</h2><span class="to-edge"></span></div>
+const section = (name: string, title: string, body: string, pulse = false, more = '') => `<section class="section ${name}">
+  <div class="section-head">${pulse ? '<span class="pulse"></span>' : ''}<h2>${title}</h2><span class="to-edge"></span>${more}</div>
   ${body}
 </section>`;
 
@@ -202,10 +202,8 @@ function main(v: View): string {
   const live = v.idle ? SYNC : !v.live.length ? `<div class="none boxed">${esc(v.noLive)}</div>`
     : v.live.length > DENSE ? `<div class="rows">${v.live.map((j) => row(v, j)).join('')}</div>`
     : `<div class="cards${v.live.length > MANY ? ' many' : ''}">${v.live.map((j) => card(v, j)).join('')}</div>`;
-  const lists = v.local
-    ? v.byProject.map((g) => section('recent', `${esc(g.project)} <span class="count">${g.jobs.length}</span>`, g.jobs.map(recent).join(''))).join('')
-    : `${v.prs.length ? section('prs', `Open PRs <span class="count">${v.prs.length}</span>`, v.prs.map(openPr).join('')) : ''}
-    ${v.finished.length ? section('recent', `Finished <span class="count">${v.finished.length}</span>`, v.finished.map(recent).join('')) : ''}`;
+  const lists = `${v.prs.length ? section('prs', `Open pull requests <span class="count">${v.prs.length}</span>`, v.prs.map(openPr).join('')) : ''}
+    ${v.finished.length ? section('recent', `Finished <span class="count">${v.finished.length}</span>`, v.finished.map(recent).join(''), false, '<a class="more" href="/jobs">All jobs →</a>') : ''}`;
   return `<main class="main">${scope}
     ${v.needs.length ? section('needs', `Needs you <span class="count">${v.needs.length}</span>`, v.needs.map(need).join('')) : ''}
     ${section('live', `Working now <span class="count">${v.live.length}</span>`, live, true)}

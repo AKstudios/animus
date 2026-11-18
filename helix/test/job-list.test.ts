@@ -57,7 +57,7 @@ test('/job-list gives the 30 newest jobs, older ones after `before`, each tagged
   assert.deepEqual([rest.jobs.length, rest.more, rest.jobs[0]!.title, rest.jobs.at(-1)!.title], [10, false, 'Failed 10', 'Failed 1']);
   const tags = Object.fromEntries(jobListView(first, false).rows.map((r) => [r.title, r.tag]));
   assert.deepEqual([tags['Waits'], tags['Runs'], tags['Asks'], tags['PR job 71'], tags['PR job 61'], tags['PR job 51'], tags['PR job 41'], tags['Failed 33']],
-    ['QUEUED', 'QUEUED', 'NEEDS INPUT', 'PR #71', 'CLOSED #61', 'MERGED #51', 'OPEN PR #41', 'FAILED']);
+    ['Queued', 'Queued', 'Needs input', 'PR #71', 'Closed #61', 'Merged #51', 'Open #41', 'Failed']);
   const row = jobListView(first, false).rows.find((r) => r.title === 'PR job 51')!;
   assert.deepEqual([row.page, row.repo, row.person, row.meta, row.personPage], [`/jobs/${row.id}`, 'app', 'ana', '$1.50', '/people/ana']);
 });

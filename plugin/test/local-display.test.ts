@@ -137,9 +137,10 @@ test('the local display names a job by its PR, links it, and says where people a
       { id: 'a-1', person: '', repo: 'shop', title: 'a', submitted: '2026-11-17T10:00:00Z', state: 'ended', outcome: 'draft-pr', pr: 'https://github.com/o/shop/pull/8' },
       { id: 'a-2', person: '', repo: 'shop', title: 'b', submitted: '2026-11-17T09:00:00Z', state: 'ended', outcome: 'pr' },
     ],
+    prs: [{ job: 'a-1', repo: 'shop', person: '', number: 8, title: 'a', url: 'https://github.com/o/shop/pull/8', draft: true, created: '2026-11-17T10:00:00Z' }],
   };
   const v = view(d, null, Date.parse(d.at));
-  assert.deepEqual(v.byProject[0]!.jobs.map((j) => [j.tag, j.href]), [['DRAFT PR #8', 'https://github.com/o/shop/pull/8'], ['PR', undefined]]);
+  assert.deepEqual([v.prs.map((p) => [p.tag, p.href]), v.finished.map((j) => [j.tag, j.href])], [[['Draft #8', 'https://github.com/o/shop/pull/8']], [['PR', undefined]]]);
   assert.equal(v.people, false);
   assert.match(peopleNotice(false, undefined, true) ?? '', /no people pages/);
   assert.match(personNotice('ana', false, undefined, true) ?? '', /no people pages/);
@@ -169,8 +170,8 @@ test('the local display takes the next free port, on 127.0.0.1', async () => {
   assert.equal(address.address, '127.0.0.1');
 });
 
-// Protects: the page's reading of the display for the local source. Fails when: jobs are not grouped by project newest first, a stopped job does not say how to carry on, or a string id has no page.
-test('the overview lists local jobs by project, a stopped one with its resume command, and string ids route to their page', () => {
+// Protects: the page's reading of the display for the local source. Fails when: a job shows twice or in the wrong section, a stopped job does not say how to carry on, or a string id has no page.
+test('the overview lists local jobs in the sections Helix has, a stopped one with its resume command, and string ids route to their page', () => {
   const at = (id: string, repo: string, state: DisplayJob['state'], submitted: string, over: Partial<DisplayJob> = {}): DisplayJob => ({ id, person: '', repo, title: id, submitted, state, ...over });
   const d: Display = {
     name: 'laptop', at: '2026-11-17T12:00:00Z', slots: 0, stages: ['setup'], local: true,
@@ -178,8 +179,8 @@ test('the overview lists local jobs by project, a stopped one with its resume co
     jobs: [at('c-2', 'blog', 'ended', '2026-11-17T11:00:00Z', { outcome: 'pr' }), at('a-9', 'shop', 'stopped', '2026-11-17T10:00:00Z', { resume: 'animus resume a-9' }), at('b-1', 'shop', 'ended', '2026-11-16T10:00:00Z', { outcome: 'failed' })],
   };
   const v = view(d, null, Date.parse(d.at));
-  assert.deepEqual(v.byProject.map((g) => [g.project, g.jobs.map((j) => j.id)]), [['blog', ['c-2']], ['shop', ['a-9', 'b-1']]]);
-  assert.deepEqual(v.byProject[1]!.jobs[0], { id: 'a-9', page: '/jobs/a-9', tag: 'STOPPED', tone: 'fail', title: 'a-9', repo: 'shop', person: '', meta: '', reason: 'It stopped before it ended. To carry on: animus resume a-9' });
+  assert.deepEqual(v.finished.map((j) => j.id), ['c-2', 'a-9', 'b-1']);
+  assert.deepEqual(v.finished[1], { id: 'a-9', page: '/jobs/a-9', tag: 'Stopped', tone: 'fail', title: 'a-9', repo: 'shop', person: '', meta: '', reason: 'It stopped before it ended. To carry on: animus resume a-9' });
   assert.deepEqual(route('/jobs/a-9'), { page: 'job', id: 'a-9' });
   assert.deepEqual(route('/jobs/12'), { page: 'job', id: 12 });
   assert.equal(jobNotice('a-9', false, undefined, true), undefined);
@@ -220,10 +221,12 @@ test('the local /job-list tags merged and closed PRs from outcomes.json and filt
   const shown = (await (await s.get('/display')).json()) as Display;
   s.stop();
   // The overview reads the same outcomes: its rows say merged and closed too.
-  const overview = Object.fromEntries(view(shown, null, Date.now()).byProject.flatMap((g) => g.jobs).map((r) => [r.title, [r.tag, r.tone]]));
-  assert.deepEqual([overview['pr-merged'], overview['pr-closed'], overview['pr-unknown']], [['MERGED #1', 'merged'], ['CLOSED #2', 'mute'], ['PR #3', 'ink']]);
+  const o = view(shown, null, Date.now());
+  const overview = Object.fromEntries([...o.finished, ...o.prs].map((r) => [r.title, [r.tag, 'tone' in r ? r.tone : 'open']]));
+  assert.deepEqual([overview['pr-merged'], overview['pr-closed'], overview['pr-unknown']], [['Merged #1', 'merged'], ['Closed #2', 'mute'], ['Open #3', 'open']]);
+  assert.deepEqual(o.prs.map((p) => p.title).filter((t) => t.startsWith('pr-')), ['pr-unknown']);
   const tags = Object.fromEntries(jobListView(all, true).rows.map((r) => [r.title, r.tag]));
-  assert.deepEqual([tags['pr-merged'], tags['pr-closed'], tags['pr-unknown']], ['MERGED #1', 'CLOSED #2', 'PR #3']);
+  assert.deepEqual([tags['pr-merged'], tags['pr-closed'], tags['pr-unknown']], ['Merged #1', 'Closed #2', 'PR #3']);
   assert.deepEqual([merged.jobs.map((j) => j.id), wiki.jobs.map((j) => j.id), bad], [['pr-merged'], ['pr-unknown'], 400]);
   assert.equal(jobListView(all, true).rows.every((r) => r.personPage === undefined), true);
 });

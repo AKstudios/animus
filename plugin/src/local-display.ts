@@ -71,12 +71,19 @@ export function localDisplay(): Display {
     const n = Number(/(\d+)\/?$/.exec(j.pr ?? '')?.[1]);
     return o && o.state !== 'OPEN' && n ? [{ job: j.id, number: n, merged: o.state === 'MERGED', at: o.closed ?? o.checked }] : [];
   });
+  // A delivered PR is open unless outcomes.json lists it closed.
+  const prs = jobs.flatMap((j) => {
+    const n = Number(/(\d+)\/?$/.exec(j.pr ?? '')?.[1]);
+    const state = j.pr ? outcomes[j.pr]?.state : undefined;
+    return j.state === 'ended' && j.pr && n && (j.outcome === 'pr' || j.outcome === 'draft-pr') && (!state || state === 'OPEN')
+      ? [{ job: j.id, repo: j.repo, person: j.person, number: n, title: j.title, url: j.pr, draft: j.outcome === 'draft-pr', created: j.ended ?? j.submitted }] : [];
+  });
   return {
     name: hostname(), at: new Date().toISOString(), local: true,
     // Nothing is queued on a laptop and nothing limits how many jobs run: the display shows no slots.
     slots: jobs.filter((j) => j.state === 'running').length, stages: STAGES,
     repos: [...new Set(jobs.map((j) => j.repo))].map((name) => ({ name })),
-    jobs, ...(closed.length ? { closed } : {}),
+    jobs, ...(prs.length ? { prs } : {}), ...(closed.length ? { closed } : {}),
   };
 }
 

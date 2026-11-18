@@ -40,14 +40,14 @@ export function listJobs(jobs: readonly (DisplayJob & { pr_state?: PrState })[],
   return { jobs: older.slice(0, JOB_LIST), more: older.length > JOB_LIST };
 }
 
-/** A row: the tag of the finished list, with a PR still open as `OPEN PR #n`. */
+/** A row: the tag of the finished list, with a PR still open as `Open #n`. */
 export type JobRow = Recent & { submitted: string };
 
 export function jobListView(p: JobListPage, local: boolean): { rows: JobRow[]; more: boolean } {
   return { more: p.more, rows: p.jobs.map((j) => {
     const { personPage: link, ...row } = recent(j, false);
     const n = j.pr && /(\d+)\/?$/.exec(j.pr)?.[1];
-    const tag = n && j.pr_state ? `${j.pr_state === 'open' ? 'OPEN PR' : j.pr_state === 'merged' ? 'MERGED' : 'CLOSED'} #${n}` : row.tag;
+    const tag = n && j.pr_state ? `${j.pr_state === 'open' ? 'Open' : j.pr_state === 'merged' ? 'Merged' : 'Closed'} #${n}` : row.tag;
     return { ...row, tag, tone: j.pr_state === 'closed' ? 'mute' : j.pr_state === 'merged' ? 'merged' : j.pr_state === 'open' ? 'open' : row.tone, submitted: j.submitted, ...(local || !link ? {} : { personPage: link }) };
   }) };
 }

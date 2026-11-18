@@ -47,9 +47,9 @@ test('a job waiting for an answer is a card with its question and the command th
   const v = view(shown(jobs), null, NOW);
   assert.deepEqual(v.needs, [{ id: 2, page: '/jobs/2', question: 'Which column?', title: 'CSV order', repo: 'app', person: 'ana', personPage: '/people/ana', waited: '15m', command: 'animus answer 2 "…"' }]);
   assert.deepEqual(v.line.map((w) => [w.id, w.tag, w.note]), [
-    [1, 'QUEUED', 'Position 1 in the queue, waiting 4m.'],
-    [3, 'QUEUED AGAIN', 'Has its answer and carries on from where it stopped. Position 2 in the queue, waiting less than a minute.'],
-    [4, 'QUEUED AGAIN', 'Helix stopped while it ran, so it carries on from where it stopped. Position 3 in the queue, waiting 1h 15m.'],
+    [1, 'Queued', 'Position 1 in the queue, waiting 4m.'],
+    [3, 'Queued again', 'Has its answer and carries on from where it stopped. Position 2 in the queue, waiting less than a minute.'],
+    [4, 'Queued again', 'Helix stopped while it ran, so it carries on from where it stopped. Position 3 in the queue, waiting 1h 15m.'],
   ]);
   assert.deepEqual([v.queued, v.asks], [3, 1]);
   assert.equal(view({ ...shown(jobs), local: true }, null, NOW).needs[0]!.command, 'animus resume 2 --answer "…"');
@@ -61,7 +61,7 @@ test('the headline is built from the counts and names the last job that finished
   const run = () => job({ state: 'running', started: ago(1) });
   const merged = job({ id: 19, state: 'ended', outcome: 'pr', pr: 'https://github.com/o/r/pull/19', ended: ago(8) });
   const d = { ...shown([ask, run(), run(), run(), merged]), closed: [{ job: 19, number: 19, merged: true, at: ago(2) }] };
-  assert.deepEqual(view(d, null, NOW).headline, { needs: '1 job needs you.', rest: '3 agents at work.', last: { when: 'Last finished 8m ago', tag: 'MERGED #19', tone: 'merged' } });
+  assert.deepEqual(view(d, null, NOW).headline, { needs: '1 job needs you.', rest: '3 agents at work.', last: { when: 'Last finished 8m ago', tag: 'Merged #19', tone: 'merged' } });
   assert.deepEqual(view(shown([run(), run()]), null, NOW).headline, { needs: '', rest: '2 agents at work.' });
   assert.deepEqual(view(shown([]), null, NOW).headline, { needs: '', rest: 'All quiet. Nothing needs you.' });
   assert.deepEqual(view(shown([ask, job({ state: 'ended', outcome: 'needs-input', question: '?' })]), null, NOW).headline, { needs: '2 jobs need you.', rest: '' });
@@ -103,13 +103,13 @@ test('finished lists the jobs that ended, newest first, with the PR\'s fate from
   closed: [{ job: 1, number: 112, merged: true, at: ago(2) }, { job: 8, number: 8, merged: false, at: ago(3) }] };
   const v = view(d, null, NOW);
   assert.deepEqual(v.finished.map((r) => [r.id, r.tag, r.tone, r.repo, r.person, r.personPage, r.meta, r.reason]), [
-    [9, 'STOPPED', 'fail', 'app', 'ana', '/people/ana', '', 'It stopped before it ended. To carry on: animus resume 9'],
-    [8, 'CLOSED #8', 'mute', 'app', 'ana', '/people/ana', '', undefined],
-    [5, 'DRY RUN', 'mute', 'app', 'ana', '/people/ana', '11m · $0.00', undefined],
-    [4, 'CANCELLED', 'mute', 'app', 'ben', '/people/ben', '45s', undefined],
-    [3, 'FAILED', 'fail', 'app', 'ana', '/people/ana', '', 'the GitHub token in the env file does not work'],
+    [9, 'Stopped', 'fail', 'app', 'ana', '/people/ana', '', 'It stopped before it ended. To carry on: animus resume 9'],
+    [8, 'Closed #8', 'mute', 'app', 'ana', '/people/ana', 'not merged', undefined],
+    [5, 'Dry run', 'mute', 'app', 'ana', '/people/ana', '11m · $0.00', undefined],
+    [4, 'Cancelled', 'mute', 'app', 'ben', '/people/ben', '45s', undefined],
+    [3, 'Failed', 'fail', 'app', 'ana', '/people/ana', '', 'the GitHub token in the env file does not work'],
     [2, 'PR #31', 'ink', 'app', 'ana', '/people/ana', '', undefined],
-    [1, 'MERGED #112', 'merged', 'app', 'ana', '/people/ana', '22m', undefined],
+    [1, 'Merged #112', 'merged', 'app', 'ana', '/people/ana', '22m · merged in 16m', undefined],
   ]);
   assert.deepEqual(v.prs.map((p) => p.id), [7]);
 });
@@ -181,4 +181,14 @@ test('the idle helix gives every rung its pose and phase in the stylesheet, not 
   const phases = [...css.matchAll(/\.sync-helix > :nth-child\((\d+)\) > \.sync-rung \{ --s: [-\d.]+; animation-delay: (-?[\d.]+)s; \}/g)].map((m) => m[2]);
   assert.equal(new Set(phases).size, 16);
   assert.doesNotMatch(app, /style="/);
+});
+
+// Protects: a running job is listed once, and a closed PR's finished row says it was not merged. Fails when: a running job also shows under Finished, or a merge time is not worked out from the job's end.
+test('a running job shows only under working now, and a finished row says how long its PR took to merge', () => {
+  const d: Display = { ...shown([
+    job({ id: 1, state: 'running', started: ago(1) }),
+    job({ id: 2, state: 'ended', outcome: 'pr', pr: 'https://github.com/o/r/pull/2', started: ago(60), ended: ago(30) }),
+  ]), closed: [{ job: 2, number: 2, merged: true, at: ago(-150) }] };
+  const v = view(d, null, NOW);
+  assert.deepEqual([v.live.map((j) => j.id), v.finished.map((j) => [j.id, j.tag, j.meta])], [[1], [[2, 'Merged #2', '30m · merged in 3h 00m']]]);
 });

@@ -70,7 +70,7 @@ export type JobPage = {
 };
 
 /** An open pull request one of Helix's jobs opened, as GitHub lists it now. */
-export type DisplayPr = { job: number; repo: string; person: string; number: number; title: string; url: string; draft: boolean; created: string };
+export type DisplayPr = { /** Helix's number, or a local job's own id. */ job: number | string; repo: string; person: string; number: number; title: string; url: string; draft: boolean; created: string };
 
 /** A PR one of Helix's jobs opened that GitHub lists as closed: merged or not, and when. */
 export type DisplayClosed = { /** Helix's number, or a local job's own id. */ job: number | string; number: number; merged: boolean; at: string };
