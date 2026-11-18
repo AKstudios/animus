@@ -8,6 +8,8 @@ clients with how to update.
 
 ## Unreleased
 
+## 0.4.6 (2026-11-18)
+
 - `/helix help` lists every Slack command, one line each, the owner's only to
   the owner; an empty or unknown `/helix` now gets the same list. The Slack
   app's manifest has a new description, a long description and `help` in the
