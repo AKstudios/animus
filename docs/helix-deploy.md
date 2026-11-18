@@ -117,7 +117,10 @@ apps to the workspace.
    [helix/deploy/slack/manifest.yaml](../helix/deploy/slack/manifest.yaml)
    on the YAML tab, then **Create**. Rename the app if you like; keep the
    `/helix` command, the scopes, the `message.im` event and Socket Mode as
-   they are, since Helix depends on each.
+   they are, since Helix depends on each. Under **Basic Information**,
+   **Display Information**, give it the same icon as the GitHub App,
+   [helix/deploy/github/logo.png](../helix/deploy/github/logo.png); a
+   manifest cannot carry one.
 2. **Install App** (or **OAuth & Permissions**), **Install to Workspace**,
    and allow it. Keep the **Bot User OAuth Token** (`xoxb-…`) it shows.
 3. **Basic Information**, **App-Level Tokens**, **Generate Token and
