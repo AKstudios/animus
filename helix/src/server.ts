@@ -65,6 +65,8 @@ export function serve(opts: {
   slack?: Pick<Transport, 'dm' | 'post'>;
   /** How a project's open PRs are listed on GitHub, with a person's token; by default GitHub's API. */
   listPrs?: ListPrs;
+  /** Lists a project's closed PRs; tests pass a fake. */
+  listClosedPrs?: ListPrs;
   /** Where joining with config.yaml's GitHub App reaches GitHub, and its pace; by default GitHub itself. */
   github?: Omit<JoinGitHub, 'clientId'>;
 }): Server {
@@ -92,7 +94,7 @@ export function serve(opts: {
       throw err;
     }
   };
-  const prs = openPrs({ store, fresh: (person) => freshToken(store, config, person, opts.github?.urls), ...(opts.listPrs ? { list: opts.listPrs } : {}) });
+  const prs = openPrs({ store, fresh: (person) => freshToken(store, config, person, opts.github?.urls), ...(opts.listPrs ? { list: opts.listPrs } : {}), ...(opts.listClosedPrs ? { listClosed: opts.listClosedPrs } : {}) });
   return createServer((req, res) => {
     const send = (status: number, value: unknown) => {
       res.writeHead(status, { 'content-type': 'application/json', 'helix-version': version });
@@ -108,7 +110,7 @@ export function serve(opts: {
         return res.end(file.body);
       }
       // What the display shows needs no token either: Helix listens on a private network only, and this only reads.
-      if (req.method === 'GET' && url.pathname === '/display') return send(200, { ...display(opts), prs: await prs() });
+      if (req.method === 'GET' && url.pathname === '/display') return send(200, { ...display(opts), prs: await prs(), closed: await prs.closed() });
       // Which release this is, for `animus doctor`; it says no more than the display does.
       if (req.method === 'GET' && url.pathname === '/version') return send(200, { version });
       // A client from a release this one cannot work with is told how to catch up, before anything is done for it.

@@ -192,11 +192,11 @@ function main(v: View): string {
     : `<div class="cards${v.live.length > MANY ? ' many' : ''}">${v.live.map((j) => card(v, j)).join('')}</div>`;
   const lists = v.local
     ? v.byProject.map((g) => section('recent', `${esc(g.project.toUpperCase())} · ${g.jobs.length}`, g.jobs.map(recent).join(''))).join('')
-    : `${section('prs', `OPEN PRS · ${v.prs.length}`, v.prs.length ? v.prs.map(openPr).join('') : '<div class="none">No pull request opened by these jobs is open.</div>')}
-    ${section('recent', `RECENT · ${v.recent.length}`, v.recent.length ? v.recent.map(recent).join('') : '<div class="none">No job has failed or been cancelled here.</div>')}`;
+    : `${v.prs.length ? section('prs', `OPEN PRS · ${v.prs.length}`, v.prs.map(openPr).join('')) : ''}
+    ${v.finished.length ? section('recent', `FINISHED · ${v.finished.length}`, v.finished.map(recent).join('')) : ''}`;
   return `<main class="main">${scope}
     ${section('live', `AGENTS WORKING NOW · ${v.live.length}`, live, true)}
-    ${section('waiting', `WAITING · ${v.waiting.length}`, v.waiting.length ? v.waiting.map(waiting).join('') : `<div class="none">${v.local ? 'No job is waiting for an answer.' : 'Nothing queued, and no job is waiting for an answer.'}</div>`)}
+    ${v.waiting.length ? section('waiting', `WAITING · ${v.waiting.length}`, v.waiting.map(waiting).join('')) : ''}
     ${lists}
   </main>`;
 }

@@ -2,29 +2,37 @@
 // GitHub call per project lists its open PRs, made with the GitHub token of a
 // person whose job opened one; the PRs are matched to the jobs' PR URLs.
 // Nothing is kept but the last answer per project, for a minute.
-import type { DisplayPr } from '../../plugin/display/shape.ts';
+import type { DisplayClosed, DisplayPr } from '../../plugin/display/shape.ts';
 import { personEnv } from './config.ts';
 import type { Store } from './store.ts';
 
 /** The part of a GitHub pull request this needs. */
-export type GithubPr = { html_url: string; number: number; title: string; draft?: boolean; created_at: string };
+export type GithubPr = { html_url: string; number: number; title: string; draft?: boolean; created_at: string; closed_at?: string | null; merged_at?: string | null };
 
 /** Lists a repository's open PRs, newest first, with a GitHub token. */
 export type ListPrs = (repoUrl: string, token: string) => Promise<GithubPr[]>;
 
+/** The closed PRs kept per project: GitHub's `per_page`, the most recently updated. */
+const CLOSED = 10;
+
 const KEPT_MS = 60_000;
 
 /** GitHub's own API; a project that is not on github.com has no open PRs here. */
-export const listOpenPrs: ListPrs = async (repoUrl, token) => {
+const github = (state: 'open' | 'closed'): ListPrs => async (repoUrl, token) => {
   const m = /github\.com[:/]([^/]+\/[^/]+?)(?:\.git)?\/?$/.exec(repoUrl);
   if (!m) return [];
-  const res = await fetch(`https://api.github.com/repos/${m[1]}/pulls?state=open&sort=created&direction=desc&per_page=100`, {
+  const res = await fetch(`https://api.github.com/repos/${m[1]}/pulls?${state === 'open' ? 'state=open&sort=created&direction=desc&per_page=100' : `state=closed&sort=updated&direction=desc&per_page=${CLOSED}`}`, {
     headers: { authorization: `Bearer ${token}`, accept: 'application/vnd.github+json', 'user-agent': 'animus-helix' },
     signal: AbortSignal.timeout(10_000),
   });
   if (!res.ok) throw new Error(`GitHub answered ${res.status}`);
   return (await res.json()) as GithubPr[];
 };
+export const listOpenPrs = github('open');
+export const listClosedPrs = github('closed');
+
+/** What reads the open PRs also reads, with `.closed()`, the latest closed ones of the same projects. */
+export type OpenPrs = { (): Promise<DisplayPr[]>; closed(): Promise<DisplayClosed[]> };
 
 /**
  * Reads the open PRs of every project, each project's from GitHub at most once
@@ -32,13 +40,30 @@ export const listOpenPrs: ListPrs = async (repoUrl, token) => {
  * minute. A PR whose person has left Helix, or has no GitHub token, is not asked
  * about and is not listed.
  */
-export function openPrs(opts: { store: Store; list?: ListPrs; now?: () => number; fresh?: (person: string) => Promise<unknown> }): () => Promise<DisplayPr[]> {
+export function openPrs(opts: { store: Store; list?: ListPrs; listClosed?: ListPrs; now?: () => number; fresh?: (person: string) => Promise<unknown> }): OpenPrs {
   const { store } = opts;
   const list = opts.list ?? listOpenPrs;
+  // A fake `list` without a fake `listClosed` must not send the closed call to GitHub itself.
+  const listClosed = opts.listClosed ?? (opts.list ? async () => [] : listClosedPrs);
   const now = opts.now ?? Date.now;
-  const kept = new Map<string, { at: number; prs: Promise<DisplayPr[]> }>();
 
-  const ask = async (name: string, url: string): Promise<DisplayPr[]> => {
+  /** Each project's last answer for a minute, one cache per kind of call. */
+  const cached = <T>(fetch: (name: string, url: string) => Promise<T[]>) => {
+    const kept = new Map<string, { at: number; got: Promise<T[]> }>();
+    return async () => {
+      const at = now();
+      const all = await Promise.all(store.projects().filter((p) => p.state === 'ready').map((p) => {
+        const known = kept.get(p.name);
+        if (known && at - known.at < KEPT_MS) return known.got;
+        const got = fetch(p.name, p.url).catch(() => []);
+        kept.set(p.name, { at, got });
+        return got;
+      }));
+      return all.flat();
+    };
+  };
+
+  const ask = async <T>(name: string, url: string, call: ListPrs, make: (pr: GithubPr, job: { id: number; person: string }) => T | undefined): Promise<T[]> => {
     // Newest job first, so the person asked is whoever opened the latest PR.
     const opened = store.inState('ended').filter((j) => j.repo === name && j.pr && (j.outcome === 'pr' || j.outcome === 'draft-pr')).reverse();
     const tokens = new Map<string, string | undefined>();
@@ -54,22 +79,15 @@ export function openPrs(opts: { store: Store; list?: ListPrs; now?: () => number
     const mine: typeof opened = [];
     for (const j of opened) if (await tokenOf(j.person)) mine.push(j);
     if (!mine.length) return [];
-    const open = await list(url, (await tokenOf(mine[0]!.person))!);
-    return open.flatMap((pr): DisplayPr[] => {
+    const got = await call(url, (await tokenOf(mine[0]!.person))!);
+    return got.flatMap((pr): T[] => {
       const job = mine.find((j) => j.pr === pr.html_url);
-      return job ? [{ job: job.id, repo: name, person: job.person, number: pr.number, title: pr.title, url: pr.html_url, draft: pr.draft === true, created: pr.created_at }] : [];
+      const made = job && make(pr, job);
+      return made ? [made] : [];
     });
   };
 
-  return async () => {
-    const at = now();
-    const all = await Promise.all(store.projects().filter((p) => p.state === 'ready').map((p) => {
-      const known = kept.get(p.name);
-      if (known && at - known.at < KEPT_MS) return known.prs;
-      const prs = ask(p.name, p.url).catch(() => []);
-      kept.set(p.name, { at, prs });
-      return prs;
-    }));
-    return all.flat();
-  };
+  const open = cached((name, url) => ask(name, url, list, (pr, job): DisplayPr => ({ job: job.id, repo: name, person: job.person, number: pr.number, title: pr.title, url: pr.html_url, draft: pr.draft === true, created: pr.created_at })));
+  const closed = cached((name, url) => ask(name, url, listClosed, (pr, job): DisplayClosed => ({ job: job.id, number: pr.number, merged: !!pr.merged_at, at: pr.merged_at ?? pr.closed_at ?? pr.created_at })));
+  return Object.assign(open, { closed });
 }

@@ -52,19 +52,39 @@ test('waiting lists the jobs that ask first, then the queue in order with each j
   assert.deepEqual([v.queued, v.asks], [3, 1]);
 });
 
-test('recent lists only the jobs that failed or were cancelled, newest first, each with what it took and why', () => {
-  const v = view(shown([
-    job({ id: 1, state: 'ended', outcome: 'pr', pr: 'https://github.com/o/r/pull/112', started: ago(40), ended: ago(18) }),
-    job({ id: 2, state: 'ended', outcome: 'draft-pr', pr: 'https://github.com/o/r/pull/31' }),
+// Protects: FINISHED lists every job that is over, tagged with what became of it. Fails when: a merged or closed PR is not told apart, a PR GitHub has not answered about is guessed, an open PR or a waiting job is listed twice, or a failure loses its reason.
+test('finished lists the jobs that ended, newest first, with the PR\'s fate from GitHub and failures with their reasons', () => {
+  const pr = (n: number) => `https://github.com/o/r/pull/${n}`;
+  const d: Display = { ...shown([
+    job({ id: 1, state: 'ended', outcome: 'pr', pr: pr(112), started: ago(40), ended: ago(18) }),
+    job({ id: 2, state: 'ended', outcome: 'draft-pr', pr: pr(31) }),
     job({ id: 3, state: 'ended', outcome: 'failed', ended: ago(5), reason: 'the GitHub token in the env file does not work' }),
     job({ id: 4, state: 'cancelled', started: ago(10), ended: ago(9.25), person: 'ben' }),
     job({ id: 5, state: 'ended', outcome: 'dry-run', started: ago(11), ended: ago(0), cost_usd: 0 }),
     job({ id: 6, state: 'ended', outcome: 'needs-input', question: '?' }),
-  ]), null, NOW);
-  assert.deepEqual(v.recent.map((r) => [r.id, r.tag, r.tone, r.repo, r.person, r.personPage, r.meta, r.reason]), [
+    job({ id: 7, state: 'ended', outcome: 'pr', pr: pr(7) }),
+    job({ id: 8, state: 'ended', outcome: 'pr', pr: pr(8) }),
+    job({ id: 9, state: 'stopped', resume: 'animus resume 9' }),
+  ]),
+  prs: [{ job: 7, repo: 'app', person: 'ana', number: 7, title: 't', url: pr(7), draft: false, created: ago(1) }],
+  closed: [{ job: 1, number: 112, merged: true, at: ago(2) }, { job: 8, number: 8, merged: false, at: ago(3) }] };
+  const v = view(d, null, NOW);
+  assert.deepEqual(v.finished.map((r) => [r.id, r.tag, r.tone, r.repo, r.person, r.personPage, r.meta, r.reason]), [
+    [9, 'STOPPED', 'fail', 'app', 'ana', '/people/ana', '', 'It stopped before it ended. To carry on: animus resume 9'],
+    [8, 'CLOSED #8', 'mute', 'app', 'ana', '/people/ana', '', undefined],
+    [5, 'DRY RUN', 'mute', 'app', 'ana', '/people/ana', '11m · $0.00', undefined],
     [4, 'CANCELLED', 'mute', 'app', 'ben', '/people/ben', '45s', undefined],
     [3, 'FAILED', 'fail', 'app', 'ana', '/people/ana', '', 'the GitHub token in the env file does not work'],
+    [2, 'PR #31', 'ink', 'app', 'ana', '/people/ana', '', undefined],
+    [1, 'MERGED #112', 'ink', 'app', 'ana', '/people/ana', '22m', undefined],
   ]);
+  assert.deepEqual(v.prs.map((p) => p.id), [7]);
+});
+
+// Protects: a section with nothing in it is not drawn. Fails when: WAITING, OPEN PRS or FINISHED keeps a heading with no rows.
+test('a section with no rows is empty for the display to leave out', () => {
+  const v = view(shown([job({ state: 'running', started: ago(1) })]), null, NOW);
+  assert.deepEqual([v.waiting.length, v.prs.length, v.finished.length], [0, 0, 0]);
 });
 
 test('each project is summed up from its own jobs, and picking one narrows every section to it', () => {
@@ -82,7 +102,7 @@ test('each project is summed up from its own jobs, and picking one narrows every
     { id: 'app', summary: '1 running · 1 queued · 1 ask', on: false, busy: true, ticks: ['ended', 'failed', 'ask', 'running', 'queued', 'queued'] },
     { id: 'site', summary: '1 queued', on: false, busy: false, ticks: ['queued'] },
   ]);
-  assert.deepEqual([all.title, all.sel, all.live.length, all.waiting.length, all.recent.length], ['All projects', undefined, 1, 3, 2]);
+  assert.deepEqual([all.title, all.sel, all.live.length, all.waiting.length, all.finished.length], ['All projects', undefined, 1, 3, 3]);
 
   const app = view(d, 'app', NOW);
   assert.deepEqual(app.sel, { id: 'app', base: 'main', gates: 'test, typecheck', prs: 1, spent: '$1.75' });

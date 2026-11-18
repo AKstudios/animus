@@ -8,6 +8,12 @@ clients with how to update.
 
 ## Unreleased
 
+- The display's RECENT is now FINISHED: the 30 newest jobs that ended or were
+  cancelled, with a delivered one tagged `MERGED #n`, `CLOSED #n` or, when
+  GitHub has not answered about it, `PR #n`. Helix asks GitHub once a minute
+  per project for its 10 latest closed PRs, and `/display` gains an optional
+  `closed` list beside `prs`. WAITING, OPEN PRS and FINISHED are not drawn when
+  empty.
 - **Breaking:** Slack's command is `/animus` and its bot is Animus, not
   `/helix` and Helix: every subcommand and `@Animus <text>` work as before, and
   `/helix` is no longer answered. Update the Slack app from

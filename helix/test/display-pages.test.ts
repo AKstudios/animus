@@ -72,8 +72,8 @@ test('every job on the overview links to its job page', () => {
     job(5, { state: 'cancelled' }),
   ] };
   const v = view(d, null, now);
-  assert.deepEqual([...v.live, ...v.waiting, ...v.recent].map((j) => [j.id, j.page]), [
-    [1, '/jobs/1'], [3, '/jobs/3'], [2, '/jobs/2'], [5, '/jobs/5'],
+  assert.deepEqual([...v.live, ...v.waiting, ...v.finished].map((j) => [j.id, j.page]), [
+    [1, '/jobs/1'], [3, '/jobs/3'], [2, '/jobs/2'], [5, '/jobs/5'], [4, '/jobs/4'],
   ]);
 });
 

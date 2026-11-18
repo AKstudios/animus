@@ -70,6 +70,9 @@ export type JobPage = {
 /** An open pull request one of Helix's jobs opened, as GitHub lists it now. */
 export type DisplayPr = { job: number; repo: string; person: string; number: number; title: string; url: string; draft: boolean; created: string };
 
+/** A PR one of Helix's jobs opened that GitHub lists as closed: merged or not, and when. */
+export type DisplayClosed = { job: number; number: number; merged: boolean; at: string };
+
 export type DisplayRepo ={ name: string; base?: string; gates?: string[] };
 
 export type Display = {
@@ -82,6 +85,8 @@ export type Display = {
   jobs: DisplayJob[];
   /** Open PRs the jobs opened, any order; left out by a source that does not ask GitHub. */
   prs?: DisplayPr[];
+  /** The latest closed PRs of those jobs, as GitHub lists them; a job not here has no answer from GitHub. */
+  closed?: DisplayClosed[];
   /** Set by the local display (`animus ui`): one person's own jobs, no sign-in and no people pages, listed by project rather than as a queue. */
   local?: true;
 };
