@@ -4,6 +4,7 @@
 // it lands as a pull request.
 import { chmodSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, join as joinPath } from 'node:path';
+import type { Lesson } from './lessons.ts';
 import { animusHome } from './log.ts';
 import { AnimusError } from './proc.ts';
 import { animusVersion } from './version.ts';
@@ -102,7 +103,11 @@ export function describeProjects(list: readonly RemoteProject[]): string {
   return rows.map((row) => row.map((cell, i) => cell.padEnd(widths[i]!)).join('  ').trimEnd()).join('\n');
 }
 
-export const leave = () => call<{ name: string; cancelled: number[]; kept?: string }>('POST', '/leave');
+/** Helix's lessons, with those a project's retro told about when one is named: its own and the factory's. */
+export const lessons = (project?: string) => call<{ lessons: Lesson[] }>('GET', project ? `/lessons?project=${encodeURIComponent(project)}` : '/lessons');
+export const decideLesson = (id: number, action: 'accept' | 'dismiss') => call<Lesson>('POST', `/lessons/${id}`, { action });
+
+export const leave =() => call<{ name: string; cancelled: number[]; kept?: string }>('POST', '/leave');
 
 /** What an invite is for: asked with its code, before any token exists. */
 export type InviteDetails = { name: string; github?: string; expires: string; repos: { name: string; url: string }[]; github_app?: boolean };

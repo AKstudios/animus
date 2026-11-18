@@ -11,7 +11,7 @@ import { CLEANUP_EVERY_MS, CLEANUP_FIRST_MS, helixCleanup } from './cleanup.ts';
 import { KEEP_DAYS } from '../../plugin/src/cleanup.ts';
 import { checkEnv, checkPerson, describeFindings, failing, githubPush, githubToken } from './check.ts';
 import { animusVersion } from '../../plugin/src/version.ts';
-import { containerLaunch, containerProblem, draftLaunch, imageName, personDirs, removeContainer } from './container.ts';
+import { containerLaunch, containerProblem, draftLaunch, imageName, personDirs, personHomes, removeContainer } from './container.ts';
 import { draftRunner } from './drafts.ts';
 import { startAdmit, submissionAdmit } from './admit.ts';
 import { freshBase } from './fresh.ts';
@@ -27,6 +27,7 @@ import { moveSlackOwner, setOwner } from './owner.ts';
 import { beforeJob, checkSignIn, freshToken, githubSetup, renewForRunningJobs } from './github-app.ts';
 import { slackEnvFile, slackOwner, slackSetup, slackWeb } from './slack-api.ts';
 import { startSlack } from './slack-socket.ts';
+import { RETRO_CHECK_MS, RETRO_FIRST_MS, weeklyRetros } from './retro.ts';
 import { slackBot, slackInvite, slackNotifier } from './slack.ts';
 import { serve } from './server.ts';
 import { openStore, type Store } from './store.ts';
@@ -242,9 +243,18 @@ function main(argv: string[]): number | undefined | Promise<number> {
       };
       const first = setTimeout(clean, CLEANUP_FIRST_MS);
       const daily = setInterval(clean, CLEANUP_EVERY_MS);
+      // Each project's retro, once a week, as an animus process; the lessons go to Helix's own Animus home and Slack says so.
+      let retroing = false;
+      const retro = () => {
+        if (retroing) return;
+        retroing = true;
+        weeklyRetros({ store, say, ...(config.container ? { homes: () => personHomes(home) } : {}), ...(slack ? { slack } : {}) }).catch((err: unknown) => say(`retro: ${(err as Error).message}`)).finally(() => { retroing = false; });
+      };
+      const firstRetro = setTimeout(retro, RETRO_FIRST_MS);
+      const retros = setInterval(retro, RETRO_CHECK_MS);
       // Free memory and load change without a job ending: look at the queue again.
       const recheck = setInterval(() => supervisor.wake(), 30 * 1000);
-      const stop = () => { clearInterval(recheck); clearTimeout(first); clearInterval(daily); unwatchFile(configFile()); slack?.close(); supervisor.stop(); server.close(); store.close(); rmSync(pidFile(), { force: true }); process.exit(0); };
+      const stop = () => { clearInterval(recheck); clearTimeout(first); clearInterval(daily); clearTimeout(firstRetro); clearInterval(retros); unwatchFile(configFile()); slack?.close(); supervisor.stop(); server.close(); store.close(); rmSync(pidFile(), { force: true }); process.exit(0); };
       process.on('SIGINT', stop);
       process.on('SIGTERM', stop);
       return undefined;

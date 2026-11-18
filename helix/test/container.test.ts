@@ -1,9 +1,10 @@
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
-import { existsSync, mkdtempSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
+import { addProposals, lessonsFile, readLessons } from '../../plugin/src/lessons.ts';
 import { saveProgress } from '../../plugin/src/log.ts';
 import { containerLaunch, dockerArgs, draftLaunch, originOf, personDirs } from '../src/container.ts';
 import { openStore } from '../src/store.ts';
@@ -19,7 +20,7 @@ function repoWithOrigin(url: string): string {
 
 const job = (over: Partial<HelixJob> = {}): HelixJob => ({ id: 7, state: 'queued', person: 'ana', repo: 'app', spec: '/h/jobs/7/spec.md', title: 't', draft: false, submitted: '', ...over });
 
-test('a job\'s container gets its person\'s folders at the same paths, Animus read-only, credentials by name only, limits, and no socket or port', () => {
+test('a job\'s container gets its person\'s folders at the same paths, Animus read-only, credentials by name only, limits, and no socket or port', () => inHelixHome(() => {
   const home = mkdtempSync(join(tmpdir(), 'helix-'));
   const launch = containerLaunch({ home, animusRoot: '/srv/animus', image: 'animus-job:0.3.0', limits: { memory: '4g', cpus: 3 }, uid: 1001, gid: 1001 });
   const mirror = repoWithOrigin('https://github.com/o/app.git');
@@ -44,7 +45,7 @@ test('a job\'s container gets its person\'s folders at the same paths, Animus re
 
   const resumed = launch(job({ animus_job: 'app-1', answer: 'yes' }), mirror, {});
   assert.deepEqual(resumed.args.slice(-4), ['resume', 'app-1', '--answer', 'yes']);
-});
+}));
 
 // Protects: a token renewed during a contained job reaching it. Fails when: the person's live token folder is not mounted, is writable, or is the file itself (a rename that replaces it would not show through), or a job without one gets a mount anyway.
 test('a job signed in with the GitHub App gets its person\'s live token folder read-only, and no other job does', () => {
@@ -108,3 +109,74 @@ test('cancelling a person\'s jobs ends their containers, and a contained job\'s 
   supervisor.stop();
   store.close();
 });
+
+const lesson = { text: 'Close the servers your tests start.', scope: 'project' as const, project: 'app', agent: 'implementer' as const, cites: ['a', 'b'] };
+
+/** Runs `fn` with Helix's own Animus home set to a new folder. */
+async function inHelixHome(fn: (animusHome: string) => unknown): Promise<void> {
+  const before = process.env.ANIMUS_HOME;
+  process.env.ANIMUS_HOME = mkdtempSync(join(tmpdir(), 'helix-animus-'));
+  try { await fn(process.env.ANIMUS_HOME); } finally { if (before === undefined) delete process.env.ANIMUS_HOME; else process.env.ANIMUS_HOME = before; }
+}
+
+// Protects: criterion 3 on a Helix with containers. Fails when: a container job is not given Helix's lessons.json read-only, or is pointed at a file that is not there (Docker would make a folder of it).
+test('a job\'s container gets Helix\'s lessons.json read-only, once there is one', () => inHelixHome(() => {
+  const home = mkdtempSync(join(tmpdir(), 'helix-'));
+  const launch = containerLaunch({ home, animusRoot: '/srv/animus', image: 'animus-job:0.3.0', limits: {}, uid: 1001, gid: 1001 });
+  const mirror = repoWithOrigin('https://github.com/o/app.git');
+
+  const without = launch(job(), mirror, {});
+  addProposals([lesson], Date.now());
+  const withLessons = launch(job(), mirror, {});
+
+  assert.ok(!without.args.join(' ').includes('lessons.json') && !('ANIMUS_LESSONS_FILE' in (without.env ?? {})));
+  assert.equal(withLessons.env?.ANIMUS_LESSONS_FILE, lessonsFile());
+  assert.ok(withLessons.args.join(' ').includes(`-v ${lessonsFile()}:${lessonsFile()}:ro`));
+  assert.ok(withLessons.args.join(' ').includes('-e ANIMUS_LESSONS_FILE'));
+}));
+
+// Protects: criterion 3's use count on a Helix with containers. Fails when: a container job's lessons are never counted (it cannot write the read-only file), or a job that wrote no run line counts an earlier run's.
+test('Helix counts a use for each lesson on the run line a contained job wrote in its person\'s home', async () => inHelixHome(async () => {
+  const home = mkdtempSync(join(tmpdir(), 'helix-'));
+  const ana = personDirs(home, 'ana').animus;
+  mkdirSync(ana, { recursive: true });
+  const [first] = addProposals([lesson, { ...lesson, text: 'Name the check.' }], Date.now());
+  const writes = (lessons: number[]) => `require('fs').appendFileSync(${JSON.stringify(join(ana, 'runs.jsonl'))}, JSON.stringify({ job: 'app-1', ended: new Date().toISOString(), lessons: ${JSON.stringify(lessons)} }) + '\\n');`;
+  let script = writes([first!.id]);
+  const store = openStore(join(home, 'helix.db'));
+  store.putPerson('ana', { token_sha256: 'x' });
+  mkdirSync(join(home, 'repo'));
+  store.putProject({ name: 'app', url: 'https://github.com/o/app.git', dir: join(home, 'repo'), state: 'ready', added: '' });
+  const supervisor = supervise({ store, config: { host: '', port: 0, slots: 1 }, home, animusHomeOf: (p) => personDirs(home, p).animus, launch: () => ({ command: process.execPath, args: ['-e', `console.error('job app-1: x'); ${script} console.log('{"outcome":"pr"}')`] }) });
+  const ended = async (id: number) => { for (let i = 0; i < 500 && store.get(id)!.state !== 'ended'; i++) await new Promise((r) => { setTimeout(r, 20); }); };
+
+  const one = store.add({ state: 'queued', person: 'ana', repo: 'app', spec: '', title: 't', draft: false, submitted: '' });
+  supervisor.wake();
+  await ended(one.id);
+  assert.deepEqual(readLessons().map((l) => l.uses), [1, 0]);
+
+  // The next run writes no line: the earlier one is not counted again.
+  script = '';
+  const two = store.add({ state: 'queued', person: 'ana', repo: 'app', spec: '', title: 't', draft: false, submitted: '' });
+  supervisor.wake();
+  await ended(two.id);
+  assert.deepEqual(readLessons().map((l) => l.uses), [1, 0]);
+
+  // A job may write anything to its person's home: a run line that is not a run, or a broken lessons file, must not stop Helix.
+  script = `require('fs').appendFileSync(${JSON.stringify(join(ana, 'runs.jsonl'))}, 'null\\n');`;
+  const three = store.add({ state: 'queued', person: 'ana', repo: 'app', spec: '', title: 't', draft: false, submitted: '' });
+  supervisor.wake();
+  await ended(three.id);
+  script = writes([first!.id]);
+  writeFileSync(lessonsFile(), '{ not json');
+  const four = store.add({ state: 'queued', person: 'ana', repo: 'app', spec: '', title: 't', draft: false, submitted: '' });
+  supervisor.wake();
+  await ended(four.id);
+  script = '';
+  const five = store.add({ state: 'queued', person: 'ana', repo: 'app', spec: '', title: 't', draft: false, submitted: '' });
+  supervisor.wake();
+  await ended(five.id);
+  assert.equal(store.get(five.id)!.state, 'ended');
+  supervisor.stop();
+  store.close();
+}));

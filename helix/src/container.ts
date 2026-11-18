@@ -7,8 +7,9 @@
 // there: no other person's credentials file, no Docker socket, no published
 // port. The container is removed when the job ends.
 import { spawnSync } from 'node:child_process';
-import { mkdirSync } from 'node:fs';
+import { existsSync, mkdirSync, readdirSync } from 'node:fs';
 import { basename, dirname, join } from 'node:path';
+import { GIVEN_FILE, lessonsFile } from '../../plugin/src/lessons.ts';
 import { AnimusError } from '../../plugin/src/proc.ts';
 import type { Config } from './config.ts';
 import type { HelixJob } from './store.ts';
@@ -22,7 +23,10 @@ export function personDirs(home: string, person: string) {
   return { root, animus: join(root, 'animus'), claude: join(root, 'claude'), repos: join(root, 'repos') };
 }
 
-export const containerName = (id: number) => `helix-job-${id}`;
+/** The Animus home of everyone who has had a folder here, those who left included: where their jobs wrote their records. */
+export const personHomes = (home: string): string[] => existsSync(join(home, 'people')) ? readdirSync(join(home, 'people')).map((p) => personDirs(home, p).animus) : [];
+
+export const containerName =(id: number) => `helix-job-${id}`;
 export const imageName = (version: string) => `animus-job:${version}`;
 
 export type Mount = { path: string; readOnly?: boolean };
@@ -59,10 +63,12 @@ export function dockerArgs(opts: {
   animusRoot: string; person: ReturnType<typeof personDirs>; specDir: string; envNames: string[]; command: string[];
   /** The person's live token folder (github-app.ts liveTokenDir), read-only, when they signed in with the GitHub App. */
   tokens?: string;
+  /** Helix's lessons.json, read-only: the lessons the job's agents are given (lessons.ts GIVEN_FILE). */
+  lessons?: string;
 }): string[] {
   return runArgs({
     name: containerName(opts.job.id), image: opts.image, limits: opts.limits, uid: opts.uid, gid: opts.gid,
-    mounts: [{ path: opts.animusRoot, readOnly: true }, { path: opts.person.root }, { path: opts.specDir, readOnly: true }, ...(opts.tokens ? [{ path: opts.tokens, readOnly: true }] : [])],
+    mounts: [{ path: opts.animusRoot, readOnly: true }, { path: opts.person.root }, { path: opts.specDir, readOnly: true }, ...(opts.tokens ? [{ path: opts.tokens, readOnly: true }] : []), ...(opts.lessons ? [{ path: opts.lessons, readOnly: true }] : [])],
     envNames: opts.envNames, workdir: opts.person.root, command: opts.command,
   });
 }
@@ -143,14 +149,16 @@ export function containerLaunch(opts: { home: string; animusRoot: string; image:
     const person = personDirs(opts.home, job.person);
     makePersonDirs(person);
     const clone = join(person.repos, job.repo);
-    const extra = { ANIMUS_HOME: person.animus, CLAUDE_CONFIG_DIR: person.claude };
+    // Only when there are lessons: Docker would make a folder of a file that is not there.
+    const lessons = existsSync(lessonsFile()) ? lessonsFile() : undefined;
+    const extra = { ANIMUS_HOME: person.animus, CLAUDE_CONFIG_DIR: person.claude, ...(lessons ? { [GIVEN_FILE]: lessons } : {}) };
     const command = jobCommand({
       node: 'node', cli: join(opts.animusRoot, 'plugin', 'src', 'cli.ts'), fresh: join(opts.animusRoot, 'helix', 'src', 'cli.ts'), clone,
       origin: job.animus_job ? '' : originOf(repoDir), animus: animusArgs(job, clone),
     });
     const envNames = [...new Set([...Object.keys(env), ...Object.keys(extra)])].sort();
     const tokens = env.ANIMUS_GH_TOKEN_FILE ? dirname(env.ANIMUS_GH_TOKEN_FILE) : undefined;
-    const args = dockerArgs({ job, image: opts.image, limits: opts.limits, uid: opts.uid, gid: opts.gid, animusRoot: opts.animusRoot, person, specDir: dirname(job.spec), envNames, command, ...(tokens ? { tokens } : {}) });
+    const args = dockerArgs({ job, image: opts.image, limits: opts.limits, uid: opts.uid, gid: opts.gid, animusRoot: opts.animusRoot, person, specDir: dirname(job.spec), envNames, command, ...(tokens ? { tokens } : {}), ...(lessons ? { lessons } : {}) });
     return { command: 'docker', args, env: extra, cwd: opts.home };
   };
 }

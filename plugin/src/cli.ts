@@ -19,6 +19,8 @@ import { jobOf, onPath, runJob, uiJobOf } from './pipeline.ts';
 import { describeNumbers, numbers, refreshOutcomes } from './outcomes.ts';
 import { prFacts, publish, pushEvidence } from './pr.ts';
 import { personalFor, readSkillsFile, skillsForRole, snapshotSkills, whereToRun, type PersonalSkill, type Where } from './personal.ts';
+import { accept, describeLessons, dismiss, readLessons } from './lessons.ts';
+import { runRetro } from './retro.ts';
 import { listenLocal, localServer } from './local-display.ts';
 import { loadProfile, PROFILE_PATH } from './profile.ts';
 import { describePlan, loadFactory, resolvePlan } from './profiles.ts';
@@ -78,6 +80,20 @@ const USAGE = `animus: a spec goes in, a pull request with proof comes out
         What became of each pull request, read from GitHub (merged or closed,
         time to merge, human commits, reverted or reworked within 30 days),
         and the five numbers split by task class.
+  animus retro [--project <name>] [--days <n>]
+        A standard-tier session, read-only, over the project's runs of the last
+        --days days (default 7; the current repo's project unless named): it
+        proposes at most 5 lessons, each one sentence for one agent
+        (implementer, planner, reviewer or spec), citing at least two jobs, or
+        one whose pull request was reverted or reworked. The script drops the
+        rest. Nothing is kept until you accept it.
+  animus lessons [accept <id> | dismiss <id>]
+        The proposed, kept and expired lessons with their ids, citations, uses
+        and days left (a kept lesson expires 60 days after it was accepted or
+        a retro saw it again). accept keeps a proposed or expired lesson;
+        dismiss drops it, and the retro is told not to propose it again.
+        For a checkout of a project on Helix these go to Helix, which runs
+        its own retro each week; --local or --helix decides.
   animus cleanup [<job>...] [--days <n>] [--dry-run]
         Remove what finished jobs left: the worktree of a job whose pull
         request merged or closed, and its branches (here and on origin) once
@@ -209,7 +225,7 @@ async function main(argv: string[]): Promise<number> {
   const { values, positionals } = parseArgs({
     args: rest, allowPositionals: true,
     options: {
-      repo: { type: 'string' }, 'dry-run': { type: 'boolean' }, keep: { type: 'boolean' }, draft: { type: 'boolean' }, answer: { type: 'string' },
+      repo: { type: 'string' }, project: { type: 'string' }, 'dry-run': { type: 'boolean' }, keep: { type: 'boolean' }, draft: { type: 'boolean' }, answer: { type: 'string' },
       json: { type: 'boolean' }, skills: { type: 'string' }, local: { type: 'boolean' }, helix: { type: 'boolean' }, n: { type: 'string', short: 'n' }, again: { type: 'boolean' }, days: { type: 'string' }, force: { type: 'boolean' }, slices: { type: 'boolean' }, yes: { type: 'boolean' }, github: { type: 'string' }, slack: { type: 'string' }, all: { type: 'boolean' },
     },
   });
@@ -401,6 +417,42 @@ async function main(argv: string[]): Promise<number> {
       const outcomes = refreshOutcomes(onPath('gh') ? prFacts : () => undefined);
       const rows = numbers(readRuns(), outcomes);
       console.log(values.json ? JSON.stringify({ numbers: rows, pull_requests: Object.values(outcomes) }, null, 2) : describeNumbers(rows));
+      return 0;
+    }
+    case 'retro': {
+      const days = values.days === undefined ? 7 : Number(values.days);
+      if (!Number.isFinite(days) || days <= 0) throw new AnimusError(`--days takes a number of days, not ${values.days}`);
+      const project = values.project ?? basename(mainCheckout(cwd));
+      const { proposed, seen, result } = runRetro({ ...deps(), project, days });
+      if (values.json) { console.log(JSON.stringify({ project, proposed: proposed.length, seen: seen.length, cost_usd: result.cost_usd })); return 0; }
+      console.log(`${proposed.length} lesson${proposed.length === 1 ? '' : 's'} proposed for ${project}${seen.length ? `, ${seen.length} kept seen again` : ''} ($${result.cost_usd.toFixed(2)})${proposed.length ? ': animus lessons' : ''}`);
+      return 0;
+    }
+    case 'lessons': {
+      const [word, id] = positionals;
+      const sub = word === 'accept' || word === 'dismiss' ? word : undefined;
+      if (word && !sub) throw new AnimusError('usage: animus lessons [accept <id> | dismiss <id>]');
+      if (sub && !/^\d+$/.test(id ?? '')) throw new AnimusError(`usage: animus lessons ${sub} <id>`);
+      if (values.local && values.helix) throw new AnimusError('--local or --helix, not both');
+      // As `animus start` decides: on Helix when this checkout's project is there, else on this machine. Outside a checkout, here.
+      const asked: Where | undefined = values.local ? 'local' : values.helix ? 'helix' : undefined;
+      const inCheckout = tryGit(cwd, ['rev-parse', '--git-dir']) !== undefined;
+      const mine = inCheckout ? personalFor(cwd) : undefined;
+      let unanswered = false;
+      const choice: { where: Where; why: string; project?: string } = asked || inCheckout
+        ? await whereToRun({ ...(asked ? { asked } : {}), ...(mine?.run ? { config: mine.run } : {}), checkout: cwd, projects: () => helix.projects().catch((err: unknown) => { unanswered = true; throw err; }) })
+        : { where: 'local', why: 'this is not a checkout of a repository' };
+      const remote = choice.where === 'helix';
+      const where = remote ? 'on Helix' : 'on this machine';
+      say(`lessons ${where}: ${choice.why}`);
+      if (sub) {
+        // Ids are numbered in each Animus home: a lesson kept here for lack of an answer from Helix could be another one.
+        if (unanswered) throw new AnimusError(`${choice.why}, so lesson ${id} was not ${sub === 'accept' ? 'kept' : 'dismissed'} here: try again when Helix answers, or use --local for this machine's own lessons`);
+        const l = remote ? await helix.decideLesson(Number(id), sub) : sub === 'accept' ? accept(Number(id), Date.now()) : dismiss(Number(id));
+        console.log(`lesson ${l.id} is ${sub === 'accept' ? 'kept' : 'dismissed'} ${where}`);
+        return 0;
+      }
+      console.log(describeLessons(remote ? (await helix.lessons(choice.project)).lessons : readLessons(), Date.now()));
       return 0;
     }
     case 'cleanup': {

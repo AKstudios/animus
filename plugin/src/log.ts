@@ -87,6 +87,8 @@ export type Run = {
   /** The commit of Animus's prompts, profiles and scripts that ran the job. */
   factory_version: string;
   skills: string[];
+  /** Ids of the kept lessons (lessons.ts) the job's agents were given. */
+  lessons?: number[];
   started: string;
   ended: string;
   /** Wall time per stage, in ms. queue is 0 in local mode; plan is the planner's sessions. */
@@ -178,8 +180,9 @@ export function saveState(state: JobState): void {
   writeJson(join(jobDir(state.job), 'state.json'), state);
 }
 
-export function loadState(job: string): JobState | undefined {
-  const file = join(jobDir(job), 'state.json');
+/** A job's state; home is the Animus home it ran under, when not this process's (a Helix person's). */
+export function loadState(job: string, home = animusHome()): JobState | undefined {
+  const file = join(home, 'jobs', job, 'state.json');
   return existsSync(file) ? (JSON.parse(readFileSync(file, 'utf8')) as JobState) : undefined;
 }
 
@@ -206,7 +209,8 @@ export function appendRun(run: Run): void {
 export function readRuns(file = runLog()): Run[] {
   if (!existsSync(file)) return [];
   return readFileSync(file, 'utf8').split('\n').filter(Boolean).flatMap((line) => {
-    try { return [JSON.parse(line) as Run]; } catch { return []; }
+    // Only objects: a line that is JSON but not a run (`null`, a number) is skipped like one that is not JSON.
+    try { const r: unknown = JSON.parse(line); return r && typeof r === 'object' && !Array.isArray(r) ? [r as Run] : []; } catch { return []; }
   });
 }
 
