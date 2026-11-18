@@ -8,6 +8,8 @@ clients with how to update.
 
 ## Unreleased
 
+## 0.4.5 (2026-11-18)
+
 - `after:` finds the earlier spec's pull request on GitHub, by the spec's
   title, when this machine's run log has no job for it, so a spec waiting on
   one that ran on Helix or another laptop starts once that PR is merged.
