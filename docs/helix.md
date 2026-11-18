@@ -38,6 +38,10 @@ Helix checks again every 30 seconds and when a job ends. With nothing running
 the first queued job starts whatever the machine reports. A held job says why
 (`waiting for memory: 3.1 GB free, needs 6 GB plus 2 GB kept free`, `waiting
 for the deep tier: 1 of 1 running`) in `animus status <id>` and on the display.
+Helix's answers to a job's submit and status carry `links`: its job page at
+`url` (Tailscale) and `lan_url` (office network), whichever are set, built as
+Slack's posts build them and never with a token. `animus submit` and
+`animus status <id>` print them under `watch it:`.
 A wrong value is refused with its key named. A `config.yaml` from
 before 0.3.3 that names `people` and `repos` has them moved into `helix.db`
 the first time a `helix` command runs.

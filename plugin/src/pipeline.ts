@@ -143,6 +143,8 @@ export async function runJob(opts: RunOptions, deps: Deps): Promise<Run> {
   if (source) run.spec_file = source;
 
   log(`job ${job}: ${spec.title}`);
+  // On Helix the person watches at Helix's own links.
+  if (opts.trigger !== 'helix' && process.env.ANIMUS_TRIGGER !== 'helix') log(`watch it: animus ui, then open /jobs/${job}`);
   log(describePlan(factory, plan));
   if (personal.length) log(`the submitter's skills: ${personal.map((p) => `${p.name} (${p.roles.join(', ')}${p.types ? `; ${p.types.join(', ')} jobs` : ''})`).join(', ')}`);
   // A spec that builds on another waits for it, then starts from a base that holds it.

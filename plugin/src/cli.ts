@@ -168,7 +168,7 @@ async function submitSpec(file: string, checkout: string, draft: boolean, known?
   const skills = snapshotSkills(personalFor(root).skills);
   const j = await helix.submit({ repo, spec: readFileSync(file, 'utf8'), name: basename(file), ...(draft ? { draft: true } : {}), ...(skills.length ? { skills: skills.map(({ sha: _sha, ...s }) => s) } : {}) });
   if (skills.length && !j.skills) say(`this Helix predates personal skills: the job runs without ${skills.map((s) => s.name).join(', ')}`);
-  console.log(`job ${j.id} is ${j.state} on Helix: ${j.title}${j.skills?.length ? `\nwith your skills: ${j.skills.join(', ')}` : ''}\nfollow it with: animus status ${j.id}`);
+  console.log(`job ${j.id} is ${j.state} on Helix: ${j.title}${j.skills?.length ? `\nwith your skills: ${j.skills.join(', ')}` : ''}\nfollow it with: animus status ${j.id}${helix.describeLinks(j).map((l) => `\n${l}`).join('')}`);
   return j;
 }
 

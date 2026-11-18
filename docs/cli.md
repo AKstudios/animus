@@ -27,6 +27,12 @@ Here, it is `animus run` and waits for the job to end. On Helix, it is
 `animus submit` and returns at once. `/animus:to-spec` starts jobs with
 this command.
 
+Either way it says where to watch the job. On this machine, right after the
+job's line: `watch it: animus ui, then open /jobs/<job>` (the display picks
+its port when it starts, so only the path is named). On Helix, its job page
+at each address Helix has set, labelled Tailscale and office network, never
+with a token.
+
 #### `animus run <spec.md> [--repo <dir>] [--dry-run] [--draft] [--keep] [--skills <file>]`
 
 Runs one job on this machine, from spec to PR: a worktree, the planner for a
@@ -195,11 +201,13 @@ of its jobs is queued or running. The clones Helix and people's jobs made of it 
 
 Queues a spec on Helix for the project with this checkout's GitHub address
 (or, failing that, the one named after its folder), with your personal
-skills. Returns the job's number at once.
+skills. Returns the job's number at once, with the `watch it:` lines: the
+job's page on Tailscale and on the office network, each when Helix has it set.
 
 #### `animus status [<id>] [--all]`
 
-With no id, your jobs on Helix. With one, that job and the end of its log.
+With no id, your jobs on Helix. With one, that job, the same `watch it:`
+links, and the end of its log.
 `--all` lists every person's jobs, with whose each is; only the owner may
 use it.
 
