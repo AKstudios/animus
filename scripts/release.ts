@@ -16,8 +16,8 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parseArgs } from 'node:util';
 import { deploy } from './deploy.ts';
-import { collect, cut, type Pull } from './release-notes.ts';
-import { atLeast, compatible, parseVersion } from '../plugin/src/version.ts';
+import { breakingRefusal, collect, cut, type Pull } from './release-notes.ts';
+import { atLeast, parseVersion } from '../plugin/src/version.ts';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const MANIFEST = join(ROOT, 'plugin', '.claude-plugin', 'plugin.json');
@@ -45,9 +45,6 @@ const version = args.positionals[0];
 if (!version || args.positionals.length > 1 || !/^\d+\.\d+\.\d+$/.test(version)) die(USAGE);
 const current = (JSON.parse(readFileSync(MANIFEST, 'utf8')) as { version: string }).version;
 if (!parseVersion(current) || atLeast(current, version)) die(`${version} is not after the current ${current}`);
-if (!compatible(current, version) && !flags.breaking) {
-  die(`${version} cannot work with ${current} clients: Helix will refuse every animus not yet updated. Pass --breaking if that is meant, and upgrade Helix and tell the team together`);
-}
 
 if (git('rev-parse', '--abbrev-ref', 'HEAD') !== 'main') die('releases are cut from main');
 if (git('status', '--porcelain')) die('the checkout has uncommitted changes');
@@ -60,13 +57,11 @@ const gh = (number: number): Pull => {
   return JSON.parse(r.stdout) as Pull;
 };
 const notes = collect({ git, pull: (n) => ({ ...gh(n), number: n }) });
-if (notes.breaking.length && !flags.breaking) {
-  die(`these pull requests break something: ${notes.breaking.map((b) => `#${b.pull.number} ${b.pull.title}`).join('; ')}. Pass --breaking if the release is meant to, and upgrade Helix and tell the team together`);
-}
+const refusal = breakingRefusal(notes, current, version, flags.breaking);
+if (refusal) die(refusal);
 const log = readFileSync(CHANGELOG, 'utf8');
 const date = new Date().toISOString().slice(0, 10);
-const next = cut(log, notes, version, date);
-if (!/^- /m.test(next.slice(next.indexOf(`## ${version}`)).split(/^## (?!\d)/m)[0]!)) die('nothing was merged since the last release');
+const next = (() => { try { return cut(log, notes, version, date); } catch (err) { return die((err as Error).message); } })();
 
 run('npm', ['test']);
 run('npm', ['run', 'typecheck']);

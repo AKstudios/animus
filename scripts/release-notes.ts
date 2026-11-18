@@ -1,3 +1,5 @@
+import { compatible } from '../plugin/src/version.ts';
+
 // The release's section of CHANGELOG.md, made from the pull requests merged
 // since the last release tag. The git and GitHub calls are passed in, so
 // tests use a fake.
@@ -48,5 +50,20 @@ export function render(notes: Notes, handWritten: string): string {
 export function cut(changelog: string, notes: Notes, version: string, date: string): string {
   const m = /^## Unreleased\n([\s\S]*?)(?=^## |(?![\s\S]))/m.exec(changelog);
   if (!m) throw new Error('CHANGELOG.md has no "## Unreleased" heading');
-  return changelog.replace(m[0], `## Unreleased\n\n## ${version} (${date})\n\n${render(notes, m[1]!)}\n\n`);
+  const lines = render(notes, m[1]!);
+  if (!lines) throw new Error('nothing was merged since the last release, and nothing is written under "## Unreleased"');
+  // A replacer function, so a `$&` or `$$` in a title is not read as a replacement pattern.
+  return changelog.replace(m[0], () => `## Unreleased\n\n## ${version} (${date})\n\n${lines}\n\n`);
+}
+
+/** Why the release must not be cut without --breaking, or undefined when it may be. */
+export function breakingRefusal(notes: Notes, current: string, version: string, breaking: boolean | undefined): string | undefined {
+  if (breaking) return undefined;
+  if (!compatible(current, version)) {
+    return `${version} cannot work with ${current} clients: Helix will refuse every animus not yet updated. Pass --breaking if that is meant, and upgrade Helix and tell the team together`;
+  }
+  if (notes.breaking.length) {
+    return `these pull requests break something: ${notes.breaking.map((b) => `#${b.pull.number} ${b.pull.title}`).join('; ')}. Pass --breaking if the release is meant to, and upgrade Helix and tell the team together`;
+  }
+  return undefined;
 }

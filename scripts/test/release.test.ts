@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { breakingOf, collect, cut, type Pull } from '../release-notes.ts';
+import { breakingOf, breakingRefusal, collect, cut, type Pull } from '../release-notes.ts';
 
 const pulls: Record<number, Pull> = {
   1: { number: 1, title: 'Add a thing', body: 'Details.\n\n## Review here\n\nNothing.', url: 'https://x/pull/1' },
@@ -54,4 +54,24 @@ test('counts every commit when there is no release tag yet', () => {
 
 test('breakingOf ignores an empty section', () => {
   assert.equal(breakingOf('## Breaking\n\n## Review here\n'), undefined);
+});
+
+// Protects: criterion 3. Fails when: a `$` in a title is expanded as a replacement pattern, or an empty release is cut because older releases have bullets.
+test('inserts titles literally, and refuses a release with nothing in it', () => {
+  const changelog = '## Unreleased\n\n## 0.1.0 (2026-01-01)\n\n- Old.\n';
+  const dollar = { git: () => 'Merge pull request #3 from a/d', pull: () => ({ number: 3, title: "Price in $$ and $' and $&", body: '', url: 'u' }) };
+
+  assert.match(cut(changelog, collect(dollar), '0.2.0', 'd'), /^- Price in \$\$ and \$' and \$& \(\[#3\]\(u\)\)$/m);
+  assert.throws(() => cut(changelog, { breaking: [], changes: [], direct: [] }, '0.2.0', 'd'), /nothing was merged/);
+});
+
+// Protects: criterion 4. Fails when: a breaking pull request, or an incompatible version, is released without --breaking.
+test('refuses without --breaking, naming the pull requests', () => {
+  const notes = collect(fake(LOG));
+  const none = collect(fake('Merge pull request #1 from a/b'));
+
+  assert.match(breakingRefusal(notes, '0.1.0', '0.1.1', false)!, /#2 Rename a field/);
+  assert.match(breakingRefusal(none, '0.1.0', '0.2.0', false)!, /cannot work with 0\.1\.0/);
+  assert.equal(breakingRefusal(notes, '0.1.0', '0.2.0', true), undefined);
+  assert.equal(breakingRefusal(none, '0.1.0', '0.1.1', false), undefined);
 });
