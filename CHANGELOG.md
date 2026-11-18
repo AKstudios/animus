@@ -8,6 +8,11 @@ clients with how to update.
 
 ## Unreleased
 
+- Each agent session leaves its tool calls in `tools.jsonl` in the job's
+  folder, read by the script from the session's transcript when it ends, and
+  the run log's agent entries gain `tools: { calls, errors, by_tool }`.
+  `animus tools <job>` (and `--json`) shows the sessions and every call.
+
 - **Breaking:** a spec's header is held to its keys. A key other than `title`,
   `size`, `difficulty`, `type`, `base`, `ui`, `after` and `design` (or, under
   `ui`, other than `target` and `pages`) is refused with "did you mean", where

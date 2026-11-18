@@ -6,14 +6,14 @@
 // function behind a queue.
 import { spawnSync } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
-import { copyFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { appendFileSync, copyFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { userInfo } from 'node:os';
 import { basename, join, resolve } from 'node:path';
 import { resolveAfter, waitForMerged } from './after.ts';
 import type { Agent, AgentResult } from './agent.ts';
 import { describe, failsOnBase, gateReport, jobChecks, LATER_SLICE, runChecks, type CheckResult } from './gates.ts';
 import { commitAll, mainCheckout, matchesAny, touchedFiles } from './git.ts';
-import { appendRun, jobDir, saveProgress, saveState, writeJson, type JobState, type Outcome, type Run, type Stage } from './log.ts';
+import { appendRun, jobDir, toolsLog, saveProgress, saveState, writeJson, type JobState, type Outcome, type Run, type Stage } from './log.ts';
 import { evidenceBranch, findPrByTitle, prBody, prState, type PrFind, type Evidence, type PrLookup, type Publish } from './pr.ts';
 import { admitFile, profileOnBase, refusal, type Admitted } from './admit.ts';
 import { loadProfile } from './profile.ts';
@@ -215,10 +215,17 @@ export async function runJob(opts: RunOptions, deps: Deps): Promise<Run> {
   let inSlice = '';
 
   const record = (stage: string, role: string, tier: Tier, effort: string, r: AgentResult) => {
+    const by_tool: Record<string, number> = {};
+    for (const t of r.tools ?? []) by_tool[t.tool] = (by_tool[t.tool] ?? 0) + 1;
     run.agents.push({
       stage, role, tier, effort, model: r.model, ok: r.ok, status: r.status, cost_usd: r.cost_usd, turns: r.turns, tokens: r.tokens, ms: r.ms,
       ...(r.session ? { session: r.session } : {}), ...(r.transcript ? { transcript: r.transcript } : {}), ...(r.context !== undefined ? { context: r.context } : {}),
+      ...(r.tools ? { tools: { calls: r.tools.length, errors: r.tools.filter((t) => !t.ok).length, by_tool } } : {}),
     });
+    if (r.tools?.length) {
+      mkdirSync(dir, { recursive: true });
+      appendFileSync(toolsLog(job), r.tools.map((t) => `${JSON.stringify({ ...t, stage, role, ...(r.session ? { session: r.session } : {}) })}\n`).join(''));
+    }
     if (r.context !== undefined) log(`  ${stage}: ${k(r.context)} tokens of context at the end${budget ? `, budget ${k(budget)}` : ''}`);
     run.cost_usd = Math.round((run.cost_usd + r.cost_usd) * 10_000) / 10_000;
     run.turns += r.turns;

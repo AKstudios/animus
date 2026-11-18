@@ -5,7 +5,7 @@
 import { appendFileSync, existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { homedir, hostname } from 'node:os';
 import { join } from 'node:path';
-import type { Tokens } from './agent.ts';
+import type { ToolCall, Tokens } from './agent.ts';
 import type { Plan } from './profiles.ts';
 import type { Finding, Review } from './review.ts';
 import type { Slicing } from './slices.ts';
@@ -20,7 +20,34 @@ export type AgentRun = {
   session?: string; ok: boolean; status: string; cost_usd: number; turns: number; tokens: Tokens; ms: number; transcript?: string;
   /** Tokens in the session's context when it ended. */
   context?: number;
+  /** What the session's tool calls came to; the calls are in the job's tools.jsonl. */
+  tools?: { calls: number; errors: number; by_tool: Record<string, number> };
 };
+
+/** One line of a job's tools.jsonl. */
+export type ToolLine = ToolCall & { stage: string; role: string; session?: string };
+
+export const toolsLog = (job: string) => join(jobDir(job), 'tools.jsonl');
+
+export function readTools(job: string): ToolLine[] {
+  const file = toolsLog(job);
+  if (!existsSync(file)) return [];
+  return readFileSync(file, 'utf8').split('\n').filter(Boolean).flatMap((line) => {
+    try { return [JSON.parse(line) as ToolLine]; } catch { return []; }
+  });
+}
+
+/** `animus tools`: each agent session of the job with its calls counted, then every call in order. */
+export function describeTools(agents: readonly AgentRun[], lines: readonly ToolLine[]): string {
+  const out: string[] = [];
+  for (const a of agents) {
+    const t = a.tools ?? { calls: 0, errors: 0, by_tool: {} };
+    const by = Object.entries(t.by_tool).map(([name, n]) => `${name} ${n}`).join(', ');
+    out.push(`${a.stage}  ${a.role}  ${a.tier}  ${a.model}  ${t.calls} calls, ${t.errors} failed${by ? `: ${by}` : ''}`);
+  }
+  if (lines.length) out.push('', ...lines.map((l) => `${l.at}  ${l.stage}  ${l.tool}  ${l.target.replace(/\s+/g, ' ')}${l.ok ? '' : '  FAILED'}`));
+  return out.join('\n');
+}
 
 export type GateRun = { attempt: number; ok: boolean; ms: number; checks: { name: string; ok: boolean; skipped: boolean; ms: number }[] };
 
