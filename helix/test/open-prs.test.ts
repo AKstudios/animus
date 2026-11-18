@@ -103,7 +103,7 @@ const pr = (n: number, over: Partial<DisplayPr> = {}): DisplayPr => ({ job: n, r
 test('the overview shows the ten newest open PRs, drafts marked, and a picked project only its own', () => {
   const twelve = Array.from({ length: 12 }, (_, i) => pr(i + 1, i === 11 ? { draft: true } : {}));
   const v = view(display({ prs: [...twelve, pr(30, { repo: 'site', created: '2026-11-17T09:00:00Z' })] }), null, NOW);
-  assert.deepEqual(v.prs.map((p) => p.tag), ['DRAFT PR #12', 'PR #11', 'PR #10', 'PR #9', 'PR #8', 'PR #7', 'PR #6', 'PR #5', 'PR #4', 'PR #3']);
+  assert.deepEqual(v.prs.map((p) => p.tag), ['Draft #12', 'Open #11', 'Open #10', 'Open #9', 'Open #8', 'Open #7', 'Open #6', 'Open #5', 'Open #4', 'Open #3']);
   assert.deepEqual([v.prs[0]!.draft, v.prs[0]!.href, v.prs[0]!.page, v.prs[0]!.repo, v.prs[0]!.person, v.prs[0]!.personPage], [true, url(12), '/jobs/12', 'app', 'ana', '/people/ana']);
   assert.deepEqual(view(display({ prs: [pr(1), pr(30, { repo: 'site' })] }), 'site', NOW).prs.map((p) => p.id), [30]);
 });

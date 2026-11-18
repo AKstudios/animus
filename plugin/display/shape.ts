@@ -65,12 +65,16 @@ export type JobPage = {
   questions?: { question: string; answer?: string }[];
   /** Its latest screenshots, as named in its shots folder (`build/…`), each served with a token at /jobs/<id>/shots/<name>; `at` is when they were taken. */
   shots?: { at: string; files: string[] };
+  /** What GitHub (locally, outcomes.json) said of its PR, and when it opened and merged; left out where it has not said. */
+  pr_state?: PrState;
+  pr_opened?: string;
+  pr_merged?: string;
   /** What the job's run has printed, all of it. */
   log: string;
 };
 
 /** An open pull request one of Helix's jobs opened, as GitHub lists it now. */
-export type DisplayPr = { job: number; repo: string; person: string; number: number; title: string; url: string; draft: boolean; created: string };
+export type DisplayPr = { /** Helix's number, or a local job's own id. */ job: number | string; repo: string; person: string; number: number; title: string; url: string; draft: boolean; created: string };
 
 /** A PR one of Helix's jobs opened that GitHub lists as closed: merged or not, and when. */
 export type DisplayClosed = { /** Helix's number, or a local job's own id. */ job: number | string; number: number; merged: boolean; at: string };
@@ -143,4 +147,10 @@ export const JOB_LIST = 30;
  * from the local display without one. `jobs` are newest first, at most
  * JOB_LIST, those submitted before `?before=`; `more` says older ones remain.
  */
-export type JobListPage = { at: string; jobs: (DisplayJob & { pr_state?: PrState })[]; more: boolean };
+export type JobListPage = { at: string; jobs: ListJob[]; more: boolean; totals: JobTotals };
+
+/** A job on the Jobs page: with what GitHub (locally, outcomes.json) said of its PR, and when it merged. */
+export type ListJob = DisplayJob & { pr_state?: PrState; pr_merged?: string };
+
+/** Everything the filters match, not only the rows sent. */
+export type JobTotals = { jobs: number; merged: number; failed: number; cost_usd: number };
