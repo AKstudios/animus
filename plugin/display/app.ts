@@ -100,7 +100,7 @@ function header(v: View | undefined): string {
         : `<div class="stat-slots"><span class="k">SLOTS</span>${squares}<span class="b">${slots}</span></div>
       <div><span class="k">QUEUED</span> <span class="b">${v?.queued ?? 0}</span></div>`}
       <div><span class="k">NEEDS INPUT</span> <span class="asks">${v?.asks ?? 0}</span></div>
-      <a class="k" href="/people">PEOPLE</a>
+      ${v?.people === false ? '' : '<a class="k" href="/people">PEOPLE</a>'}
       <div class="time">${wall(new Date())}</div>
       ${readToken(storage) && !v?.local ? '<button type="button" class="sign-out" data-sign-out>SIGN OUT</button>' : ''}
     </div>
@@ -137,10 +137,10 @@ const who = (j: { person: string; personPage?: string }) => (j.personPage ? `<a 
 
 const card = (v: View, j: Live) => `<article class="card" data-key="j-${j.id}">
   <span class="corner-a" aria-hidden="true"></span><span class="corner-b" aria-hidden="true"></span>
-  <div class="card-top"><span><span class="b">${ref(j.id)}</span> <span class="mute">${esc(j.repo)} · ${who(j)}</span></span><span class="elapsed">${j.elapsed}</span></div>
+  <div class="card-top"><span><span class="b">${ref(j.id)}</span> <span class="mute">${j.by.map((b) => (b.page ? `<a href="${esc(b.page)}">${esc(b.text)}</a>` : esc(b.text))).join(' · ')}</span></span><span class="elapsed">${j.elapsed}</span></div>
   <a class="card-title" href="${esc(j.page)}">${esc(j.title)}</a>
   <div class="card-stage">${track(v, j)}<div class="card-step"><span class="stage-name">${esc(j.stageText)}</span><span class="mute">${esc(j.stepText)}</span></div></div>
-  <div class="card-feed"><div class="mute">${esc(j.who)}</div><div class="now">&gt; ${esc(j.now)}<span class="cursor">_</span></div></div>
+  <div class="card-feed"><div class="mute">${esc(j.who)}</div>${j.now ? `<div class="now">&gt; ${esc(j.now)}<span class="cursor">_</span></div>` : ''}</div>
 </article>`;
 
 const row = (v: View, j: Live) => `<div class="row" data-key="j-${j.id}">
@@ -155,7 +155,7 @@ const waiting = (j: Waiting) => `<div class="wait${j.ask ? ' ask' : ''}" data-ke
 
 const recent = (j: Recent) => `<div class="done-row" data-key="j-${j.id}">
   <span class="id">${ref(j.id)}</span>
-  <span class="tag tone-${j.tone}">${esc(j.tag)}</span>
+  ${j.href ? `<a class="tag tone-${j.tone}" href="${esc(j.href)}" target="_blank" rel="noopener noreferrer">${esc(j.tag)}</a>` : `<span class="tag tone-${j.tone}">${esc(j.tag)}</span>`}
   <a class="title" href="${esc(j.page)}">${esc(j.title)}</a><span class="by">${[esc(j.repo), who(j), esc(j.meta)].filter(Boolean).join(' · ')}</span>
   ${j.reason ? `<span class="reason tone-${j.tone}">${esc(j.reason)}</span>` : ''}
 </div>`;
@@ -231,7 +231,7 @@ function jobSections(v: JobPageView): string {
     shots ? section('screenshots', 'SCREENSHOTS', `<div class="shots">${shots}</div>`) : '',
     section('questions', 'QUESTIONS', questions || none('It has asked nothing.')),
     section('spec', 'SPEC', v.spec ? pre(v.spec) : none('Helix no longer has the spec.')),
-    section('log', 'LOG', v.log ? pre(v.log, ' data-log') : none('It has printed nothing yet.'), v.follow),
+    section('log', 'LOG', v.log ? pre(v.log, ' data-log') : none(v.noLog), v.follow),
   ].join('');
 }
 
@@ -244,9 +244,9 @@ function jobMain(id: number | string, now: number, local: boolean): string {
   return `<main class="main">${back}${scope}${body}</main>`;
 }
 
-function peopleList(): string {
-  const notice = peopleNotice(readToken(storage) !== null, state.peopleStatus);
-  if (notice) return `<div class="none boxed">${esc(notice)}</div>${signIn}`;
+function peopleList(local: boolean): string {
+  const notice = peopleNotice(readToken(storage) !== null, state.peopleStatus, local);
+  if (notice) return `<div class="none boxed">${esc(notice)}</div>${local ? '' : signIn}`;
   if (!state.people) return '';
   const rows = peopleView(state.people).rows.map((p) => `<tr data-key="u-${esc(p.name)}">
     <td><a href="${esc(p.page)}">${esc(p.name)}</a></td><td>${esc(p.github)}</td><td>${esc(p.joined)}</td>
@@ -254,9 +254,9 @@ function peopleList(): string {
   return rows ? `<table class="people"><thead><tr><th>PERSON</th><th>GITHUB</th><th>JOINED</th><th class="num">JOBS</th><th class="num">PRS OPENED</th><th class="num">SPENT</th><th>LAST ACTIVITY</th></tr></thead><tbody>${rows}</tbody></table>` : none('Nobody has joined this Helix yet.');
 }
 
-function personSections(name: string): string {
-  const notice = personNotice(name, readToken(storage) !== null, state.personStatus);
-  if (notice) return `<div class="none boxed">${esc(notice)}</div>${readToken(storage) ? '' : signIn}`;
+function personSections(name: string, local: boolean): string {
+  const notice = personNotice(name, readToken(storage) !== null, state.personStatus, local);
+  if (notice) return `<div class="none boxed">${esc(notice)}</div>${readToken(storage) || local ? '' : signIn}`;
   if (state.person?.name !== name) return '';
   const v = personView(state.person, state.older);
   const facts = `<div class="facts">${v.facts.map((f) => `<div><span class="mute">${esc(f.k)}</span> ${esc(f.v)}</div>`).join('')}</div>`;
@@ -271,9 +271,9 @@ function personSections(name: string): string {
   ].join('');
 }
 
-const peopleMain = (name?: string) => `<main class="main">${back}
+const peopleMain = (local: boolean, name?: string) => `<main class="main">${back}
   <div class="scope"><div><div class="label">${name ? 'PERSON' : 'PEOPLE'}</div><h1>${esc(name ?? 'People')}</h1></div></div>
-  ${name ? personSections(name) : peopleList()}
+  ${name ? personSections(name, local) : peopleList(local)}
 </main>`;
 
 function page(): string {
@@ -281,7 +281,7 @@ function page(): string {
   const now = (state.offline && state.heard ? state.heard.getTime() : Date.now()) + state.skew;
   const v = state.display ? view(state.display, picked(), now) : undefined;
   // A job page waits for the display: whether it needs a sign-in depends on the source it answers.
-  const body = at.page === 'job' ? (state.display ? jobMain(at.id, now, state.display.local === true) : '') : at.page === 'people' ? peopleMain(at.name) : v ? `${nav(v)}${main(v)}` : '';
+  const body = at.page === 'job' ? (state.display ? jobMain(at.id, now, state.display.local === true) : '') : at.page === 'people' ? (state.display ? peopleMain(state.display.local === true, at.name) : '') : v ? `${nav(v)}${main(v)}` : '';
   return [
     header(v),
     state.offline ? offline() : '',

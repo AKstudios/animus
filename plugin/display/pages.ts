@@ -60,17 +60,22 @@ export function jobNotice(id: number | string, signedIn: boolean, status?: numbe
   return undefined;
 }
 
+/** What the local display says at a people address: there is nothing to sign in to. */
+const NO_PEOPLE = "This machine's display has no people pages. They are on Helix.";
+
 /** A person's own page. */
 export const personPage = (name: string) => `/people/${encodeURIComponent(name)}`;
 
 /** What the people list says in place of the list, or nothing when it has it. `status` is how Helix answered for its data. */
-export function peopleNotice(signedIn: boolean, status?: number): string | undefined {
+export function peopleNotice(signedIn: boolean, status?: number, local = false): string | undefined {
+  if (local) return NO_PEOPLE;
   if (signedIn) return undefined;
   return status === 401 ? 'Helix did not take that token, so this browser forgot it. Sign in again to see who is on this Helix.' : 'Sign in to see who is on this Helix. Paste your Helix token: animus join kept it in ~/.animus/helix.json.';
 }
 
 /** What a person's page says in place of the person, or nothing when it has them. `status` is how Helix answered for its data. */
-export function personNotice(name: string, signedIn: boolean, status?: number): string | undefined {
+export function personNotice(name: string, signedIn: boolean, status?: number, local = false): string | undefined {
+  if (local) return NO_PEOPLE;
   if (!signedIn) {
     return status === 401 ? `Helix did not take that token, so this browser forgot it. Sign in again to see ${name}.` : `Sign in to see ${name}. Paste your Helix token: animus join kept it in ~/.animus/helix.json.`;
   }

@@ -23,6 +23,8 @@ export type JobPageView = {
   /** Each screenshot, named by its file, and where Helix serves it to a token. */
   shots: { name: string; src: string }[];
   log: string;
+  /** Said in the log's place when the job printed nothing to it. */
+  noLog: string;
   /** While the job may still write to it, the page reads its log again every two seconds and keeps to its end. */
   follow: boolean;
 };
@@ -73,6 +75,7 @@ export function jobView(p: JobPage, now: number, local = false): JobPageView {
       src: `/jobs/${encodeURIComponent(j.id)}/shots/${f.split('/').map(encodeURIComponent).join('/')}`,
     })),
     log: p.log,
+    noLog: local ? 'Its output went to the terminal it ran in; this display keeps no log of it.' : 'It has printed nothing yet.',
     follow: j.state === 'running' || j.state === 'queued',
   };
 }
