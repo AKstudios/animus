@@ -8,6 +8,8 @@ clients with how to update.
 
 ## Unreleased
 
+## 0.4.4 (2026-11-18)
+
 - A Helix job for a repository whose GitHub App installation lacks Contents
   or Pull requests write is refused before it starts, saying what the app
   needs and who accepts it, instead of doing all its work and failing to open
