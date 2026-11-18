@@ -13,7 +13,7 @@ import { checkEnv, checkPerson, describeFindings, failing, githubPush, githubTok
 import { animusVersion } from '../../plugin/src/version.ts';
 import { containerLaunch, containerProblem, draftLaunch, imageName, personDirs, removeContainer } from './container.ts';
 import { draftRunner } from './drafts.ts';
-import { commentWatcher, githubNotifier } from './github-comments.ts';
+import { checkComments, commentWatcher, githubNotifier } from './github-comments.ts';
 import { addPerson, addRepo, configFile, envFileVars, helixHome, identityEnv, importRegistry, loadConfig, readyRepos, removeRepo } from './config.ts';
 import { ensureSetup } from '../../plugin/src/workspace.ts';
 import { loadProfile } from '../../plugin/src/profile.ts';
@@ -258,6 +258,12 @@ function main(argv: string[]): number | undefined | Promise<number> {
             // A sign-in through the GitHub App is refreshed first, so the token checked is the one jobs get.
             const findings = [...await checkSignIn(store, config, name), ...checkPerson(store, name, { agent })];
             console.log(describeFindings(name, findings));
+            ok &&= !failing(findings).length;
+          }
+          // A project belongs to no one: whether anyone's token reads its comments is asked once, on a whole check.
+          if (!positionals[0]) {
+            const findings = await checkComments(store, config);
+            if (findings.length) console.log(describeFindings('projects', findings));
             ok &&= !failing(findings).length;
           }
           return ok ? 0 : 1;

@@ -5,7 +5,7 @@ import { join } from 'node:path';
 import { test } from 'node:test';
 import { hashToken, type Config } from '../src/config.ts';
 import { draftRunner, type DraftLaunch } from '../src/drafts.ts';
-import { commentWatcher, githubNotifier, MARKER } from '../src/github-comments.ts';
+import { checkComments, commentWatcher, githubNotifier, MARKER } from '../src/github-comments.ts';
 import { deviceCode, keepTokens, pollDevice } from '../src/github-app.ts';
 import { openStore } from '../src/store.ts';
 import { pauseFile, supervise, type Launch } from '../src/supervisor.ts';
@@ -77,7 +77,7 @@ async function helix(opts: { slack?: boolean; owner?: string; run?: boolean } = 
   const jobs = supervise({ store, config, home, launch: launchJob, notify: githubNotifier({ store, config, github, say: (l) => lines.push(l) }) });
   const watcher = commentWatcher({ store, config, drafts, jobs, github, now: () => clock, say: (l) => lines.push(l) });
   await watcher.poll();
-  return { github, store, lines, drafts, jobs, closes, slack: slack.sent, home, poll: () => watcher.poll(), clock: { at: (s: number) => { clock = T0 + s * 1000; } } };
+  return { github, store, config, lines, drafts, jobs, closes, slack: slack.sent, home, poll: () => watcher.poll(), clock: { at: (s: number) => { clock = T0 + s * 1000; } } };
 }
 
 // Protects: criterion 1. Fails when: the person gets no 👀, or the draft is not a marked comment with the spec in a markdown fence and the replies.
@@ -443,4 +443,22 @@ test('lets the owner cancel another person\'s job from the issue', async () => {
   await h.poll();
 
   assert.equal(h.store.get(job.id)!.state, 'cancelled');
+});
+
+// Protects: criterion 11. Fails when helix check calls a project fine that no person's token can read comments on, or flags one a token reads.
+test('helix check flags a project no person\'s GitHub token can read comments on', async () => {
+  const h = await helix();
+  assert.deepEqual(await checkComments(h.store, h.config, h.github), [{ what: 'comments on o/app', ok: true, detail: 'ana\'s token reads them' }]);
+
+  h.github.access['ana-gh'] = ['o/other'];
+  h.github.access['bob-gh'] = ['o/other'];
+  const [flag] = await checkComments(h.store, h.config, h.github);
+  assert.equal(flag!.ok, false);
+  assert.match(flag!.detail, /^no person's GitHub token can read them, so \/animus there goes unanswered \(ana: .*404; bob: .*404\)$/);
+});
+
+test('helix check passes a project when the first token fails and another person\'s reads its comments', async () => {
+  const h = await helix();
+  h.github.access['ana-gh'] = ['o/other'];
+  assert.deepEqual(await checkComments(h.store, h.config, h.github), [{ what: 'comments on o/app', ok: true, detail: 'bob\'s token reads them' }]);
 });

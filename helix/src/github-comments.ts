@@ -4,6 +4,7 @@
 // from a person on this Helix; Animus answers as that person, with their user
 // token, and marks everything it posts so it never acts on its own comments.
 import { AnimusError } from '../../plugin/src/proc.ts';
+import type { Finding } from './check.ts';
 import { personEnv, type Config } from './config.ts';
 import { freshToken, GITHUB, githubRepo, type GitHubUrls } from './github-app.ts';
 import type { Drafts } from './drafts.ts';
@@ -81,6 +82,36 @@ async function listComments(repo: string, since: string, token: string, urls: Gi
   }
 }
 
+/** Who may read a project's comments, in the order their tokens are tried: whoever added it, then everyone else. */
+const readers = (store: Store, project: Project) =>
+  [...new Set([...(project.added_by ? [project.added_by] : []), ...Object.keys(store.people())])].filter((n) => store.person(n));
+
+/**
+ * What `helix check` says of each GitHub project's comments: whether any
+ * person's token can read them, the way the watcher does. A project that
+ * none can read is never watched, so a `/animus` there goes unanswered.
+ */
+export async function checkComments(store: Store, config: Pick<Config, 'github'>, urls: GitHubUrls = GITHUB, now = Date.now()): Promise<Finding[]> {
+  const findings: Finding[] = [];
+  for (const project of store.projects().filter((p) => p.state === 'ready')) {
+    const repo = githubRepo(project.url);
+    if (!repo) continue;
+    const what = `comments on ${repo}`;
+    const why: string[] = [];
+    for (const person of readers(store, project)) {
+      try {
+        const token = await tokenOf(store, config, person, urls);
+        if (!token) { why.push(`${person} has no GitHub token`); continue; }
+        await listComments(repo, new Date(now).toISOString(), token, urls);
+        findings.push({ what, ok: true, detail: `${person}'s token reads them` });
+        break;
+      } catch (err) { why.push(`${person}: ${(err as Error).message}`); }
+    }
+    if (!findings.some((f) => f.what === what)) findings.push({ what, ok: false, detail: `no person's GitHub token can read them, so /animus there goes unanswered (${why.join('; ') || 'no one on this Helix'})` });
+  }
+  return findings;
+}
+
 /** A draft as a comment: a line saying Animus drafted it, the spec in a `markdown` fence (longer than any run of backticks in it), and the replies Animus understands. */
 export function draftComment(spec: string): string {
   const fence = '`'.repeat(Math.max(3, ...(spec.match(/`+/g) ?? []).map((r) => r.length + 1)));
@@ -139,8 +170,7 @@ export function commentWatcher(opts: {
 
   /** The comments updated since, read with the token of whoever added the project, else of another person; a failed read is logged and the next person tried. */
   async function read(project: Project, repo: string, since: string): Promise<IssueComment[] | undefined> {
-    const people = [...new Set([...(project.added_by ? [project.added_by] : []), ...Object.keys(store.people())])].filter((n) => store.person(n));
-    for (const person of people) {
+    for (const person of readers(store, project)) {
       try {
         const token = await tokenOf(store, config, person, urls);
         if (token) return await listComments(repo, since, token, urls);

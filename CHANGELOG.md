@@ -13,8 +13,8 @@ clients with how to update.
   `/helix` is no longer answered. Update the Slack app from
   helix/deploy/slack/manifest.yaml and reinstall it to the workspace. The
   `helix` CLI is unchanged.
-- Helix reads each project's issue and pull request comments about once a
-  minute, from the moment it first sees the project. A person's `/animus <text>`
+- Start and follow work with GitHub comments: Helix reads each project's issue
+  and pull request comments about once a minute, from the moment it first sees the project. A person's `/animus <text>`
   on an issue gets a 👀 reaction and a draft spec as a comment (the spec in a
   `markdown` block, with the replies it understands), written from the issue and
   the comment, whether or not Slack is set up. A second `/animus <changes>` while
@@ -37,6 +37,9 @@ clients with how to update.
   `/animus answer <text>` on the issue answers the question and resumes the job,
   and `/animus cancel` cancels it. `submit`, `discard`, `answer` and `cancel` by
   anyone but the draft's or job's person, or the owner, get a one-line refusal.
+  `helix check` now flags a project that no person's GitHub token can read
+  comments on, and docs/factory.md, helix.md and cli.md describe `/animus`
+  comments on GitHub.
 
 ## 0.4.7 (2026-11-18)
 

@@ -33,7 +33,7 @@ Three triggers feed one queue. Whatever the trigger, the job is the same record:
 | --- | --- | --- | --- |
 | Claude Code session | `spec.md`, written after the agent interviews you | `animus submit` over your private network (Tailscale), by CLI or a small MCP tool | GitHub PR notification |
 | Slack message | A draft spec written from the message and what it links to, revised by replies in its thread until you press Submit | A bot on the office machine that connects outward to Slack | Reply in the same thread, plus the PR |
-| GitHub issue comment | The issue body; a `/animus` comment starts it | The machine polls GitHub or runs a self-hosted Actions runner | Comment on the issue, plus the PR |
+| GitHub issue comment | A draft spec written from the issue and a `/animus <text>` comment, posted on the issue and revised by more `/animus` comments or by editing it, until `/animus submit` | Helix polls GitHub about once a minute with a person's token, and opens no port | Comments on the issue when the PR opens, the job fails or it asks a question, plus the PR |
 
 Rules that apply to every trigger:
 
@@ -42,6 +42,7 @@ Rules that apply to every trigger:
 - **No mid-run questions.** A job that cannot proceed ends as "needs input" with its question. You answer and resubmit.
 - **Issue jobs suit well-described work.** Nobody interviews you there, so vague requests come back as questions.
 - **A Slack job starts from a draft you confirm, never from the message.** `/animus draft <text>` or `@Animus <text>` gets a draft spec in a thread, from a fast session ($0.50 at most) that reads only the message, the repository and what a script fetched from its links. Reply in the thread (any reply in a DM, one mentioning @Animus in a channel) to have it rewritten. Submit runs the check `animus plan` does and wants a `$ command` under every criterion; a complete draft becomes your job, and its thread the job's. A person has at most 3 open drafts, `draft_slots` (1 by default) run at once, and a draft untouched for 7 days is discarded.
+- **A GitHub job starts from a draft you confirm too.** `/animus <text>` on an issue in a project Helix has gets a 👀 and a draft spec as a comment, from the same draft session, written from the issue and your comment. `/animus <changes>` revises it as a new comment, and you may edit the draft comment by hand. `/animus submit` reads the spec block of the latest draft comment as it is then, checks it as `animus plan` does, and queues it as your job; `/animus discard` drops it. The job comments on the issue when its PR opens (which says `Closes #N`), when it fails and when it asks a question, which you answer with `/animus answer <text>`; `/animus cancel` cancels it. Only the draft's or job's person, or the owner, may submit, discard, answer or cancel. Drafts share the limits above with Slack's. Helix acts only on comments by people on it, created after it started watching and less than a day old when it first sees them. `/animus` on a pull request says `fix` is not available yet. Details in [helix.md](helix.md#github-comments).
 
 ## The pipeline
 
