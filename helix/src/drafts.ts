@@ -6,15 +6,27 @@
 import { spawn } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { checkDraft, fetchReferences, findLinks, GITHUB_ITEM, GITHUB_VARS, type Fetch } from '../../plugin/src/draft.ts';
+import { fetchReferences, findLinks, GITHUB_ITEM, GITHUB_VARS, type Fetch } from '../../plugin/src/draft.ts';
 import { AnimusError } from '../../plugin/src/proc.ts';
-import { loadFactory } from '../../plugin/src/profiles.ts';
+import { loadFactory, resolvePlan } from '../../plugin/src/profiles.ts';
+import { parseSpec } from '../../plugin/src/spec.ts';
 import { credentialEnv, personEnv, type Config } from './config.ts';
 import { commentAs, commentBody, draftComment, specBlock } from './github-comments.ts';
 import { freshToken, GITHUB, githubRepo, liveTokenFile, reachableRepos, type GitHubUrls } from './github-app.ts';
 import type { Transport } from './slack-api.ts';
 import type { Draft, Store } from './store.ts';
 import { PLUGIN, type Supervisor } from './supervisor.ts';
+
+/**
+ * What Submit asks of a draft until Helix admits it against the project's profile: labels that would run, and a `$ command` under every criterion.
+ * shortcut: the profile is not read here; replace with admit once drafts know their project.
+ */
+function checkDraft(factory: ReturnType<typeof loadFactory>, text: string): void {
+  const spec = parseSpec(text, 'draft.md');
+  resolvePlan(factory, spec);
+  const bare = spec.criteria.flatMap((c, i) => (c.commands.length ? [] : [i + 1]));
+  if (bare.length) throw new AnimusError(`draft.md: criterion ${bare.join(', ')} has no check: put a \`$ command\` line under each criterion`);
+}
 
 /** The buttons a draft's thread carries: the project picked, and what to do with the draft. */
 export const PICK = 'draft_project';

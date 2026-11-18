@@ -21,6 +21,7 @@ import { personalFor, readSkillsFile, skillsForRole, snapshotSkills, whereToRun,
 import { listenLocal, localServer } from './local-display.ts';
 import { loadProfile } from './profile.ts';
 import { describePlan, loadFactory, resolvePlan } from './profiles.ts';
+import { admitFile, describeAdmit } from './admit.ts';
 import { git, tryGit, AnimusError, GitError } from './proc.ts';
 import * as helix from './remote.ts';
 import { describeSkills, grantsFor } from './skills.ts';
@@ -225,10 +226,16 @@ async function main(argv: string[]): Promise<number> {
     }
     case 'plan': {
       if (!positionals[0]) throw new AnimusError('usage: animus plan <spec.md>');
-      const spec = loadSpec(resolve(positionals[0]));
       const factory = loadFactory();
-      const plan = resolvePlan(factory, spec);
-      console.log(`${spec.title}\n${describePlan(factory, plan)}`);
+      const specFile = resolve(positionals[0]);
+      const repoDir = mainCheckout(resolve(values.repo ?? cwd));
+      const admitted = admitFile(factory, specFile, repoDir, loadProfile(repoDir));
+      if (admitted.problems.length || !admitted.plan) {
+        console.log(`${admitted.spec.title}\n${describeAdmit(admitted)}`);
+        return 1;
+      }
+      const { spec, plan } = { spec: admitted.spec, plan: admitted.plan };
+      console.log(`${spec.title}\n${describePlan(factory, plan)}\n${describeAdmit(admitted)}`);
       const yours = personalFor(resolve(values.repo ?? cwd)).skills;
       const asCarried = yours.map((e) => ({ ...e, text: '', sha: '' }));
       for (const role of ['implementer', ...(plan.review ? [plan.review.role] : [])]) console.log(`  skills     ${role}: ${[...grantsFor(factory, role, spec.type).map((g) => g.name), ...skillsForRole(asCarried, role, spec.type).map((s) => `${s.name} (yours)`)].join(', ') || 'none'}`);

@@ -13,9 +13,8 @@ import { BlockList, isIP } from 'node:net';
 import { join } from 'node:path';
 import type { Agent, AgentResult } from './agent.ts';
 import { writeJson } from './log.ts';
-import { modelFor, readPrompt, resolvePlan, type Factory } from './profiles.ts';
+import { modelFor, readPrompt, type Factory } from './profiles.ts';
 import { AnimusError } from './proc.ts';
-import { parseSpec, type Spec } from './spec.ts';
 
 export type Fetch = (url: string, init?: RequestInit) => Promise<Response>;
 
@@ -191,19 +190,6 @@ function draftPrompt(folder: string, message: string, sources: Source[], revise?
       `Its person replied with what to change. Answer with the whole spec, changed as the reply asks:\n\n<reply>\n${revise.reply.trim()}\n</reply>`,
     ] : []),
   ].join('\n\n');
-}
-
-/**
- * What Submit asks of a draft: the check `animus plan` makes (a spec with
- * acceptance criteria, whose labels would run), and a `$ command` under every
- * criterion, since no one is there to add one later.
- */
-export function checkDraft(factory: Factory, text: string): Spec {
-  const spec = parseSpec(text, 'draft.md');
-  resolvePlan(factory, spec);
-  const bare = spec.criteria.flatMap((c, i) => (c.commands.length ? [] : [i + 1]));
-  if (bare.length) throw new AnimusError(`draft.md: criterion ${bare.join(', ')} has no check: put a \`$ command\` line under each criterion`);
-  return spec;
 }
 
 /**
