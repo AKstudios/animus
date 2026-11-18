@@ -8,6 +8,9 @@ import { runJob } from '../src/pipeline.ts';
 import { describeJob } from '../src/remote.ts';
 import { clean, deps, done, fakeAgent, makeRepo, writeSpec } from './helpers.ts';
 
+// These are jobs on this machine; run inside a Helix job, the suite inherits ANIMUS_TRIGGER=helix, which rightly drops the watch line.
+delete process.env.ANIMUS_TRIGGER;
+
 // Protects: a job on this machine says where to watch it, right after its job line. Fails when: the line is missing, has no page path, or comes before the job line.
 test('a job on this machine prints watch it: animus ui with its page path right after the job line', async () => {
   const { agent } = fakeAgent([() => done(), () => clean()]);
