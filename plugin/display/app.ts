@@ -6,7 +6,7 @@
 import { forgetToken, jobNotice, jobsNotice, keepToken, peopleNotice, personNotice, readToken, route, takeToken } from './pages.ts';
 import { atEnd, jobView, type JobPageView } from './job-view.ts';
 import { keepOlder, peopleView, personView } from './people-view.ts';
-import { filterOf, jobListView, queryOf, RESULTS } from './job-list.ts';
+import { filterOf, jobListView, queryOf, RESULTS, type JobRow } from './job-list.ts';
 import type { Display, JobListPage, JobPage, PeoplePage, PersonPage } from './shape.ts';
 import { view, type Live, type Pr, type Project, type Need, type Recent, type View, type Waiting } from './view.ts';
 
@@ -133,8 +133,8 @@ const week = (v: View) => `<section class="panel week" data-key="week">
 
 const nav = (v: View) => `<aside class="side">${week(v)}<nav class="panel projects" aria-label="Projects">
   <h2>Projects <span class="count">${v.projects.length}</span></h2>
-  <button type="button" class="all" data-pick="" aria-pressed="${!v.sel}">All projects</button>
   ${v.projects.map(project).join('')}
+  <div class="key"><span><i class="merged"></i>merged</span><span><i class="running"></i>running</span><span><i class="ask"></i>asks</span><span><i class="failed"></i>failed</span></div>
 </nav></aside>`;
 
 const track = (v: View, j: Live) => `<span class="track" aria-hidden="true">${Array.from({ length: v.stages }, (_, i) => `<span class="seg${i < j.stage ? ' done' : i === j.stage ? ' on' : ''}"></span>`).join('')}</span>`;
@@ -176,8 +176,8 @@ const openPr = (p: Pr) => `<div class="done-row" data-key="pr-${esc(p.href)}">
   <a class="title" href="${esc(p.page)}">${esc(p.title)}</a><span class="by">#${p.id} · ${esc(p.repo)} · ${who(p)}</span>
 </div>`;
 
-const section = (name: string, title: string, body: string, pulse = false) => `<section class="section ${name}">
-  <div class="section-head">${pulse ? '<span class="pulse"></span>' : ''}<h2>${title}</h2><span class="to-edge"></span></div>
+const section = (name: string, title: string, body: string, pulse = false, more = '') => `<section class="section ${name}">
+  <div class="section-head">${pulse ? '<span class="pulse"></span>' : ''}<h2>${title}</h2><span class="to-edge"></span>${more}</div>
   ${body}
 </section>`;
 
@@ -202,10 +202,8 @@ function main(v: View): string {
   const live = v.idle ? SYNC : !v.live.length ? `<div class="none boxed">${esc(v.noLive)}</div>`
     : v.live.length > DENSE ? `<div class="rows">${v.live.map((j) => row(v, j)).join('')}</div>`
     : `<div class="cards${v.live.length > MANY ? ' many' : ''}">${v.live.map((j) => card(v, j)).join('')}</div>`;
-  const lists = v.local
-    ? v.byProject.map((g) => section('recent', `${esc(g.project)} <span class="count">${g.jobs.length}</span>`, g.jobs.map(recent).join(''))).join('')
-    : `${v.prs.length ? section('prs', `Open PRs <span class="count">${v.prs.length}</span>`, v.prs.map(openPr).join('')) : ''}
-    ${v.finished.length ? section('recent', `Finished <span class="count">${v.finished.length}</span>`, v.finished.map(recent).join('')) : ''}`;
+  const lists = `${v.prs.length ? section('prs', `Open pull requests <span class="count">${v.prs.length}</span>`, v.prs.map(openPr).join('')) : ''}
+    ${v.finished.length ? section('recent', `Finished <span class="count">${v.finished.length}</span>`, v.finished.map(recent).join(''), false, '<a class="all-jobs" href="/jobs">All jobs →</a>') : ''}`;
   return `<main class="main">${scope}
     ${v.needs.length ? section('needs', `Needs you <span class="count">${v.needs.length}</span>`, v.needs.map(need).join('')) : ''}
     ${section('live', `Working now <span class="count">${v.live.length}</span>`, live, true)}
@@ -226,11 +224,14 @@ const pre = (text: string, attrs = '') => `<pre class="text"${attrs}>${esc(text)
 const none = (text: string) => `<div class="none">${esc(text)}</div>`;
 
 function jobSections(v: JobPageView): string {
-  const stages = v.bar.length ? `<svg class="timebar" viewBox="0 0 100 1" preserveAspectRatio="none" role="img" aria-label="Where the time went">${v.bar.map((s, i) => `<rect class="seg-${i % 7}" x="${v.bar.slice(0, i).reduce((a, b) => a + b.pct, 0)}" width="${s.pct}" height="1"/>`).join('')}</svg>
-    <div class="timekey">${v.bar.map((s, i) => `<span class="${s.on ? 'on' : ''}"><i class="seg-${i % 7}"></i>${esc(s.name)} <code>${s.on ? 'now' : esc(s.took)}</code></span>`).join('')}</div>` : '';
+  // Each stage is its own nested svg so its name is clipped to its part; the CSP allows no style attribute, so widths are percentages in attributes.
+  const stages = v.bar.length ? `<svg class="timebar" role="img" aria-label="Where the time went">${v.bar.map((s) => `<svg x="${s.at}%" width="${s.pct}%" height="28"><rect class="st-${esc(s.name)}" width="100%" height="28"/>${s.label ? `<text x="8" y="18">${esc(s.label)}</text>` : ''}</svg>`).join('')}</svg>
+    <div class="timekey">${v.bar.map((s) => `<span class="${s.on ? 'on' : ''}"><i class="st-${esc(s.name)}"></i>${esc(s.name)} <code>${s.on ? 'now' : esc(s.took)}</code></span>`).join('')}</div>` : '';
   const fold = (name: string, title: string, body: string, open = false) => `<details class="fold ${name}" data-key="fold-${name}"${open ? ' open' : ''}><summary>${title}</summary>${body}</details>`;
-  const criteria = v.criteria.map((c) => `<div class="criterion"><span class="tag tone-${c.tone}">${esc(c.tag)}</span><div class="what"><p>${esc(c.text)}</p>${c.command ? `<code>${esc(c.command)}</code>` : ''}</div>${c.output ? `<details class="out"><summary>Output</summary>${pre(c.output)}</details>` : ''}</div>`).join('');
-  const pills = v.pills.map((c) => c.output ? `<details class="pill tone-${c.tone}"><summary>${esc(c.name)} ${esc(c.tag)}</summary>${pre(c.output)}</details>` : `<span class="pill tone-${c.tone}" title="${esc(c.command)}">${esc(c.name)} ${esc(c.tag)}</span>`).join('');
+  const mark = (tone: string, tag: string) => `<span class="mark tone-${tone}" aria-label="${tone === 'fail' ? 'failed' : tone === 'ink' ? 'passed' : esc(tag)}">${esc(tag)}</span>`;
+  const criteria = v.criteria.map((c) => `<div class="criterion">${mark(c.tone, c.tag)}<div class="what"><p>${esc(c.text)}</p>${c.command ? `<code>${esc(c.command)}</code>` : ''}</div>${c.output ? `<details class="out"><summary>output</summary>${pre(c.output)}</details>` : ''}</div>`).join('');
+  const pills = v.pills.map((c) => c.output ? `<details class="chip"><summary>${mark(c.tone, c.tag)}${esc(c.name)}</summary>${pre(c.output)}</details>` : `<span class="chip" title="${esc(c.command)}">${mark(c.tone, c.tag)}${esc(c.name)}</span>`).join('');
+  const note = (text: string) => (text ? ` <span class="count">${esc(text)}</span>` : '');
   const slices = v.slices.length ? `<ol class="slices">${v.slices.map((s) => `<li${s.done ? ' class="done"' : ''}><span class="b">${esc(s.title)}</span> <span class="mute">${s.done ? 'done' : ''}</span><div class="mute">${esc(s.delivers)}</div></li>`).join('')}</ol>` : '';
   const reviews = v.reviews.map((r) => `<div class="round"><div class="label">${esc(r.title)}</div><p>${esc(r.summary)}</p>
     ${r.findings.map((f) => `<div class="finding"><span class="tag tone-${f.tone}">${esc(f.tag)}</span>${f.where ? `<code>${esc(f.where)}</code>` : ''}<p>${esc(f.problem)}</p>${f.fix ? `<p class="mute">${esc(f.fix)}</p>` : ''}</div>`).join('') || none('No findings.')}</div>`).join('');
@@ -243,15 +244,26 @@ function jobSections(v: JobPageView): string {
     v.reason ? `<pre class="text why">${esc(v.reason)}</pre>` : '',
     `<div class="numbers">${v.numbers.map((n) => `<div><code class="num">${esc(n.v)}</code><span class="mute">${esc(n.k)}</span></div>`).join('')}</div>`,
     section('stages', 'Where the time went', stages || none('No stage has taken time yet.')),
-    criteria ? section('criteria', `Acceptance criteria <span class="count">${v.criteria.filter((c) => c.tone === 'ink').length} of ${v.criteria.length} proven</span>`, `<div class="list">${criteria}</div>`) : '',
-    section('checks', 'Checks', pills ? `<div class="pills">${pills}</div>` : none(criteria ? 'No other checks.' : 'No checks have run yet.')),
-    section('review', 'Review', reviews || none('Not reviewed yet.')),
+    criteria ? section('criteria', `Acceptance criteria${note(v.notes.criteria)}`, `<div class="list">${criteria}</div>`) : '',
+    section('checks', `Checks${note(v.notes.checks)}`, pills ? `<div class="chips">${pills}</div>` : none(criteria ? 'No other checks.' : 'No checks have run yet.')),
+    section('review', `Review${note(v.notes.review)}`, reviews || none('Not reviewed yet.')),
     shots ? section('screenshots', 'Screenshots', `<div class="shots">${shots}</div>`) : '',
-    slices ? fold('slices', `Slices <span class="count">${v.slices.filter((s) => s.done).length} of ${v.slices.length}</span>`, slices) : '',
-    fold('questions', 'Questions', questions || none('It has asked nothing.')),
-    fold('spec', 'Spec', v.spec ? pre(v.spec) : none('Helix no longer has the spec.')),
-    fold('log', 'Log', v.log ? pre(v.log, ' data-log') : none(v.noLog), v.follow),
+    `<div class="folds">${[
+      slices ? fold('slices', `Slices${note(`${v.slices.filter((s) => s.done).length} of ${v.slices.length}`)}`, slices) : '',
+      fold('spec', 'Spec', v.spec ? pre(v.spec) : none('Helix no longer has the spec.')),
+      fold('log', 'Log', v.log ? pre(v.log, ' data-log') : none(v.noLog), v.follow),
+      fold('questions', `Questions${note(v.questions.length ? '' : 'none asked')}`, questions || none('It has asked nothing.')),
+    ].join('')}</div>`,
   ].join('');
+}
+
+/** The panels beside a job page's main column: its pull request and its labels. */
+function jobSide(v: JobPageView): string {
+  const rows = (r: { k: string; v: string }[]) => r.map((x) => `<div class="kv"><span class="mute">${esc(x.k)}</span><span>${esc(x.v)}</span></div>`).join('');
+  const pr = v.pr ? `<section class="panel pr"><h2>Pull request</h2>
+    <div class="kv"><span>${esc(v.pr.number)}</span>${v.pr.href ? `<a class="tone-${v.pr.tone}" href="${esc(v.pr.href)}" target="_blank" rel="noopener noreferrer">${esc(v.pr.state)} ↗</a>` : `<span class="tone-${v.pr.tone}">${esc(v.pr.state)}</span>`}</div>${rows(v.pr.rows)}</section>` : '';
+  const labels = v.labels.length ? `<section class="panel labels"><h2>Labels</h2>${rows(v.labels)}</section>` : '';
+  return pr || labels ? `<aside class="side">${pr}${labels}</aside>` : '';
 }
 
 function jobMain(id: number | string, now: number, local: boolean): string {
@@ -260,7 +272,8 @@ function jobMain(id: number | string, now: number, local: boolean): string {
   const lead = v && !notice ? `<div class="tag-row"><span class="tag tone-${v.tag.tone}">${esc(v.tag.text)}</span><span class="mute">${ref(id) ? `${ref(id)} · ` : ''}${esc(v.line)}</span></div>` : '';
   const scope = `<div class="scope"><div><h1>${esc(v?.title ?? `Job ${ref(id) || id}`)}</h1>${lead}</div></div>`;
   const body = notice ? `<div class="none boxed">${esc(notice.text)}</div>${notice.signIn ? signIn : ''}` : v ? jobSections(v) : '';
-  return `<main class="main">${back('/jobs', 'Jobs')}${scope}${body}</main>`;
+  const trail = v && !notice ? `<nav class="crumb" aria-label="Trail"><a href="/jobs">Jobs</a> / ${esc(v.trail.project)} / <code>${esc(v.trail.job)}</code></nav>` : back('/jobs', 'Jobs');
+  return `<main class="main">${trail}${scope}${body}</main>${v && !notice ? jobSide(v) : ''}`;
 }
 
 function peopleList(local: boolean): string {
@@ -307,9 +320,20 @@ function jobsMain(local: boolean): string {
     pick('project', 'Project', ['', ...new Set([...state.display!.repos.map((r) => r.name), f.project].filter(Boolean))], f.project),
     ...(local ? [] : [pick('person', 'Person', names, f.person)]),
   ].join('')}</div>`;
-  const rows = state.list ? jobListView({ ...state.list, jobs: [...state.list.jobs, ...state.listOlder] }, local).rows : [];
+  const now = (state.offline && state.heard ? state.heard.getTime() : Date.now()) + state.skew;
+  const lv = state.list ? jobListView({ ...state.list, jobs: [...state.list.jobs, ...state.listOlder] }, local, now) : undefined;
+  const t = lv?.totals;
+  const sum = t ? `<div class="sum"><div><b>${t.jobs}</b><span class="mute">jobs</span></div><div><b>${t.merged}</b><span class="mute">merged · ${t.mergedShare}</span></div><div><b>${t.failed}</b><span class="mute">failed</span></div><div><b class="mono">${t.spent}</b><span class="mute">spent</span></div><div><b class="mono">${t.perMerged}</b><span class="mute">per merged PR</span></div></div>` : '';
+  const tr = (r: JobRow) => `<div class="tr" data-key="j-${r.id}">
+    ${r.href ? `<a class="tag tone-${r.tone}" href="${esc(r.href)}" target="_blank" rel="noopener noreferrer">${esc(r.tag)}</a>` : `<span class="tag tone-${r.tone}">${esc(r.tag)}</span>`}
+    <span class="job"><a class="title" href="${esc(r.page)}">${esc(r.title)}</a>${r.why ? `<span class="why tone-${r.tone === 'fail' || r.tone === 'ask' ? r.tone : 'mute'}">${esc(r.why)}</span>` : ''}</span>
+    <span class="mute">${esc(r.repo)}</span>${local ? '' : `<span class="mute">${who(r)}</span>`}
+    <span class="n">${esc(r.took)}</span><span class="n cost">${esc(r.cost)}</span><span class="n">${esc(r.toMerge)}</span>
+  </div>`;
+  const table = lv ? `<div class="tbl${local ? ' local' : ''}"><div class="tr th"><span>Result</span><span>Job</span><span>Project</span>${local ? '' : '<span>Person</span>'}<span class="n">Took</span><span class="n cost">Cost</span><span class="n">To merge</span></div>${
+    lv.rows.map((r, i) => `${lv.days.filter((d) => d.at === i).map((d) => `<div class="day">${esc(d.heading)}</div>`).join('')}${tr(r)}`).join('')}</div>` : '';
   const body = notice ? `<div class="none boxed">${esc(notice)}</div>${local ? '' : signIn}` : state.list
-    ? `<div class="list">${rows.map(recent).join('') || none('No job matches.')}</div>${state.listMore ? '<button type="button" class="more" data-more>Show more</button>' : ''}` : '';
+    ? `${sum}${lv!.rows.length ? table : none('No job matches.')}${state.listMore ? '<button type="button" class="more" data-more>Show more</button>' : ''}` : '';
   return `<main class="main"><div class="scope"><div><h1>Jobs</h1></div></div>${bar}${body}</main>`;
 }
 

@@ -34,7 +34,7 @@ export type Week = { merged: string; finished: string; spent: string; median: st
 export type Recent = { id: number | string; page: string; tag: string; /** Local display: the pull request the tag names, on GitHub. */ href?: string; tone: Tone; title: string; repo: string; person: string; personPage?: string; meta: string; reason?: string };
 
 /** An open pull request on the overview; it links to GitHub and to the job that opened it. */
-export type Pr = { id: number; page: string; href: string; tag: string; draft: boolean; title: string; repo: string; person: string; personPage: string };
+export type Pr = { id: number | string; page: string; href: string; tag: string; draft: boolean; title: string; repo: string; person: string; personPage?: string };
 
 export type View = {
   name: string;
@@ -48,12 +48,10 @@ export type View = {
   idle: boolean;
   /** Shown in place of the three sections when there is no job to list. */
   empty?: { title: string; text: string; free: string; command: string };
-  /** The local display: it has no slots or queue to show, and lists every job by project instead of PRs and FINISHED. */
+  /** The local display: it has no slots or people to show. */
   local: boolean;
   /** Whether the header links to the people pages: Helix has them, the local display does not. */
   people: boolean;
-  /** Local display: every job of the shown projects, newest first, grouped by project in the order of their newest job. */
-  byProject: { project: string; jobs: Recent[] }[];
   live: Live[]; noLive: string;
   headline: Headline;
   week: Week;
@@ -104,8 +102,8 @@ function tick(j: DisplayJob, closed?: Map<number | string, DisplayClosed>): Tick
 const isOver = (j: DisplayJob) => j.state === 'cancelled' || j.state === 'stopped' || (j.state === 'ended' && !isAsk(j));
 
 const LISTED: Record<string, [string, Tone]> = {
-  running: ['RUNNING', 'ink'], queued: ['QUEUED', 'mute'], stopped: ['STOPPED', 'fail'], cancelled: ['CANCELLED', 'mute'],
-  pr: ['PR', 'ink'], 'draft-pr': ['DRAFT PR', 'ink'], 'dry-run': ['DRY RUN', 'mute'], 'needs-input': ['NEEDS INPUT', 'ask'], failed: ['FAILED', 'fail'],
+  running: ['Running', 'ink'], queued: ['Queued', 'mute'], stopped: ['Stopped', 'fail'], cancelled: ['Cancelled', 'mute'],
+  pr: ['PR', 'ink'], 'draft-pr': ['Draft PR', 'ink'], 'dry-run': ['Dry run', 'mute'], 'needs-input': ['Needs input', 'ask'], failed: ['Failed', 'fail'],
 };
 
 /** A row of a job in any state; a stopped one says how to carry on. */
@@ -115,25 +113,28 @@ const people = (person: string, local: boolean) => (local ? {} : { personPage: p
 export function recent(j: DisplayJob, local = false, closed?: DisplayClosed): Recent {
   const [tag, tone] = LISTED[j.state === 'ended' ? j.outcome ?? 'failed' : j.state] ?? ['ENDED', 'mute'];
   const took = j.started && j.ended ? span(Date.parse(j.ended) - Date.parse(j.started)) : '';
-  // Helix lists open PRs apart; only the local display tags a job with its pull request.
-  const number = local && j.pr ? /(\d+)\/?$/.exec(j.pr)?.[1] : undefined;
   const made = {
-    id: j.id, page: jobPage(j.id), tag: number ? `${tag} #${number}` : tag, ...(number && /^https?:\/\//.test(j.pr!) ? { href: j.pr } : {}), tone, title: j.title, repo: j.repo, person: j.person, ...people(j.person, local),
+    id: j.id, page: jobPage(j.id), tag, ...(local && j.pr && /^https?:\/\//.test(j.pr) ? { href: j.pr } : {}), tone, title: j.title, repo: j.repo, person: j.person, ...people(j.person, local),
     meta: [took, j.cost_usd !== undefined ? usd(j.cost_usd) : ''].filter(Boolean).join(' · '),
     ...(j.resume ? { reason: `It stopped before it ended. To carry on: ${j.resume}` } : j.reason ? { reason: firstLine(j.reason) } : {}),
   };
   // A PR GitHub (or, locally, outcomes.json) has not answered about stays `PR #n`, never guessed.
   const n = j.pr && (j.outcome === 'pr' || j.outcome === 'draft-pr') ? /(\d+)\/?$/.exec(j.pr)?.[1] : undefined;
-  if (!n || (local && !closed)) return made;
-  return closed ? { ...made, tag: `${closed.merged ? 'MERGED' : 'CLOSED'} #${n}`, tone: closed.merged ? 'merged' : 'mute' } : { ...made, tag: `PR #${n}` };
+  if (!n) return made;
+  if (!closed) return { ...made, tag: `PR #${n}` };
+  // How long the PR took to merge is its merge time less the job's end.
+  const after = closed.merged ? `merged in ${j.ended ? span(Date.parse(closed.at) - Date.parse(j.ended)) : '—'}` : 'not merged';
+  return { ...made, tag: `${closed.merged ? 'Merged' : 'Closed'} #${n}`, tone: closed.merged ? 'merged' : 'mute', meta: [made.meta, after].filter(Boolean).join(' · ') };
 }
 
-function pr(p: DisplayPr): Pr {
-  return { id: p.job, page: jobPage(p.job), href: p.url, tag: `${p.draft ? 'DRAFT ' : ''}PR #${p.number}`, draft: p.draft, title: p.title, repo: p.repo, person: p.person, personPage: personPage(p.person) };
+function pr(p: DisplayPr, local: boolean): Pr {
+  return { id: p.job, page: jobPage(p.job), href: p.url, tag: `${p.draft ? 'Draft' : 'Open'} #${p.number}`, draft: p.draft, title: p.title, repo: p.repo, person: p.person, ...people(p.person, local) };
 }
 
 /** The display for one moment: `now` is Helix's clock in ms, `picked` the project chosen in the list. */
 export function view(d: Display, picked: string | null, now: number): View {
+  // The local display lists newest first; the rest of this reads jobs oldest first, as Helix numbers them.
+  if (d.local) d = { ...d, jobs: [...d.jobs].reverse() };
   const sel = d.repos.find((r) => r.name === picked);
   const shown = sel ? d.jobs.filter((j) => j.repo === sel.name) : d.jobs;
   const count = (jobs: readonly DisplayJob[], t: Tick) => jobs.filter((j) => tick(j) === t && j.state !== 'cancelled').length;
@@ -166,7 +167,7 @@ export function view(d: Display, picked: string | null, now: number): View {
     const why = j.resumed === 'answer' ? 'Has its answer and carries on from where it stopped. '
       : j.resumed === 'restart' ? 'Helix stopped while it ran, so it carries on from where it stopped. ' : '';
     return {
-      id: j.id, page: jobPage(j.id), tag: j.resumed ? 'QUEUED AGAIN' : 'QUEUED', title: j.title, repo: j.repo, person: j.person, ...people(j.person, d.local === true),
+      id: j.id, page: jobPage(j.id), tag: j.resumed ? 'Queued again' : 'Queued', title: j.title, repo: j.repo, person: j.person, ...people(j.person, d.local === true),
       note: `${why}Position ${line.indexOf(j) + 1} in the queue, waiting ${waited < 60_000 ? 'less than a minute' : span(waited)}.`,
     };
   });
@@ -195,7 +196,7 @@ export function view(d: Display, picked: string | null, now: number): View {
     return { merged: String(merged), finished: String(done.length), spent: usd(spent), median: mid === undefined ? '–' : span(mid) };
   })();
   const ended = shown.filter((j) => isOver(j) && !open.has(j.id as number)).reverse();
-  const prs = (d.prs ?? []).filter((p) => !sel || p.repo === sel.name).sort((a, b) => Date.parse(b.created) - Date.parse(a.created)).slice(0, PRS).map(pr);
+  const prs = (d.prs ?? []).filter((p) => !sel || p.repo === sel.name).sort((a, b) => Date.parse(b.created) - Date.parse(a.created)).slice(0, PRS).map((p) => pr(p, d.local === true));
 
   return {
     name: d.name,
@@ -228,6 +229,5 @@ export function view(d: Display, picked: string | null, now: number): View {
     finished: ended.slice(0, FINISHED).map((j) => recent(j, d.local === true, closed.get(j.id))),
     local: d.local === true,
     people: d.local !== true,
-    byProject: d.local ? [...Map.groupBy(shown, (j) => j.repo)].map(([project, jobs]) => ({ project, jobs: jobs.map((j) => recent(j, d.local === true, closed.get(j.id))) })) : [],
   };
 }

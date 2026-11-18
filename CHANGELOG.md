@@ -8,6 +8,7 @@ clients with how to update.
 
 ## Unreleased
 
+- The display's overview is the same on `animus ui` and on Helix: Needs you, Working now, Queued, Open pull requests, Finished. Result tags are in sentence case, a Finished row says how long its PR took to merge, and the Projects panel has ticks and a key in place of the "All projects" button.
 - `animus retro [--project <name>] [--days <n>]` runs a read-only `retro`
   session (standard tier, a new role in profiles.yaml) over a project's runs
   and proposes at most 5 lessons, each citing at least two jobs or one whose

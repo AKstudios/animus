@@ -139,7 +139,7 @@ export function serve(opts: {
       // A job page's data, for any person on this Helix. The display is served by this Helix, so it sends no client version.
       const pageData = req.method === 'GET' ? /^\/jobs\/(\d+)\/page-data$/.exec(url.pathname)?.[1] : undefined;
       if (pageData) {
-        const page = jobPage(opts, Number(pageData));
+        const page = jobPage(opts, Number(pageData), { prs: await prs(), closed: await prs.closed() });
         return page ? send(200, page) : send(404, { error: `no job ${pageData}` });
       }
       // The Jobs page's data: every job in the table, filtered, thirty older than ?before=<submitted> at a time. A separate path, so it is not read as a job id.

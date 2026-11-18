@@ -12,7 +12,7 @@ import type { AddressInfo } from 'node:net';
 import { hostname } from 'node:os';
 import { basename, join } from 'node:path';
 import { listJobs, RESULTS, type JobFilter, type Result } from '../display/job-list.ts';
-import type { Display, DisplayJob, JobListPage, JobPage, PrState } from '../display/shape.ts';
+import type { Display, DisplayJob, JobListPage, JobPage, ListJob, PrState } from '../display/shape.ts';
 import { asset, CSP } from './assets.ts';
 import { folderParts, read, shotFile } from './job-folder.ts';
 import { readOutcomes, type Outcomes } from './outcomes.ts';
@@ -71,12 +71,19 @@ export function localDisplay(): Display {
     const n = Number(/(\d+)\/?$/.exec(j.pr ?? '')?.[1]);
     return o && o.state !== 'OPEN' && n ? [{ job: j.id, number: n, merged: o.state === 'MERGED', at: o.closed ?? o.checked }] : [];
   });
+  // A delivered PR is open unless outcomes.json lists it closed.
+  const prs = jobs.flatMap((j) => {
+    const n = Number(/(\d+)\/?$/.exec(j.pr ?? '')?.[1]);
+    const state = j.pr ? outcomes[j.pr]?.state : undefined;
+    return j.state === 'ended' && j.pr && n && (j.outcome === 'pr' || j.outcome === 'draft-pr') && (!state || state === 'OPEN')
+      ? [{ job: j.id, repo: j.repo, person: j.person, number: n, title: j.title, url: j.pr, draft: j.outcome === 'draft-pr', created: j.ended ?? j.submitted }] : [];
+  });
   return {
     name: hostname(), at: new Date().toISOString(), local: true,
     // Nothing is queued on a laptop and nothing limits how many jobs run: the display shows no slots.
     slots: jobs.filter((j) => j.state === 'running').length, stages: STAGES,
     repos: [...new Set(jobs.map((j) => j.repo))].map((name) => ({ name })),
-    jobs, ...(closed.length ? { closed } : {}),
+    jobs, ...(prs.length ? { prs } : {}), ...(closed.length ? { closed } : {}),
   };
 }
 
@@ -84,9 +91,9 @@ export function localDisplay(): Display {
 export function localJobList(f: Partial<JobFilter>, before?: string): JobListPage {
   let outcomes: Outcomes = {};
   try { outcomes = readOutcomes(); } catch { /* unreadable: no PR is known */ }
-  const jobs = localJobs().map((j) => {
-    const state = j.pr ? outcomes[j.pr]?.state : undefined;
-    return state ? { ...j, pr_state: state.toLowerCase() as PrState } : j;
+  const jobs = localJobs().map((j): ListJob => {
+    const o = j.pr ? outcomes[j.pr] : undefined;
+    return o ? { ...j, pr_state: o.state.toLowerCase() as PrState, ...(o.state === 'MERGED' ? { pr_merged: o.closed ?? o.checked } : {}) } : j;
   });
   return { at: new Date().toISOString(), ...listJobs(jobs, { ...f, person: '' }, before) };
 }
@@ -97,7 +104,11 @@ export function localJobPage(id: string): JobPage | undefined {
   const job = PLAIN.test(id) ? jobOf(id, runs) : undefined;
   if (!job) return undefined;
   const spec = read(loadState(id)?.spec ?? join(jobDir(id), 'spec.md'));
-  return { at: new Date().toISOString(), stages: STAGES, job, ...(spec !== undefined ? { spec } : {}), log: '', ...folderParts(jobDir(id), runs.filter((r) => r.job === id)) };
+  let outcomes: Outcomes = {};
+  try { outcomes = readOutcomes(); } catch { /* unreadable: no PR is known */ }
+  const o = job.pr ? outcomes[job.pr] : undefined;
+  const pr: Partial<JobPage> = o ? { pr_state: o.state.toLowerCase() as PrState, pr_opened: o.opened, ...(o.state === 'MERGED' ? { pr_merged: o.closed ?? o.checked } : {}) } : {};
+  return { at: new Date().toISOString(), stages: STAGES, job, ...pr, ...(spec !== undefined ? { spec } : {}), log: '', ...folderParts(jobDir(id), runs.filter((r) => r.job === id)) };
 }
 
 /** Listens on the first free port from `port` up, on 127.0.0.1 only. */

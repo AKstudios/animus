@@ -70,7 +70,7 @@ const gates = join(jobDir('drafts-from-slack'), 'gates');
 mkdirSync(gates, { recursive: true });
 const list = (test: string) => [`ok   typecheck: npm run typecheck (1.0s)`, `${test} test: npm test (14.7s)`, ...criteria.map((_, i) => `ok   acceptance-${i + 1}: node --test test/c${i + 1}.test.ts (0.${i + 2}s)`)].join('\n');
 writeFileSync(join(gates, 'run-1.txt'), `${list('FAIL')}\n\n=== typecheck: npm run typecheck\n\n=== test: npm test\nnot ok 3 - a server left open\n`);
-writeFileSync(join(gates, 'run-2.txt'), `${list('ok  ')}\n`);
+writeFileSync(join(gates, 'run-2.txt'), `${list('ok  ')}\n\n${criteria.map((_, i) => `=== acceptance-${i + 1}: node --test test/c${i + 1}.test.ts\nok ${i + 1} - passes\n`).join('\n')}`);
 writeJson(join(jobDir('drafts-from-slack'), 'review-1.json'), { status: 'reviewed', summary: 'One blocker, fixed in the next round.', criteria: [], findings: [
   { severity: 'blocker', file: 'helix/src/drafts.ts', line: 88, problem: "A draft's file upload is retried forever when Slack answers 429.", fix: 'Give up after three tries and say so in the DM.' },
   { severity: 'should-fix', file: 'helix/src/slack.ts', line: 212, problem: 'The DM reply names the spec path on Helix, which the sender cannot open.' },
