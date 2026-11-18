@@ -25,7 +25,7 @@ export type Asset = { type: string; body: Buffer | string; cache: string };
 const stripped = new Map<string, { mtime: number; text: string }>();
 
 /** The display's pages besides `/`: each is the same index.html, and its script draws the one the path names (pages.ts). */
-const PAGES = /^\/(?:jobs\/[^/]+|people(?:\/[^/]+)?)$/;
+const PAGES = /^\/(?:jobs(?:\/[^/]+)?|people(?:\/[^/]+)?)$/;
 
 /**
  * The file a path names, or nothing: only names in plugin/display and its

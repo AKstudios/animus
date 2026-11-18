@@ -235,7 +235,7 @@ Serves the local display on `127.0.0.1` (port 7420, or the next free one),
 opens it in your browser and runs until Ctrl-C. It shows every job this machine
 ran, read from `~/.animus`, grouped by project and newest first, each with its
 job page. A job whose process is gone and that has no outcome shows as stopped,
-with `animus resume <job>`. It has no sign-in and no people pages, and answers
+with `animus resume <job>`. Its Jobs page (`/jobs`, linked from the header) lists them 30 at a time with filters by result and project in the address; merged and closed tags come from `outcomes.json`. It has no sign-in and no people pages, and answers
 only GET and only for the host names `127.0.0.1` and `localhost`. There is no
 run log to show, so a job page's log is empty.
 

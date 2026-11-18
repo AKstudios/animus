@@ -8,6 +8,18 @@ clients with how to update.
 
 ## Unreleased
 
+- The display's RECENT is now FINISHED: the 30 newest jobs that ended or were
+  cancelled, with a delivered one tagged `MERGED #n`, `CLOSED #n` or, when
+  GitHub has not answered about it, `PR #n`. Helix asks GitHub once a minute
+  per project for its 10 latest closed PRs, and `/display` gains an optional
+  `closed` list beside `prs`. WAITING, OPEN PRS and FINISHED are not drawn when
+  empty.
+- A Jobs page at `/jobs`, linked from the display's header, lists every job
+  newest first, 30 at a time with SHOW MORE, tagged RUNNING, QUEUED, NEEDS INPUT,
+  OPEN PR #n, MERGED #n, CLOSED #n, FAILED and so on. Its result, project and
+  person filters are in the address. Helix serves it from `GET /job-list`, to a
+  person's token; `animus ui` has it too, without the person filter, with
+  merged and closed read from `outcomes.json`.
 - Every job says where to watch it. `animus start` and `animus run` on this
   machine print `watch it: animus ui, then open /jobs/<job>`; `animus start
   --helix`, `animus submit` and `animus status <id>` print the job page on

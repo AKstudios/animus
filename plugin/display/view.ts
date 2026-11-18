@@ -2,7 +2,7 @@
 // which section, and every label, note and count. No DOM here, so the
 // wording is tested without a browser (helix/test/view.test.ts).
 import { jobPage, personPage } from './pages.ts';
-import type { Display, DisplayJob, DisplayPr } from './shape.ts';
+import type { Display, DisplayClosed, DisplayJob, DisplayPr } from './shape.ts';
 
 export type Tone = 'ink' | 'mute' | 'ask' | 'fail';
 export type Tick = 'running' | 'ask' | 'failed' | 'queued' | 'ended';
@@ -38,7 +38,7 @@ export type View = {
   idle: boolean;
   /** Shown in place of the three sections when there is no job to list. */
   empty?: { title: string; text: string; free: string; command: string };
-  /** The local display: it has no slots or queue to show, and lists every job by project instead of PRs and RECENT. */
+  /** The local display: it has no slots or queue to show, and lists every job by project instead of PRs and FINISHED. */
   local: boolean;
   /** Whether the header links to the people pages: Helix has them, the local display does not. */
   people: boolean;
@@ -48,12 +48,13 @@ export type View = {
   waiting: Waiting[];
   /** The newest open PRs the jobs opened. */
   prs: Pr[];
-  recent: Recent[];
+  /** The newest jobs that ended or were cancelled, apart from those waiting for an answer or with an open PR. */
+  finished: Recent[];
 };
 
-/** How many of a project's latest jobs its row of ticks shows, how many failed or cancelled jobs are listed, and how many open PRs. */
+/** How many of a project's latest jobs its row of ticks shows, how many finished jobs are listed, and how many open PRs. */
 const TICKS = 10;
-const RECENT = 30;
+const FINISHED = 30;
 const PRS = 10;
 
 const pad = (n: number) => String(n).padStart(2, '0');
@@ -81,8 +82,8 @@ function tick(j: DisplayJob): Tick {
   return j.outcome === 'failed' ? 'failed' : 'ended';
 }
 
-/** Recent is where a job that did not deliver is read; what it delivered is a PR, listed while it is open. */
-const isMiss = (j: DisplayJob) => j.state === 'cancelled' || (j.state === 'ended' && j.outcome === 'failed');
+/** Finished is where every job that is over is read, but one waiting for an answer (Waiting) or with its PR open (Pr). */
+const isOver = (j: DisplayJob) => j.state === 'cancelled' || j.state === 'stopped' || (j.state === 'ended' && !isAsk(j));
 
 const LISTED: Record<string, [string, Tone]> = {
   running: ['RUNNING', 'ink'], queued: ['QUEUED', 'mute'], stopped: ['STOPPED', 'fail'], cancelled: ['CANCELLED', 'mute'],
@@ -93,16 +94,20 @@ const LISTED: Record<string, [string, Tone]> = {
 /** A person's page to link to: Helix has them, the local display does not. */
 const people = (person: string, local: boolean) => (local ? {} : { personPage: personPage(person) });
 
-function recent(j: DisplayJob, local = false): Recent {
+export function recent(j: DisplayJob, local = false, closed?: DisplayClosed): Recent {
   const [tag, tone] = LISTED[j.state === 'ended' ? j.outcome ?? 'failed' : j.state] ?? ['ENDED', 'mute'];
   const took = j.started && j.ended ? span(Date.parse(j.ended) - Date.parse(j.started)) : '';
   // Helix lists open PRs apart; only the local display tags a job with its pull request.
   const number = local && j.pr ? /(\d+)\/?$/.exec(j.pr)?.[1] : undefined;
-  return {
+  const made = {
     id: j.id, page: jobPage(j.id), tag: number ? `${tag} #${number}` : tag, ...(number && /^https?:\/\//.test(j.pr!) ? { href: j.pr } : {}), tone, title: j.title, repo: j.repo, person: j.person, ...people(j.person, local),
     meta: [took, j.cost_usd !== undefined ? usd(j.cost_usd) : ''].filter(Boolean).join(' · '),
     ...(j.resume ? { reason: `It stopped before it ended. To carry on: ${j.resume}` } : j.reason ? { reason: firstLine(j.reason) } : {}),
   };
+  // A PR GitHub has not answered about stays `PR #n`, never guessed.
+  const n = !local && j.pr && (j.outcome === 'pr' || j.outcome === 'draft-pr') ? /(\d+)\/?$/.exec(j.pr)?.[1] : undefined;
+  if (!n) return made;
+  return closed ? { ...made, tag: `${closed.merged ? 'MERGED' : 'CLOSED'} #${n}`, tone: closed.merged ? 'ink' : 'mute' } : { ...made, tag: `PR #${n}` };
 }
 
 function pr(p: DisplayPr): Pr {
@@ -145,7 +150,9 @@ export function view(d: Display, picked: string | null, now: number): View {
     }),
   ];
 
-  const ended = shown.filter(isMiss).reverse();
+  const open = new Set((d.prs ?? []).map((p) => p.job));
+  const closed = new Map((d.closed ?? []).map((c) => [c.job, c]));
+  const ended = shown.filter((j) => isOver(j) && !open.has(j.id as number)).reverse();
   const prs = (d.prs ?? []).filter((p) => !sel || p.repo === sel.name).sort((a, b) => Date.parse(b.created) - Date.parse(a.created)).slice(0, PRS).map(pr);
 
   return {
@@ -176,7 +183,7 @@ export function view(d: Display, picked: string | null, now: number): View {
     noLive: sel ? 'No agent is working on this project.' : d.local ? 'No agent is working right now.' : `No agent is working right now. ${d.slots === 1 ? 'The one slot is' : `All ${d.slots} slots are`} free.`,
     waiting,
     prs,
-    recent: ended.slice(0, RECENT).map((j) => recent(j, d.local === true)),
+    finished: ended.slice(0, FINISHED).map((j) => recent(j, d.local === true, closed.get(j.id as number))),
     local: d.local === true,
     people: d.local !== true,
     byProject: d.local ? [...Map.groupBy(shown, (j) => j.repo)].map(([project, jobs]) => ({ project, jobs: jobs.map((j) => recent(j, d.local === true)) })) : [],

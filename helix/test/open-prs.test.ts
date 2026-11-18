@@ -121,3 +121,13 @@ test('/display carries the open PRs, asked of GitHub with the opener\'s token', 
     assert.deepEqual(asked, [['https://github.com/o/app.git', 'ana-gh']]);
   } finally { supervisor.stop(); server.close(); store.close(); }
 });
+
+// Protects: the overview can tell a merged PR from a closed one, and only for jobs of Helix's. Fails when: merged_at is ignored, a PR no job opened is listed, or a failed call breaks the open list.
+test('lists the latest closed PRs of jobs, merged or not, and is empty when GitHub fails', async () => {
+  const { store } = table([{ n: 1, person: 'ana' }, { n: 2, person: 'ben' }]);
+  const listClosed: ListPrs = async () => [gh(1, { merged_at: '2026-11-17T12:00:00Z' }), gh(2, { closed_at: '2026-11-17T13:00:00Z' }), gh(99, { merged_at: '2026-11-17T14:00:00Z' })];
+  const prs = openPrs({ store, list: github([]).list, listClosed });
+  assert.deepEqual((await prs.closed()).map((c) => [c.number, c.merged, c.at]), [[1, true, '2026-11-17T12:00:00Z'], [2, false, '2026-11-17T13:00:00Z']]);
+  const failing = openPrs({ store, list: github([gh(1)]).list, listClosed: async () => { throw new Error('GitHub answered 500'); } });
+  assert.deepEqual([(await failing()).length, await failing.closed()], [1, []]);
+});

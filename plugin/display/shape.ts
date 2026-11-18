@@ -70,6 +70,9 @@ export type JobPage = {
 /** An open pull request one of Helix's jobs opened, as GitHub lists it now. */
 export type DisplayPr = { job: number; repo: string; person: string; number: number; title: string; url: string; draft: boolean; created: string };
 
+/** A PR one of Helix's jobs opened that GitHub lists as closed: merged or not, and when. */
+export type DisplayClosed = { job: number; number: number; merged: boolean; at: string };
+
 export type DisplayRepo ={ name: string; base?: string; gates?: string[] };
 
 export type Display = {
@@ -82,6 +85,8 @@ export type Display = {
   jobs: DisplayJob[];
   /** Open PRs the jobs opened, any order; left out by a source that does not ask GitHub. */
   prs?: DisplayPr[];
+  /** The latest closed PRs of those jobs, as GitHub lists them; a job not here has no answer from GitHub. */
+  closed?: DisplayClosed[];
   /** Set by the local display (`animus ui`): one person's own jobs, no sign-in and no people pages, listed by project rather than as a queue. */
   local?: true;
 };
@@ -124,3 +129,16 @@ export type PersonPage = PersonRow & {
   /** Everything they did that Helix kept, newest first. */
   activity: { at: string; kind: string; detail?: Record<string, string | number> }[];
 };
+
+/** What a job's pull request became, as the Jobs page knows it: left out when GitHub has not said. */
+export type PrState = 'open' | 'merged' | 'closed';
+
+/** The most jobs the Jobs page is sent at a time. */
+export const JOB_LIST = 30;
+
+/**
+ * The Jobs page's data: from Helix, GET /job-list, with a person's token, and
+ * from the local display without one. `jobs` are newest first, at most
+ * JOB_LIST, those submitted before `?before=`; `more` says older ones remain.
+ */
+export type JobListPage = { at: string; jobs: (DisplayJob & { pr_state?: PrState })[]; more: boolean };

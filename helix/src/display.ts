@@ -5,7 +5,8 @@
 import { statSync } from 'node:fs';
 import { hostname } from 'node:os';
 import { join } from 'node:path';
-import { PERSON_JOBS, type Display, type DisplayJob, type DisplayRepo, type JobPage, type PeoplePage, type PersonPage, type PersonRow } from '../../plugin/display/shape.ts';
+import { listJobs, type JobFilter } from '../../plugin/display/job-list.ts';
+import { PERSON_JOBS, type Display, type DisplayClosed, type DisplayPr, type JobListPage, type DisplayJob, type DisplayRepo, type JobPage, type PeoplePage, type PersonPage, type PersonRow } from '../../plugin/display/shape.ts';
 import { folderParts, read, shotFile } from '../../plugin/src/job-folder.ts';
 import { readRuns, STAGES } from '../../plugin/src/log.ts';
 import { loadProfile, PROFILE_PATH } from '../../plugin/src/profile.ts';
@@ -129,4 +130,19 @@ export function display(opts: { config: Config; store: Store; supervisor: Superv
     repos: Object.entries(readyRepos(store)).map(([name, dir]) => repoOf(name, dir)),
     jobs: store.list(SHOWN).map((j) => jobOf(j, supervisor)),
   };
+}
+
+/**
+ * One page of the Jobs page: the whole table, filtered, thirty at a time. A
+ * job's PR is open or merged or closed as GitHub last said (`prs`, `closed`);
+ * one it has not answered about carries no state.
+ */
+export function jobList(opts: { store: Store; supervisor: Supervisor }, f: Partial<JobFilter>, before: string | undefined, github: { prs: DisplayPr[]; closed: DisplayClosed[] }): JobListPage {
+  const open = new Set(github.prs.map((p) => p.job));
+  const closed = new Map(github.closed.map((c) => [c.job, c.merged ? 'merged' as const : 'closed' as const]));
+  const jobs = opts.store.list(-1).map((j) => {
+    const state = open.has(j.id) ? 'open' as const : closed.get(j.id);
+    return { ...jobOf(j, opts.supervisor), ...(state ? { pr_state: state } : {}) };
+  });
+  return { at: new Date().toISOString(), ...listJobs(jobs, f, before) };
 }
