@@ -171,6 +171,14 @@ export const prState: PrLookup = (url, cwd) => {
   return state === 'OPEN' || state === 'MERGED' || state === 'CLOSED' ? state : undefined;
 };
 
+/** Whether an open pull request is a draft; undefined when GitHub cannot say. */
+export type DraftLookup = (url: string, cwd: string) => boolean | undefined;
+
+export const prDraft: DraftLookup = (url, cwd) => {
+  const draft = gh(cwd, ['pr', 'view', url, '--json', 'isDraft', '--jq', '.isDraft'], undefined, true);
+  return draft === 'true' ? true : draft === 'false' ? false : undefined;
+};
+
 /** What GitHub records about a pull request. commits holds each commit's committer date. */
 export type PrFacts = { state: PrState; createdAt: string; closedAt?: string; mergedAt?: string; mergeCommit?: string; baseRefName: string; commits: string[]; /** The pull request's last commit. */ head?: string };
 

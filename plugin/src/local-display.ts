@@ -16,12 +16,7 @@ import type { Display, DisplayJob, JobListPage, JobPage, PrState } from '../disp
 import { asset, CSP } from './assets.ts';
 import { folderParts, read, shotFile } from './job-folder.ts';
 import { readOutcomes, type Outcomes } from './outcomes.ts';
-import { animusHome, jobDir, loadProgress, loadState, readRuns, STAGES, type Run } from './log.ts';
-
-/** True for a live process; EPERM means it exists under another user. */
-const alive = (pid: number): boolean => {
-  try { process.kill(pid, 0); return true; } catch (e) { return (e as NodeJS.ErrnoException).code === 'EPERM'; }
-};
+import { alive, animusHome, jobDir, loadProgress, loadState, readRuns, STAGES, type Run } from './log.ts';
 
 /** Job folders are named by Animus; only a plain name is taken as one. */
 const PLAIN = /^[A-Za-z0-9][\w.-]*$/;

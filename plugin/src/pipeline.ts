@@ -14,7 +14,7 @@ import type { Agent, AgentResult } from './agent.ts';
 import { describe, failsOnBase, gateReport, jobChecks, LATER_SLICE, runChecks, type CheckResult } from './gates.ts';
 import { commitAll, mainCheckout, matchesAny, touchedFiles } from './git.ts';
 import { appendRun, CANCELLED_MARKER, jobDir, toolsLog, saveProgress, saveState, writeJson, type Cause, type FindingLog, type JobState, type Outcome, type Run, type Stage } from './log.ts';
-import { evidenceBranch, findPrByTitle, prBody, prState, type PrFind, type Evidence, type PrLookup, type Publish } from './pr.ts';
+import { evidenceBranch, findPrByTitle, prBody, prDraft, prState, type DraftLookup, type PrFind, type Evidence, type PrLookup, type Publish } from './pr.ts';
 import { admitFile, profileOnBase, refusal, type Admitted } from './admit.ts';
 import { loadProfile } from './profile.ts';
 import { describePlan, escalate, modelFor, PLUGIN_ROOT, raise, readPrompt, type Factory, type Plan, type Tier } from './profiles.ts';
@@ -40,6 +40,8 @@ export type Deps = {
   shots?: typeof takeShots;
   /** How a spec with `after:` learns the earlier pull request merged, and how it waits between looks; replaced in tests. */
   prState?: PrLookup;
+  /** Whether a pull request a fix updates is a draft; replaced in tests. */
+  prDraft?: DraftLookup;
   findPr?: PrFind;
   sleep?: (ms: number) => Promise<void>;
   /** Ends the process after a signal has been logged; replaced in tests. */
@@ -64,7 +66,7 @@ export type RunOptions = {
   /** Pick a job up again, with the person's answer if it asked a question. */
   resume?: { state: JobState; answer?: string };
   /** Start a fix (fix.ts): a new job on the pull request's branch, in the worktree of `from`, the job it continues. */
-  fix?: { from: JobState; ask: string };
+  fix?: { from: JobState; ask: string; pr: string };
 };
 
 /** Ends the job where it is thrown, with an outcome that is not a pull request. */
@@ -155,7 +157,7 @@ async function runJobWith(opts: RunOptions, deps: Deps, live: { run?: Run; start
   const repo = mainCheckout(opts.repo);
   const prior = opts.resume?.state;
   // A fix starts from the job it continues; a fix picked up again has that in its own state.
-  const fix = opts.fix ? { of: opts.fix.from.job, ask: opts.fix.ask, from: opts.fix.from } : prior?.fix_of && prior.ask ? { of: prior.fix_of, ask: prior.ask } : undefined;
+  const fix: { of: string; ask: string; pr?: string | undefined; from?: JobState } | undefined = opts.fix ? { of: opts.fix.from.job, ask: opts.fix.ask, pr: opts.fix.pr, from: opts.fix.from } : prior?.fix_of && prior.ask ? { of: prior.fix_of, ask: prior.ask, pr: prior.pr } : undefined;
   if (!prior && !opts.specFile && !opts.fix) throw new AnimusError('animus run needs a spec file');
   // On Helix the profile is the base branch's as Helix fetched it, not whatever the clone has checked out (docs/adr/0008).
   const onBase = opts.trigger === 'helix' || process.env.ANIMUS_TRIGGER === 'helix' ? profileOnBase(repo) : undefined;
@@ -261,7 +263,7 @@ async function runJobWith(opts: RunOptions, deps: Deps, live: { run?: Run; start
   const state: JobState = {
     job, repo, spec: specCopy, ...(source ? { source } : {}), workspace: ws, plan, ...(before?.session ? { session: before.session } : {}), ...(before?.context !== undefined ? { context: before.context } : {}), ...(answers.length ? { answers } : {}),
     ...(prior?.slicing ? { slicing: prior.slicing, sliced_by: prior.sliced_by ?? 'script', slices_done: prior.slices_done ?? [] } : {}),
-    ...(fix ? { fix_of: fix.of, ask: fix.ask } : {}), ...(before?.fixes ? { fixes: before.fixes } : {}), ...(before?.closes ? { closes: before.closes } : {}),
+    ...(fix ? { fix_of: fix.of, ask: fix.ask, ...(fix.pr ? { pr: fix.pr } : {}) } : {}), ...(before?.fixes ? { fixes: before.fixes } : {}), ...(before?.closes ? { closes: before.closes } : {}),
   };
   saveState(state);
 
@@ -715,10 +717,14 @@ async function runJobWith(opts: RunOptions, deps: Deps, live: { run?: Run; start
       ...(state.fixes ? { fixes: state.fixes } : {}),
     });
     writeFileSync(join(dir, 'pr-body.md'), `${body}\n`);
-    // shortcut: a fix that failed leaves the open pull request as it is and the work on the branch; how a failed or unreviewed fix ends is slice 4.
-    if (!opts.dryRun && !(failed && fix)) {
+    // A fix that failed pushes nothing: the pull request stays as it was. The one failure that still pushes is the
+    // reviewer's refusal on a pull request that was already a draft, which stays a draft with the reasons in its body.
+    const held = failed && fix && !(stopped?.cause === 'review' && fix.pr && (deps.prDraft ?? prDraft)(fix.pr, wt) === true);
+    if (held) {
+      log(`the fix is not pushed and the pull request is as it was; the work is on ${ws.branch}${open.length ? `\nthe reviewer's blockers:\n${listFindings(open)}` : ''}`);
+    } else if (!opts.dryRun) {
       try {
-        run.pr =await timed('pr', () => deps.publish({ cwd: wt, branch: ws.branch, baseBranch: ws.baseBranch, title: spec.title, body, draft: failed || Boolean(opts.draft) }));
+        run.pr = await timed('pr', () => deps.publish({ cwd: wt, branch: ws.branch, baseBranch: ws.baseBranch, title: spec.title, body, draft: failed || Boolean(opts.draft) }));
         if (failed) outcome = 'draft-pr';
         log(`${failed ? 'draft pull request with the failure report' : 'pull request'}: ${run.pr}`);
       } catch (err) {

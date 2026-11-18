@@ -4,8 +4,8 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
 import { fixTarget } from '../src/fix.ts';
-import { loadState } from '../src/log.ts';
-import { runJob } from '../src/pipeline.ts';
+import { loadState, saveProgress, saveState } from '../src/log.ts';
+import { runJob, type Deps } from '../src/pipeline.ts';
 import { BODY_LIMIT, prBody, SPEC_SUMMARY } from '../src/pr.ts';
 import { loadFactory, resolvePlan } from '../src/profiles.ts';
 import { git } from '../src/proc.ts';
@@ -28,10 +28,10 @@ async function opened(repo: string, session: string, context?: number) {
   return run;
 }
 
-const fixOf = (repo: string, ask: string, agent: ReturnType<typeof fakeAgent>['agent']) => {
-  const d = deps(agent);
-  const { state } = fixTarget(repo, '1');
-  return runJob({ repo, fix: { from: state, ask } }, d).then((run) => ({ run, d }));
+const fixOf = (repo: string, ask: string, agent: ReturnType<typeof fakeAgent>['agent'], over: Partial<Deps> = {}) => {
+  const d = deps(agent, over);
+  const { run, state } = fixTarget(repo, '1', () => 'OPEN');
+  return runJob({ repo, fix: { from: state, ask, pr: run.pr! } }, d).then((fixed) => ({ run: fixed, d }));
 };
 
 // Protects: criteria 1 and 2 of the fix spec. Fails when: a fix is a new job on a new branch, or does not carry on from the implementer's session, or a second fix starts from the first job's session, or the body loses Closes #N, the criteria or the Fixes list.
@@ -124,4 +124,72 @@ test('the pull request body holds the spec in a collapsed block, and leaves it o
   assert.ok(long.length <= BODY_LIMIT);
   assert.doesNotMatch(long, /<details>/);
   assert.match(long, /The spec is not in this description: .* 65,536 characters\.$/);
+});
+
+const notReady = () => ({ output: { status: 'not-ready', summary: 'It misses the point.', criteria: [], findings: [{ severity: 'blocker', problem: 'It is wrong.' }] } });
+
+// Protects: criterion 4. Fails when: a pull request no job opened, a merged or closed one, or one with a fix running or waiting is fixed anyway, or the refusal does not name the fix.
+test('a fix is refused, with one line, on a pull request no job opened, a merged or closed one, and one with a fix running or waiting', async () => {
+  const repo = makeRepo();
+  const first = await opened(repo, 'session-job');
+
+  assert.throws(() => fixTarget(repo, '99', () => 'OPEN'), /no job opened pull request 99/);
+  assert.throws(() => fixTarget(repo, '1', () => 'MERGED'), /pull request 1 is merged/);
+  assert.throws(() => fixTarget(repo, '1', () => 'CLOSED'), /pull request 1 is closed/);
+
+  const asking = fakeAgent([() => ({ output: { status: 'needs-input', summary: '', question: 'Which one?' } })]);
+  const waiting = await fixOf(repo, 'Say it twice', asking.agent);
+  assert.equal(waiting.run.outcome, 'needs-input');
+  assert.throws(() => fixTarget(repo, '1', () => 'OPEN'), new RegExp(`has a fix waiting for an answer: job ${waiting.run.job}`));
+
+  const state = { ...loadState(waiting.run.job)! };
+  delete state.outcome;
+  saveState(state);
+  saveProgress(state.job, 'implement', 'implementer');
+  assert.throws(() => fixTarget(repo, '1', () => 'OPEN'), new RegExp(`has a fix running: job ${state.job}`));
+  // The tests share one Animus home and one pull request address: end the fix so the next test can fix it.
+  saveState({ ...state, outcome: 'failed' });
+  assert.equal(fixTarget(repo, '1', () => 'OPEN').run.job, first.job);
+});
+
+// Protects: criterion 5, a failed fix. Fails when: a fix that fails pushes, or changes the PR, or does not say why.
+test('a fix that fails pushes nothing and reports why', async () => {
+  const repo = makeRepo();
+  await opened(repo, 'session-job');
+
+  const { run, d } = await fixOf(repo, 'Say it twice', fakeAgent([() => done()]).agent);
+
+  assert.equal(run.outcome, 'failed');
+  assert.match(run.reason!, /the implementer changed nothing/);
+  assert.equal(run.pr, undefined);
+  assert.equal(d.published.length, 0);
+});
+
+// Protects: criterion 5, a refused fix. Fails when: the reviewer's refusal still pushes on a ready pull request, or does not push on a draft one, or turns the draft ready.
+test('a fix the reviewer refuses pushes nothing on a ready pull request, and pushes as a draft on one that already was', async () => {
+  const repo = makeRepo();
+  await opened(repo, 'session-job');
+
+  const ready = await fixOf(repo, 'Say it twice', fakeAgent([say('done wrongly'), () => notReady()]).agent, { prDraft: () => false });
+  assert.equal(ready.run.outcome, 'failed');
+  assert.match(ready.run.reason!, /the reviewer says the work is not ready: It misses the point/);
+  assert.equal(ready.d.published.length, 0);
+  assert.ok(ready.d.lines.some((l) => /It is wrong\./.test(l)));
+
+  const draft = await fixOf(repo, 'Say it twice', fakeAgent([say('done differently'), () => notReady()]).agent, { prDraft: () => true });
+  assert.equal(draft.run.outcome, 'draft-pr');
+  assert.equal(draft.d.published.length, 1);
+  assert.equal(draft.d.published[0]!.draft, true);
+  assert.match(draft.d.published[0]!.body, /It misses the point/);
+});
+
+// Protects: criterion 5, a fix that passes. Fails when: a passing fix on a draft pull request leaves it a draft.
+test('a fix that passes is published ready, which marks a draft pull request ready', async () => {
+  const repo = makeRepo();
+  await opened(repo, 'session-job');
+
+  const { run, d } = await fixOf(repo, 'Say it twice', fakeAgent([say('done, again'), () => clean()]).agent, { prDraft: () => true });
+
+  assert.equal(run.outcome, 'pr');
+  assert.equal(d.published[0]!.draft, false);
 });

@@ -142,6 +142,8 @@ export type JobState = {
   /** Set on a fix: the job it continues, what was asked, and every fix on the pull request so far (this one last, once its body is built). */
   fix_of?: string;
   ask?: string;
+  /** On a fix: the pull request it updates, as its URL. */
+  pr?: string;
   fixes?: { ask: string; job: string; cost_usd: number }[];
   /** The issue the pull request closes, so a fix keeps the line. */
   closes?: number;
@@ -180,6 +182,11 @@ export function loadState(job: string): JobState | undefined {
 export function saveProgress(job: string, stage: Stage, who: string): void {
   writeJson(join(jobDir(job), 'progress.json'), { stage, who, at: new Date().toISOString(), pid: process.pid, host: hostname() } satisfies Progress);
 }
+
+/** True for a live process; EPERM means it exists under another user. */
+export const alive = (pid: number): boolean => {
+  try { process.kill(pid, 0); return true; } catch (e) { return (e as NodeJS.ErrnoException).code === 'EPERM'; }
+};
 
 /** A job's progress; home is the Animus home it ran under, when not this process's (a Helix job in a container). */
 export function loadProgress(job: string, home = animusHome()): Progress | undefined {

@@ -1,19 +1,44 @@
 // `animus fix <pr> "<text>"` (GLOSSARY.md, "Fix"): a new job on the branch of an open pull request a job
 // opened. This holds what is particular to it: finding the job it continues, bringing the worktree to the
 // branch as GitHub has it, and what the implementer and the reviewer are told.
-import { loadState, readRuns, type JobState, type Run } from './log.ts';
+import { readdirSync } from 'node:fs';
+import { hostname } from 'node:os';
+import { alive, jobDir, loadProgress, loadState, readRuns, type JobState, type Run } from './log.ts';
+import { prState, type PrLookup } from './pr.ts';
 import { git, AnimusError, GitError, tryGit } from './proc.ts';
 import { revParse } from './git.ts';
 
 /** One fix as the pull request lists it. */
 export type FixEntry = { ask: string; job: string; cost_usd: number };
 
-/** The job a fix continues: the latest run in this repo whose pull request is `pr` (a number, `#number` or the URL), and its state. */
-export function fixTarget(repo: string, pr: string): { run: Run; state: JobState } {
+/** The fix on this pull request that is running here or waiting for an answer, if any. */
+function activeFix(pr: string): { job: string; what: string } | undefined {
+  let names: string[] = [];
+  try { names = readdirSync(jobDir('')); } catch { /* no jobs yet */ }
+  for (const job of names) {
+    const s = loadState(job);
+    if (s?.pr !== pr || !s.fix_of) continue;
+    if (s.outcome === 'needs-input') return { job, what: 'waiting for an answer' };
+    const p = loadProgress(job);
+    if (!s.outcome && p?.host === hostname() && p.pid !== undefined && alive(p.pid)) return { job, what: 'running' };
+  }
+  return undefined;
+}
+
+/**
+ * The job a fix continues: the latest run in this repo whose pull request is `pr` (a number, `#number` or the URL),
+ * and its state. Refuses, with one line, a pull request no job opened, one that is merged or closed, and one that
+ * has a fix running or waiting for an answer. `lookup` says whether GitHub has the pull request open.
+ */
+export function fixTarget(repo: string, pr: string, lookup: PrLookup = prState): { run: Run; state: JobState } {
   const n = /^#?(\d+)$/.exec(pr.trim())?.[1];
   const opened = readRuns().filter((r) => r.repo === repo && r.pr && (r.pr === pr.trim() || (n && r.pr.endsWith(`/${n}`))));
   const run = opened.at(-1);
   if (!run) throw new AnimusError(`no job opened pull request ${pr}, so there is nothing to fix`);
+  const github = lookup(run.pr!, repo);
+  if (github && github !== 'OPEN') throw new AnimusError(`pull request ${pr} is ${github.toLowerCase()}, so it cannot be fixed`);
+  const active = activeFix(run.pr!);
+  if (active) throw new AnimusError(`pull request ${pr} has a fix ${active.what}: job ${active.job}`);
   const state = loadState(run.job);
   if (!state) throw new AnimusError(`the folder of job ${run.job}, which opened ${run.pr}, is gone`);
   return { run, state };

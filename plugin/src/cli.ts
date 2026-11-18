@@ -349,8 +349,8 @@ async function main(argv: string[]): Promise<number> {
       if (!pr || !text.length) throw new AnimusError('usage: animus fix <pr> "<what to change>"');
       if (!values['dry-run'] && !onPath('gh')) throw new AnimusError('gh is not installed, so the pull request cannot be updated; install it or use --dry-run');
       const repo = mainCheckout(resolve(values.repo ?? cwd));
-      const { state } = fixTarget(repo, pr);
-      return finish(await runJob({ repo, fix: { from: state, ask: text.join(' ') }, personal: localSkills(repo, values.skills), ...flags }, deps()));
+      const { run, state } = fixTarget(repo, pr);
+      return finish(await runJob({ repo, fix: { from: state, ask: text.join(' '), pr: run.pr! }, personal: localSkills(repo, values.skills), ...flags }, deps()));
     }
     case 'resume': {
       const state = positionals[0] ? loadState(positionals[0]) : undefined;
