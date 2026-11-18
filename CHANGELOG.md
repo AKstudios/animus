@@ -8,6 +8,10 @@ clients with how to update.
 
 ## Unreleased
 
+- `after:` keeps waiting on an earlier spec that is not a valid spec, instead
+  of failing the job. The waiting line names the file and why it could not be
+  read, and the file is read again on every check.
+
 ## 0.4.5 (2026-11-18)
 
 - `after:` finds the earlier spec's pull request on GitHub, by the spec's
