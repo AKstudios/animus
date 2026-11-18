@@ -21,6 +21,8 @@ const read = (f) => fs.existsSync(f) ? fs.readFileSync(f, 'utf8') : '';
 const refs = fs.existsSync(folder + '/references') ? fs.readdirSync(folder + '/references').sort().map((f) => read(folder + '/references/' + f)).join('\\n') : '';
 const reply = fs.existsSync(folder + '/reply.md') ? '\\nRevised: ' + read(folder + '/reply.md') : '';
 fs.writeFileSync(folder + '/draft.md', '# Draft\\n\\n' + read(folder + '/message.md') + '\\nIssue: ' + refs + reply);
+// A session given the project writes what it found beside the spec; here, when the message asks.
+if (read(folder + '/message.md').includes('summarise')) fs.writeFileSync(folder + '/summary.md', 'gates: test\\n');
 `;
 
 // Stands in for `animus run` and `animus resume`: the job's title says how it ends.
@@ -319,6 +321,23 @@ test('replies with what is wrong and queues nothing when no criterion has a comm
   assert.deepEqual(h.store.list(), []);
   assert.equal(h.store.draftsIn('ready').length, 1);
   assert.match(h.github.posted.at(-1)!.body, /^Not submitted: .*no acceptance criterion has a `\$ command` line/s);
+});
+
+// Protects: criterion 6. Fails when: the summary is missing from the draft comment, or is inside the spec's fence, so submit would queue it as part of the spec.
+test('the draft comment has the summary outside the spec\'s fence, and submitting it queues the spec alone', async () => {
+  const h = await helix();
+  h.github.addComment('o/app', 7, 'ana-gh', '/animus add passkey sign-in, summarise', at(30));
+  await h.poll();
+  await until('the draft comment', () => h.github.posted.length > 0);
+
+  assert.match(h.github.posted[0]!.body, /```markdown\n[\s\S]*?\n```\n\nAnimus read it against the project:\n\n```text\ngates: test\n```\n/);
+  const draft = h.github.comments.find((c) => c.body.startsWith('Animus drafted'))!;
+  draft.body = draft.body.replace(/```markdown[\s\S]*?\n```/, `\`\`\`markdown\n${SPEC}\`\`\``);
+  h.github.addComment('o/app', 7, 'ana-gh', '/animus submit', at(90));
+  h.clock.at(120);
+  await h.poll();
+
+  assert.equal(h.store.list().length, 1);
 });
 
 // Protects: criterion 7. Fails when: a criterion left to the reviewer, beside one with a command, keeps a spec from being queued.
