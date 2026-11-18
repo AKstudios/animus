@@ -8,6 +8,8 @@ clients with how to update.
 
 ## Unreleased
 
+## 0.5.1 (2026-11-18)
+
 - The display's RECENT is now FINISHED: the 30 newest jobs that ended or were
   cancelled, with a delivered one tagged `MERGED #n`, `CLOSED #n` or, when
   GitHub has not answered about it, `PR #n`. Helix asks GitHub once a minute
