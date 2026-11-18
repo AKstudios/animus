@@ -11,3 +11,18 @@ commands:
   test: npm run test
   changelog: npm run changelog
 base: main
+
+# The display (plugin/display), served from made-up jobs so a display job's
+# screenshots show every section. Display specs can be `type: ui`.
+ui:
+  targets:
+    display:
+      serve: "node --disable-warning=ExperimentalWarning scripts/display-fixture.ts"
+      url: "http://127.0.0.1:$PORT"
+      paths: ["plugin/display/**", "plugin/src/local-display.ts", "scripts/display-fixture.ts"]
+      # Each page is compared with its design in docs/design/display.
+      pages:
+        overview: { path: /, reference: docs/design/display/overview.html }
+        jobs: { path: /jobs, reference: docs/design/display/jobs.html }
+        job: { path: /jobs/drafts-from-slack, reference: docs/design/display/job.html }
+      viewports: ["1440x900", "390x844"]

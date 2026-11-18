@@ -217,7 +217,11 @@ test('the local /job-list tags merged and closed PRs from outcomes.json and filt
   const merged = await list('?result=merged');
   const wiki = await list('?project=wiki&person=somebody');
   const bad = (await s.get('/job-list?result=bogus')).status;
+  const shown = (await (await s.get('/display')).json()) as Display;
   s.stop();
+  // The overview reads the same outcomes: its rows say merged and closed too.
+  const overview = Object.fromEntries(view(shown, null, Date.now()).byProject.flatMap((g) => g.jobs).map((r) => [r.title, [r.tag, r.tone]]));
+  assert.deepEqual([overview['pr-merged'], overview['pr-closed'], overview['pr-unknown']], [['MERGED #1', 'merged'], ['CLOSED #2', 'mute'], ['PR #3', 'ink']]);
   const tags = Object.fromEntries(jobListView(all, true).rows.map((r) => [r.title, r.tag]));
   assert.deepEqual([tags['pr-merged'], tags['pr-closed'], tags['pr-unknown']], ['MERGED #1', 'CLOSED #2', 'PR #3']);
   assert.deepEqual([merged.jobs.map((j) => j.id), wiki.jobs.map((j) => j.id), bad], [['pr-merged'], ['pr-unknown'], 400]);

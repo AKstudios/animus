@@ -8,6 +8,27 @@ clients with how to update.
 
 ## Unreleased
 
+- The display's overview leads with what needs you: a headline from the counts
+  ("1 job needs you. 3 agents at work.") and the last job that finished, an
+  amber card for each question waiting (with the `animus answer` or
+  `animus resume --answer` command), the work in progress, then a short QUEUED
+  list. A THIS WEEK panel and the PROJECTS list sit beside the main column, a
+  merged PR's tick in violet, and the header has tabs.
+- The display's look: system sans with mono only for ids, numbers and commands,
+  no grid, result tags as pills tinted with their status (merged violet, open
+  green, failed red), headings and buttons in sentence case. The job page
+  lists its acceptance criteria with the command that proved each, its other
+  checks as tags, and its slices folded; the stage bar is one hue. The Jobs
+  page filters by result with one row of choices. Titillium Web and its files
+  are gone.
+- `animus ui` reads GitHub for its PRs' outcomes when it starts and every ten
+  minutes (in a process of its own, when `gh` is installed), so merged and
+  closed PRs show as such on the local display's overview as well as its Jobs
+  page.
+- This repo's profile has a ui target, `display`: the display served from
+  made-up jobs (`scripts/display-fixture.ts`), each page compared with its
+  design in `docs/design/display/`. Display specs can now be `type: ui`.
+
 ## 0.5.1 (2026-11-18)
 
 - The display's RECENT is now FINISHED: the 30 newest jobs that ended or were

@@ -57,6 +57,8 @@ export type JobPage = {
   /** When it was cut into more than one slice: each in order, and whether its gates passed. */
   slices?: { title: string; delivers: string; done: boolean }[];
   checks?: JobCheck[];
+  /** How many times its gates ran: the job folder's gate run files. */
+  gate_runs?: number;
   /** Every review round, first to last. */
   reviews?: Pick<Review, 'summary' | 'findings'>[];
   /** Every question the job asked, with the answer it was given; the one it waits on has none. */
@@ -71,7 +73,7 @@ export type JobPage = {
 export type DisplayPr = { job: number; repo: string; person: string; number: number; title: string; url: string; draft: boolean; created: string };
 
 /** A PR one of Helix's jobs opened that GitHub lists as closed: merged or not, and when. */
-export type DisplayClosed = { job: number; number: number; merged: boolean; at: string };
+export type DisplayClosed = { /** Helix's number, or a local job's own id. */ job: number | string; number: number; merged: boolean; at: string };
 
 export type DisplayRepo ={ name: string; base?: string; gates?: string[] };
 

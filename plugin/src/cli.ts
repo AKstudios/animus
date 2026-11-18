@@ -1,4 +1,5 @@
 // The animus command.
+import { spawn } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { parseArgs } from 'node:util';
@@ -365,6 +366,11 @@ async function main(argv: string[]): Promise<number> {
         const url = `http://127.0.0.1:${await listenLocal(server, LOCAL_PORT)}`;
         openPage(url);
         say(`The jobs this machine ran, at ${url}. Press Ctrl-C to stop.`);
+        // Whether each PR merged or closed comes from outcomes.json: read GitHub now and every ten minutes, in a process of its own so the display never waits on it.
+        const outcomes = () => { if (onPath('gh')) spawn(process.execPath, [...process.execArgv, process.argv[1]!, 'outcomes'], { stdio: 'ignore' }).on('error', () => {}); };
+        outcomes();
+        const every = setInterval(outcomes, 10 * 60_000);
+        server.once('close', () => clearInterval(every));
         // Listening keeps the process alive; Ctrl-C ends it cleanly.
         await new Promise<void>((done) => { process.once('SIGINT', () => { server.close(); done(); }); });
         return 0;

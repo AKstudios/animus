@@ -142,6 +142,8 @@ test('a job page shows the job\'s facts, spec, stages and slices, checks with a 
     { question: 'Keep the cover?', answer: 'Yes, as page one.', answered: true },
   ]);
   assert.deepEqual([v.log, v.follow], [lines, false]);
+  // Two gate run files in the folder.
+  assert.equal(v.numbers[2]!.v, '2');
 });
 
 // Protects: a job that has not started, or whose folder is missing, still has a page. Fails when: a missing file makes Helix fail the request.
@@ -158,6 +160,43 @@ test('a queued job\'s page shows its spec and facts, and says it has no stages, 
 const page = (job: Partial<DisplayJob>, over: Partial<JobPage> = {}): JobPage => ({
   at: new Date(NOW).toISOString(), stages: STAGES, log: '', ...over,
   job: { id: 9, state: 'running', person: 'ana', repo: 'app', title: 'Live', submitted: '2026-11-17T11:00:00Z', ...job },
+});
+
+// Protects: criterion 4, the outcome, four numbers and the time bar. Fails when: the tag, the merge time, a number or a stage's share is wrong.
+test('a merged job page leads with its tag and line, four numbers and a bar of each stage\'s share of the time', () => {
+  const p = page({ state: 'ended', outcome: 'pr', pr: 'https://github.com/o/app/pull/4', cost_usd: 3.4, started: '2026-11-17T10:05:00Z', ended: '2026-11-17T10:40:30Z' }, {
+    ms: { setup: 0, plan: 120_000, implement: 360_000, gates: 0, review: 120_000 }, gate_runs: 3,
+    reviews: [{ summary: 'ok', findings: [] }], slices: [{ title: 'a', delivers: '', done: true }, { title: 'b', delivers: '', done: false }],
+  });
+  const v = jobView(p, NOW, false, { job: 9, number: 4, merged: true, at: '2026-11-17T12:00:30Z' });
+  assert.deepEqual([v.tag, v.line], [{ text: 'MERGED #4', tone: 'merged' }, 'app · ana · started 2026-11-17 10:05 UTC · merged after 1h 20m']);
+  assert.deepEqual(v.numbers, [{ k: 'time taken', v: '35m' }, { k: 'cost', v: '$3.40' }, { k: 'gate runs', v: '3' }, { k: 'slices passed', v: '1 of 2' }]);
+  assert.deepEqual(v.bar, [
+    { name: 'plan', took: '2m', pct: 20, on: false }, { name: 'implement', took: '6m', pct: 60, on: false }, { name: 'review', took: '2m', pct: 20, on: false },
+  ]);
+  assert.equal(jobView({ ...p, slices: undefined }, NOW).numbers[3]!.v, '1');
+});
+
+// Protects: criterion 5, criteria in the spec's words with their checks. Fails when: a criterion is matched to the wrong check, its command is lost, or a spec that cannot be read hides checks.
+test('a job page lists each acceptance criterion with its check, the other checks as pills, and falls back to pills when the spec has no list', () => {
+  const spec = '# T\n\n## Acceptance criteria\n\n1. First thing\n   wraps here.\n   $ node --test a.ts\n2. Second thing\n\n## Out of scope\n\n- nope\n';
+  const checks = [
+    { name: 'test', command: 'npm test', status: 'fail' as const, detail: '1s', output: 'boom' },
+    { name: 'acceptance-2', command: 'node --test b.ts', status: 'fail' as const, detail: '1s', output: 'not ok' },
+    { name: 'acceptance-1', command: 'node --test a.ts', status: 'ok' as const, detail: '1s' },
+    { name: 'lint', command: 'npm run lint', status: 'skip' as const, detail: '' },
+  ];
+  const v = jobView(page({ state: 'ended' }, { spec, checks }), NOW);
+  assert.deepEqual(v.criteria, [
+    { text: 'First thing wraps here.', tag: 'ok', tone: 'ink', command: 'node --test a.ts' },
+    { text: 'Second thing', tag: 'FAIL', tone: 'fail', command: 'node --test b.ts', output: 'not ok' },
+  ]);
+  assert.deepEqual(v.pills, [
+    { name: 'test', command: 'npm test', tag: 'FAIL', tone: 'fail', output: 'boom' },
+    { name: 'lint', command: 'npm run lint', tag: 'skip', tone: 'mute' },
+  ]);
+  const bare = jobView(page({ state: 'ended' }, { spec: 'no list', checks }), NOW);
+  assert.deepEqual([bare.criteria, bare.pills.length], [[], 4]);
 });
 
 // Protects: a running job's page follows it. Fails when: the stage it is on is not marked, or its log is not followed.

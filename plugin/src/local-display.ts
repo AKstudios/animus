@@ -63,12 +63,20 @@ export function localJobs(): DisplayJob[] {
 /** What the overview shows: the jobs, and a project for each repository they ran in. */
 export function localDisplay(): Display {
   const jobs = localJobs();
+  let outcomes: Outcomes = {};
+  try { outcomes = readOutcomes(); } catch { /* unreadable: no PR is known */ }
+  // A PR outcomes.json saw merge or close, in the shape Helix sends from GitHub.
+  const closed = jobs.flatMap((j) => {
+    const o = j.pr ? outcomes[j.pr] : undefined;
+    const n = Number(/(\d+)\/?$/.exec(j.pr ?? '')?.[1]);
+    return o && o.state !== 'OPEN' && n ? [{ job: j.id, number: n, merged: o.state === 'MERGED', at: o.closed ?? o.checked }] : [];
+  });
   return {
     name: hostname(), at: new Date().toISOString(), local: true,
     // Nothing is queued on a laptop and nothing limits how many jobs run: the display shows no slots.
     slots: jobs.filter((j) => j.state === 'running').length, stages: STAGES,
     repos: [...new Set(jobs.map((j) => j.repo))].map((name) => ({ name })),
-    jobs,
+    jobs, ...(closed.length ? { closed } : {}),
   };
 }
 

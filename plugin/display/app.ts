@@ -8,7 +8,7 @@ import { atEnd, jobView, type JobPageView } from './job-view.ts';
 import { keepOlder, peopleView, personView } from './people-view.ts';
 import { filterOf, jobListView, queryOf, RESULTS } from './job-list.ts';
 import type { Display, JobListPage, JobPage, PeoplePage, PersonPage } from './shape.ts';
-import { view, type Live, type Pr, type Project, type Recent, type View, type Waiting } from './view.ts';
+import { view, type Live, type Pr, type Project, type Need, type Recent, type View, type Waiting } from './view.ts';
 
 const POLL_MS = 2000;
 const RETRY_MS = 5000;
@@ -100,23 +100,21 @@ function header(v: View | undefined): string {
   const squares = v && v.slots <= 16 ? `<div class="squares">${Array.from({ length: v.slots }, (_, i) => `<span${i < v.running ? ' class="on"' : ''}></span>`).join('')}</div>` : '';
   const slots = v ? `${v.running}/${v.slots}` : 'connecting';
   return `<header class="head">
-    <div class="brand">${LOGO}<div class="wordmark">HELIX</div>${v ? `<div class="machine">${esc(v.name)}</div>` : ''}</div>
+    <div class="brand">${LOGO}<div class="machine">${esc(v?.name ?? 'Helix')}</div></div>
+    <nav class="tabs" aria-label="Pages">
+      ${[['Overview', '/', 'overview'], ['Jobs', '/jobs', 'jobs'], ...(v?.people === false ? [] : [['People', '/people', 'people']])].map(([name, href, key]) => `<a href="${href}"${at.page === key || (key === 'jobs' && at.page === 'job') ? ' aria-current="page"' : ''}>${name}</a>`).join('')}
+    </nav>
     <div class="stats">
-      ${v?.local ? `<div><span class="k">RUNNING</span> <span class="b">${v.running}</span></div>`
-        : `<div class="stat-slots"><span class="k">SLOTS</span>${squares}<span class="b">${slots}</span></div>
-      <div><span class="k">QUEUED</span> <span class="b">${v?.queued ?? 0}</span></div>`}
-      <div><span class="k">NEEDS INPUT</span> <span class="asks">${v?.asks ?? 0}</span></div>
-      <a class="k" href="/jobs">JOBS</a>
-      ${v?.people === false ? '' : '<a class="k" href="/people">PEOPLE</a>'}
+      ${v?.local ? `<div><span class="k">running</span> <span class="b">${v.running}</span></div>`
+        : `<div class="stat-slots"><span class="k">slots</span>${squares}<span class="b">${slots}</span></div>`}
       <div class="time">${wall(new Date())}</div>
-      ${readToken(storage) && !v?.local ? '<button type="button" class="sign-out" data-sign-out>SIGN OUT</button>' : ''}
+      ${readToken(storage) && !v?.local ? '<button type="button" class="sign-out" data-sign-out>Sign out</button>' : ''}
     </div>
-  </header>
-  <div class="rule"><span></span></div>`;
+  </header>`;
 }
 
 const offline = () => `<div class="offline" role="status">
-  <span class="dot"></span><span class="what">CANNOT REACH HELIX</span>
+  <span class="dot"></span><span class="what">Cannot reach Helix</span>
   <span>${state.heard ? `This is the last state it reported, at ${wall(state.heard)}.` : 'It has not answered since this page was opened.'} Trying again every ${RETRY_MS / 1000} seconds.</span>
 </div>`;
 
@@ -125,17 +123,19 @@ const project = (p: Project) => `<button type="button" class="project${p.busy ? 
   <span class="ticks" aria-hidden="true">${p.ticks.map((t) => `<span class="tick ${t}"></span>`).join('')}<span class="rest"></span></span>
 </button>`;
 
-const nav = (v: View) => `<nav class="nav" aria-label="Projects">
-  <div class="nav-head label"><span>PROJECTS</span><span>${v.projects.length}</span></div>
-  <button type="button" class="all" data-pick="" aria-pressed="${!v.sel}">ALL PROJECTS</button>
+const week = (v: View) => `<section class="panel week" data-key="week">
+  <h2>This week</h2>
+  <dl>
+    <div><dt>PRs merged</dt><dd>${v.week.merged}</dd></div><div><dt>Jobs finished</dt><dd>${v.week.finished}</dd></div>
+    <div><dt>Spent</dt><dd>${v.week.spent}</dd></div><div><dt>Median job</dt><dd>${v.week.median}</dd></div>
+  </dl>
+</section>`;
+
+const nav = (v: View) => `<aside class="side">${week(v)}<nav class="panel projects" aria-label="Projects">
+  <h2>Projects <span class="count">${v.projects.length}</span></h2>
+  <button type="button" class="all" data-pick="" aria-pressed="${!v.sel}">All projects</button>
   ${v.projects.map(project).join('')}
-  <div class="legend">
-    <div><span class="tick running"></span>running</div>
-    <div><span class="tick ended"></span>ended</div>
-    <div><span class="tick ask"></span>needs input</div>
-    <div><span class="tick queued"></span>queued</div>
-  </div>
-</nav>`;
+</nav></aside>`;
 
 const track = (v: View, j: Live) => `<span class="track" aria-hidden="true">${Array.from({ length: v.stages }, (_, i) => `<span class="seg${i < j.stage ? ' done' : i === j.stage ? ' on' : ''}"></span>`).join('')}</span>`;
 
@@ -143,7 +143,6 @@ const track = (v: View, j: Live) => `<span class="track" aria-hidden="true">${Ar
 const who = (j: { person: string; personPage?: string }) => (j.personPage ? `<a href="${esc(j.personPage)}">${esc(j.person)}</a>` : esc(j.person));
 
 const card = (v: View, j: Live) => `<article class="card" data-key="j-${j.id}">
-  <span class="corner-a" aria-hidden="true"></span><span class="corner-b" aria-hidden="true"></span>
   <div class="card-top"><span><span class="b">${ref(j.id)}</span> <span class="mute">${j.by.map((b) => (b.page ? `<a href="${esc(b.page)}">${esc(b.text)}</a>` : esc(b.text))).join(' · ')}</span></span><span class="elapsed">${j.elapsed}</span></div>
   <a class="card-title" href="${esc(j.page)}">${esc(j.title)}</a>
   <div class="card-stage">${track(v, j)}<div class="card-step"><span class="stage-name">${esc(j.stageText)}</span><span class="mute">${esc(j.stepText)}</span></div></div>
@@ -155,32 +154,38 @@ const row = (v: View, j: Live) => `<div class="row" data-key="j-${j.id}">
   ${track(v, j)}<span class="stage">${esc(j.stageText)} <span class="step">${esc(j.stepShort)}</span></span><span class="elapsed">${j.elapsed}</span>
 </div>`;
 
-const waiting = (j: Waiting) => `<div class="wait${j.ask ? ' ask' : ''}" data-key="j-${j.id}">
+const queued = (j: Waiting) => `<div class="wait" data-key="j-${j.id}">
   <span class="id">${ref(j.id)}</span><span class="tag">${j.tag}</span><a class="title" href="${esc(j.page)}">${esc(j.title)}</a>
   <span class="by">${esc(j.repo)} · ${who(j)}</span><span class="note">${esc(j.note)}</span>
 </div>`;
 
+const need = (j: Need) => `<article class="ask-card" data-key="j-${j.id}">
+  <p class="question">${esc(j.question)}</p>
+  <div class="by"><span class="id">${ref(j.id)}</span> ${esc(j.repo)} · <a href="${esc(j.page)}">${esc(j.title)}</a> · waiting <span class="mono">${esc(j.waited)}</span></div>
+  <div class="ask-act"><code>${esc(j.command)}</code><a class="ask-btn" href="${esc(j.page)}">Open job</a></div>
+</article>`;
+
 const recent = (j: Recent) => `<div class="done-row" data-key="j-${j.id}">
-  <span class="id">${ref(j.id)}</span>
   ${j.href ? `<a class="tag tone-${j.tone}" href="${esc(j.href)}" target="_blank" rel="noopener noreferrer">${esc(j.tag)}</a>` : `<span class="tag tone-${j.tone}">${esc(j.tag)}</span>`}
-  <a class="title" href="${esc(j.page)}">${esc(j.title)}</a><span class="by">${[esc(j.repo), who(j), esc(j.meta)].filter(Boolean).join(' · ')}</span>
+  <a class="title" href="${esc(j.page)}">${esc(j.title)}</a><span class="by">${[ref(j.id), esc(j.repo), who(j), esc(j.meta)].filter(Boolean).join(' · ')}</span>
   ${j.reason ? `<span class="reason tone-${j.tone}">${esc(j.reason)}</span>` : ''}
 </div>`;
 
 const openPr = (p: Pr) => `<div class="done-row" data-key="pr-${esc(p.href)}">
-  <span class="id">#${p.id}</span>
-  <a class="tag tone-${p.draft ? 'ask' : 'ink'}" href="${esc(p.href)}" target="_blank" rel="noopener noreferrer">${esc(p.tag)}</a>
-  <a class="title" href="${esc(p.page)}">${esc(p.title)}</a><span class="by">${esc(p.repo)} · ${who(p)}</span>
+  <a class="tag tone-${p.draft ? 'mute' : 'open'}" href="${esc(p.href)}" target="_blank" rel="noopener noreferrer">${esc(p.tag)}</a>
+  <a class="title" href="${esc(p.page)}">${esc(p.title)}</a><span class="by">#${p.id} · ${esc(p.repo)} · ${who(p)}</span>
 </div>`;
 
 const section = (name: string, title: string, body: string, pulse = false) => `<section class="section ${name}">
-  <div class="section-head label">${pulse ? '<span class="pulse"></span>' : ''}<h2>${title}</h2><span class="to-edge"></span></div>
+  <div class="section-head">${pulse ? '<span class="pulse"></span>' : ''}<h2>${title}</h2><span class="to-edge"></span></div>
   ${body}
 </section>`;
 
 function main(v: View): string {
+  const h = v.headline;
   const scope = `<div class="scope">
-    <div><div class="label">${v.sel ? 'PROJECT' : 'OVERVIEW'}</div><h1>${esc(v.title)}</h1></div>
+    <div>${v.sel ? `<div class="project-title">${esc(v.title)}</div>` : ''}<h1 class="headline">${h.needs ? `<span class="needs">${esc(h.needs)}</span> ` : ''}${esc(h.rest)}</h1>
+      ${h.last ? `<div class="last">${esc(h.last.when)} · <span class="tag tone-${h.last.tone}">${esc(h.last.tag)}</span></div>` : ''}</div>
     ${v.sel ? `<div class="facts" data-key="facts-${esc(v.sel.id)}">
       ${v.sel.base ? `<div><span class="mute">base</span> ${esc(v.sel.base)}</div>` : ''}
       ${v.sel.gates ? `<div><span class="mute">gates</span> ${esc(v.sel.gates)}</div>` : ''}
@@ -198,57 +203,64 @@ function main(v: View): string {
     : v.live.length > DENSE ? `<div class="rows">${v.live.map((j) => row(v, j)).join('')}</div>`
     : `<div class="cards${v.live.length > MANY ? ' many' : ''}">${v.live.map((j) => card(v, j)).join('')}</div>`;
   const lists = v.local
-    ? v.byProject.map((g) => section('recent', `${esc(g.project.toUpperCase())} · ${g.jobs.length}`, g.jobs.map(recent).join(''))).join('')
-    : `${v.prs.length ? section('prs', `OPEN PRS · ${v.prs.length}`, v.prs.map(openPr).join('')) : ''}
-    ${v.finished.length ? section('recent', `FINISHED · ${v.finished.length}`, v.finished.map(recent).join('')) : ''}`;
+    ? v.byProject.map((g) => section('recent', `${esc(g.project)} <span class="count">${g.jobs.length}</span>`, g.jobs.map(recent).join(''))).join('')
+    : `${v.prs.length ? section('prs', `Open PRs <span class="count">${v.prs.length}</span>`, v.prs.map(openPr).join('')) : ''}
+    ${v.finished.length ? section('recent', `Finished <span class="count">${v.finished.length}</span>`, v.finished.map(recent).join('')) : ''}`;
   return `<main class="main">${scope}
-    ${section('live', `AGENTS WORKING NOW · ${v.live.length}`, live, true)}
-    ${v.waiting.length ? section('waiting', `WAITING · ${v.waiting.length}`, v.waiting.map(waiting).join('')) : ''}
+    ${v.needs.length ? section('needs', `Needs you <span class="count">${v.needs.length}</span>`, v.needs.map(need).join('')) : ''}
+    ${section('live', `Working now <span class="count">${v.live.length}</span>`, live, true)}
+    ${v.line.length ? section('waiting', `Queued <span class="count">${v.queued}</span>`, v.line.map(queued).join('')) : ''}
     ${lists}
   </main>`;
 }
 
-const back = '<a class="back" href="/">&larr; OVERVIEW</a>';
+const back = (href: string, name: string) => `<a class="back" href="${href}">&larr; ${name}</a>`;
 
 const signIn = `<form class="sign-in" data-sign-in>
-  <label for="token" class="label">HELIX TOKEN</label>
+  <label for="token" class="label">Helix token</label>
   <input id="token" name="token" type="password" autocomplete="off" spellcheck="false" required>
-  <button type="submit">SIGN IN</button>
+  <button type="submit">Sign in</button>
 </form>`;
 
 const pre = (text: string, attrs = '') => `<pre class="text"${attrs}>${esc(text)}</pre>`;
 const none = (text: string) => `<div class="none">${esc(text)}</div>`;
 
 function jobSections(v: JobPageView): string {
-  const stages = `<div class="steps">${v.stages.map((s) => `<div class="step-row${s.on ? ' on' : ''}"><span>${esc(s.name)}</span><span class="mute">${s.on ? 'now' : esc(s.took)}</span></div>`).join('')}</div>`;
+  const stages = v.bar.length ? `<svg class="timebar" viewBox="0 0 100 1" preserveAspectRatio="none" role="img" aria-label="Where the time went">${v.bar.map((s, i) => `<rect class="seg-${i % 7}" x="${v.bar.slice(0, i).reduce((a, b) => a + b.pct, 0)}" width="${s.pct}" height="1"/>`).join('')}</svg>
+    <div class="timekey">${v.bar.map((s, i) => `<span class="${s.on ? 'on' : ''}"><i class="seg-${i % 7}"></i>${esc(s.name)} <code>${s.on ? 'now' : esc(s.took)}</code></span>`).join('')}</div>` : '';
+  const fold = (name: string, title: string, body: string, open = false) => `<details class="fold ${name}" data-key="fold-${name}"${open ? ' open' : ''}><summary>${title}</summary>${body}</details>`;
+  const criteria = v.criteria.map((c) => `<div class="criterion"><span class="tag tone-${c.tone}">${esc(c.tag)}</span><div class="what"><p>${esc(c.text)}</p>${c.command ? `<code>${esc(c.command)}</code>` : ''}</div>${c.output ? `<details class="out"><summary>Output</summary>${pre(c.output)}</details>` : ''}</div>`).join('');
+  const pills = v.pills.map((c) => c.output ? `<details class="pill tone-${c.tone}"><summary>${esc(c.name)} ${esc(c.tag)}</summary>${pre(c.output)}</details>` : `<span class="pill tone-${c.tone}" title="${esc(c.command)}">${esc(c.name)} ${esc(c.tag)}</span>`).join('');
   const slices = v.slices.length ? `<ol class="slices">${v.slices.map((s) => `<li${s.done ? ' class="done"' : ''}><span class="b">${esc(s.title)}</span> <span class="mute">${s.done ? 'done' : ''}</span><div class="mute">${esc(s.delivers)}</div></li>`).join('')}</ol>` : '';
-  const checks = v.checks.map((c) => `<div class="check"><span class="tag tone-${c.tone}">${esc(c.tag)}</span><span class="b">${esc(c.name)}</span><code>${esc(c.command)}</code><span class="mute">${esc(c.detail)}</span>${c.output !== undefined ? pre(c.output) : ''}</div>`).join('');
-  const reviews = v.reviews.map((r) => `<div class="round"><div class="label">${esc(r.title.toUpperCase())}</div><p>${esc(r.summary)}</p>
+  const reviews = v.reviews.map((r) => `<div class="round"><div class="label">${esc(r.title)}</div><p>${esc(r.summary)}</p>
     ${r.findings.map((f) => `<div class="finding"><span class="tag tone-${f.tone}">${esc(f.tag)}</span>${f.where ? `<code>${esc(f.where)}</code>` : ''}<p>${esc(f.problem)}</p>${f.fix ? `<p class="mute">${esc(f.fix)}</p>` : ''}</div>`).join('') || none('No findings.')}</div>`).join('');
   const shots = v.shots.map((s) => {
     const src = shotUrls.get(shotKey(s.src));
     return `<figure class="shot" data-key="s-${esc(s.src)}">${src ? `<img src="${esc(src)}" alt="${esc(s.name)}">` : none('Loading…')}<figcaption>${esc(s.name)}</figcaption></figure>`;
   }).join('');
-  const questions = v.questions.map((q) => `<div class="qa"><p><span class="label">ASKED</span> ${esc(q.question)}</p><p${q.answered ? '' : ' class="tone-ask"'}><span class="label">ANSWERED</span> ${esc(q.answer)}</p></div>`).join('');
+  const questions = v.questions.map((q) => `<div class="qa"><p><span class="label">Asked</span> ${esc(q.question)}</p><p${q.answered ? '' : ' class="tone-ask"'}><span class="label">Answer</span> ${esc(q.answer)}</p></div>`).join('');
   return [
     v.reason ? `<pre class="text why">${esc(v.reason)}</pre>` : '',
-    section('stages', 'STAGES', `${stages}${slices}`),
-    section('checks', 'CHECKS', checks || none('No checks have run yet.')),
-    section('review', 'REVIEW', reviews || none('Not reviewed yet.')),
-    shots ? section('screenshots', 'SCREENSHOTS', `<div class="shots">${shots}</div>`) : '',
-    section('questions', 'QUESTIONS', questions || none('It has asked nothing.')),
-    section('spec', 'SPEC', v.spec ? pre(v.spec) : none('Helix no longer has the spec.')),
-    section('log', 'LOG', v.log ? pre(v.log, ' data-log') : none(v.noLog), v.follow),
+    `<div class="numbers">${v.numbers.map((n) => `<div><code class="num">${esc(n.v)}</code><span class="mute">${esc(n.k)}</span></div>`).join('')}</div>`,
+    section('stages', 'Where the time went', stages || none('No stage has taken time yet.')),
+    criteria ? section('criteria', `Acceptance criteria <span class="count">${v.criteria.filter((c) => c.tone === 'ink').length} of ${v.criteria.length} proven</span>`, `<div class="list">${criteria}</div>`) : '',
+    section('checks', 'Checks', pills ? `<div class="pills">${pills}</div>` : none(criteria ? 'No other checks.' : 'No checks have run yet.')),
+    section('review', 'Review', reviews || none('Not reviewed yet.')),
+    shots ? section('screenshots', 'Screenshots', `<div class="shots">${shots}</div>`) : '',
+    slices ? fold('slices', `Slices <span class="count">${v.slices.filter((s) => s.done).length} of ${v.slices.length}</span>`, slices) : '',
+    fold('questions', 'Questions', questions || none('It has asked nothing.')),
+    fold('spec', 'Spec', v.spec ? pre(v.spec) : none('Helix no longer has the spec.')),
+    fold('log', 'Log', v.log ? pre(v.log, ' data-log') : none(v.noLog), v.follow),
   ].join('');
 }
 
 function jobMain(id: number | string, now: number, local: boolean): string {
   const notice = jobNotice(id, readToken(storage) !== null, state.jobStatus, local);
-  const v = state.job?.job.id === id ? jobView(state.job, now, local) : undefined;
-  const facts = v ? `<div class="facts">${v.facts.map((f) => `<div><span class="mute">${esc(f.k)}</span> ${f.href ? `<a href="${esc(f.href)}" target="_blank" rel="noopener noreferrer">${esc(f.v)}</a>` : f.page ? `<a href="${esc(f.page)}">${esc(f.v)}</a>` : esc(f.v)}</div>`).join('')}</div>` : '';
-  const scope = `<div class="scope"><div><div class="label">JOB${typeof id === 'number' ? ` #${id}` : ''}</div><h1>${esc(v?.title ?? `Job ${ref(id) || id}`)}</h1></div>${notice ? '' : facts}</div>`;
+  const v = state.job?.job.id === id ? jobView(state.job, now, local, state.display?.closed?.find((c) => c.job === id)) : undefined;
+  const lead = v && !notice ? `<div class="tag-row"><span class="tag tone-${v.tag.tone}">${esc(v.tag.text)}</span><span class="mute">${ref(id) ? `${ref(id)} · ` : ''}${esc(v.line)}</span></div>` : '';
+  const scope = `<div class="scope"><div><h1>${esc(v?.title ?? `Job ${ref(id) || id}`)}</h1>${lead}</div></div>`;
   const body = notice ? `<div class="none boxed">${esc(notice.text)}</div>${notice.signIn ? signIn : ''}` : v ? jobSections(v) : '';
-  return `<main class="main">${back}${scope}${body}</main>`;
+  return `<main class="main">${back('/jobs', 'Jobs')}${scope}${body}</main>`;
 }
 
 function peopleList(local: boolean): string {
@@ -258,7 +270,7 @@ function peopleList(local: boolean): string {
   const rows = peopleView(state.people).rows.map((p) => `<tr data-key="u-${esc(p.name)}">
     <td><a href="${esc(p.page)}">${esc(p.name)}</a></td><td>${esc(p.github)}</td><td>${esc(p.joined)}</td>
     <td class="num">${p.jobs}</td><td class="num">${p.prs}</td><td class="num">${esc(p.spent)}</td><td>${esc(p.last)}</td></tr>`).join('');
-  return rows ? `<table class="people"><thead><tr><th>PERSON</th><th>GITHUB</th><th>JOINED</th><th class="num">JOBS</th><th class="num">PRS OPENED</th><th class="num">SPENT</th><th>LAST ACTIVITY</th></tr></thead><tbody>${rows}</tbody></table>` : none('Nobody has joined this Helix yet.');
+  return rows ? `<table class="people"><thead><tr><th>Person</th><th>GitHub</th><th>Joined</th><th class="num">Jobs</th><th class="num">PRs opened</th><th class="num">Spent</th><th>Last activity</th></tr></thead><tbody>${rows}</tbody></table>` : none('Nobody has joined this Helix yet.');
 }
 
 function personSections(name: string, local: boolean): string {
@@ -268,38 +280,37 @@ function personSections(name: string, local: boolean): string {
   const v = personView(state.person, state.older);
   const facts = `<div class="facts">${v.facts.map((f) => `<div><span class="mute">${esc(f.k)}</span> ${esc(f.v)}</div>`).join('')}</div>`;
   const jobs = v.jobs.map((j) => `<div class="done-row" data-key="j-${j.id}">
-    <span class="id">#${j.id}</span>${j.href ? `<a class="tag" href="${esc(j.href)}" target="_blank" rel="noopener noreferrer">${esc(j.tag)}</a>` : `<span class="tag">${esc(j.tag)}</span>`}
-    <a class="title" href="${esc(j.page)}">${esc(j.title)}</a><span class="by">${esc(j.repo)} · ${esc(j.submitted)}</span></div>`).join('');
+    ${j.href ? `<a class="tag" href="${esc(j.href)}" target="_blank" rel="noopener noreferrer">${esc(j.tag)}</a>` : `<span class="tag">${esc(j.tag)}</span>`}
+    <a class="title" href="${esc(j.page)}">${esc(j.title)}</a><span class="by">#${j.id} · ${esc(j.repo)} · ${esc(j.submitted)}</span></div>`).join('');
   const activity = v.activity.map((a, i) => `<div class="done-row" data-key="a-${i}"><span class="by">${esc(a.when)}</span>${a.page ? `<a class="title" href="${esc(a.page)}">${esc(a.text)}</a>` : `<span class="title">${esc(a.text)}</span>`}${a.note ? `<span class="reason">${esc(a.note)}</span>` : ''}</div>`).join('');
   return [
     v.left ? `<div class="none boxed">${esc(v.left)}</div>` : '', facts,
-    section('jobs', 'JOBS', (jobs || none('No job yet.')) + (v.more ? '<button type="button" class="more" data-more>SHOW MORE</button>' : '')),
-    section('activity', 'ACTIVITY', activity || none('Nothing kept yet.')),
+    section('jobs', 'Jobs', (jobs || none('No job yet.')) + (v.more ? '<button type="button" class="more" data-more>Show more</button>' : '')),
+    section('activity', 'Activity', activity || none('Nothing kept yet.')),
   ].join('');
 }
 
-const peopleMain = (local: boolean, name?: string) => `<main class="main">${back}
-  <div class="scope"><div><div class="label">${name ? 'PERSON' : 'PEOPLE'}</div><h1>${esc(name ?? 'People')}</h1></div></div>
+const peopleMain = (local: boolean, name?: string) => `<main class="main">${name ? back('/people', 'People') : ''}
+  <div class="scope"><div><h1>${esc(name ?? 'People')}</h1></div></div>
   ${name ? personSections(name, local) : peopleList(local)}
 </main>`;
 
 /** A select that reloads the page with its filter in the address. */
-const pick = (name: 'result' | 'project' | 'person', label: string, values: readonly string[], on: string) => `<label class="mute">${label} <select data-filter="${name}">${values.map((v) => `<option value="${esc(v === 'all' || v === '' ? '' : v)}"${v === on || (v === 'all' && !on) ? ' selected' : ''}>${esc(v || 'all')}</option>`).join('')}</select></label>`;
+const pick = (name: 'result' | 'project' | 'person', label: string, values: readonly string[], on: string) => `<label class="filter"><span class="mute">${label}</span><select data-filter="${name}">${values.map((v) => `<option value="${esc(v === 'all' || v === '' ? '' : v)}"${v === on || (v === 'all' && !on) ? ' selected' : ''}>${esc(v || 'all')}</option>`).join('')}</select></label>`;
 
 function jobsMain(local: boolean): string {
   const notice = jobsNotice(readToken(storage) !== null, state.listStatus, local);
   const f = filterOf(location.search);
   // The people it offers are those on the overview's newest jobs, and the one in the address.
   const names = ['', ...new Set([...state.display!.jobs.map((j) => j.person), f.person].filter(Boolean))].sort();
-  const bar = notice ? '' : `<div class="facts">${[
-    pick('result', 'RESULT', RESULTS, f.result),
-    pick('project', 'PROJECT', ['', ...new Set([...state.display!.repos.map((r) => r.name), f.project].filter(Boolean))], f.project),
-    ...(local ? [] : [pick('person', 'PERSON', names, f.person)]),
+  const bar = notice ? '' : `<div class="filters"><nav class="segmented" aria-label="Result">${RESULTS.map((r) => `<a href="/jobs${queryOf({ ...f, result: r })}"${r === f.result ? ' aria-current="true"' : ''}>${r === 'all' ? 'All' : r[0]!.toUpperCase() + r.slice(1)}</a>`).join('')}</nav>${[
+    pick('project', 'Project', ['', ...new Set([...state.display!.repos.map((r) => r.name), f.project].filter(Boolean))], f.project),
+    ...(local ? [] : [pick('person', 'Person', names, f.person)]),
   ].join('')}</div>`;
   const rows = state.list ? jobListView({ ...state.list, jobs: [...state.list.jobs, ...state.listOlder] }, local).rows : [];
   const body = notice ? `<div class="none boxed">${esc(notice)}</div>${local ? '' : signIn}` : state.list
-    ? section('jobs', 'JOBS', (rows.map(recent).join('') || none('No job matches.')) + (state.listMore ? '<button type="button" class="more" data-more>SHOW MORE</button>' : '')) : '';
-  return `<main class="main">${back}<div class="scope"><div><div class="label">JOBS</div><h1>Jobs</h1></div></div>${bar}${body}</main>`;
+    ? `<div class="list">${rows.map(recent).join('') || none('No job matches.')}</div>${state.listMore ? '<button type="button" class="more" data-more>Show more</button>' : ''}` : '';
+  return `<main class="main"><div class="scope"><div><h1>Jobs</h1></div></div>${bar}${body}</main>`;
 }
 
 function page(): string {
@@ -307,7 +318,7 @@ function page(): string {
   const now = (state.offline && state.heard ? state.heard.getTime() : Date.now()) + state.skew;
   const v = state.display ? view(state.display, picked(), now) : undefined;
   // A job page waits for the display: whether it needs a sign-in depends on the source it answers.
-  const body = at.page === 'job' ? (state.display ? jobMain(at.id, now, state.display.local === true) : '') : at.page === 'jobs' ? (state.display ? jobsMain(state.display.local === true) : '') : at.page === 'people' ? (state.display ? peopleMain(state.display.local === true, at.name) : '') : v ? `${nav(v)}${main(v)}` : '';
+  const body = at.page === 'job' ? (state.display ? jobMain(at.id, now, state.display.local === true) : '') : at.page === 'jobs' ? (state.display ? jobsMain(state.display.local === true) : '') : at.page === 'people' ? (state.display ? peopleMain(state.display.local === true, at.name) : '') : v ? `${main(v)}${nav(v)}` : '';
   return [
     header(v),
     state.offline ? offline() : '',
@@ -326,8 +337,10 @@ const keyOf = (n: Node) => (n instanceof Element ? n.getAttribute('data-key') : 
  * data-key are matched by it; the rest by position.
  */
 function morph(from: Element, to: Element): void {
-  for (const a of [...from.attributes]) if (!to.hasAttribute(a.name)) from.removeAttribute(a.name);
-  for (const a of [...to.attributes]) if (from.getAttribute(a.name) !== a.value) from.setAttribute(a.name, a.value);
+  // A folded part is opened and closed by the person, never by a redraw.
+  const kept = (n: string) => n === 'open' && from.nodeName === 'DETAILS';
+  for (const a of [...from.attributes]) if (!to.hasAttribute(a.name) && !kept(a.name)) from.removeAttribute(a.name);
+  for (const a of [...to.attributes]) if (!kept(a.name) && from.getAttribute(a.name) !== a.value) from.setAttribute(a.name, a.value);
   const keyed = new Map<string, ChildNode>();
   for (const n of from.childNodes) { const k = keyOf(n); if (k) keyed.set(k, n); }
   let cursor = from.firstChild;
