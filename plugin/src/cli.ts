@@ -13,8 +13,8 @@ import { githubLogin, joinHelix, leaveHelix, openPage } from './join.ts';
 import { addProject } from './project.ts';
 import { describe, failsOnBase, jobChecks, runChecks } from './gates.ts';
 import { githubUrl, mainCheckout, touchedFiles } from './git.ts';
-import { describeRuns, jobDir, loadState, readRuns, type Run } from './log.ts';
-import { factoryVersion, jobOf, onPath, runJob, uiJobOf } from './pipeline.ts';
+import { describeRuns, describeTools, jobDir, loadState, readRuns, readTools, type Run } from './log.ts';
+import { jobOf, onPath, runJob, uiJobOf } from './pipeline.ts';
 import { describeNumbers, numbers, refreshOutcomes } from './outcomes.ts';
 import { prFacts, publish, pushEvidence } from './pr.ts';
 import { personalFor, readSkillsFile, skillsForRole, snapshotSkills, whereToRun, type PersonalSkill, type Where } from './personal.ts';
@@ -27,7 +27,7 @@ import * as helix from './remote.ts';
 import { describeSkills, grantsFor } from './skills.ts';
 import { criteriaSoFar, describeSlicing, planSlices } from './slices.ts';
 import { loadSpec } from './spec.ts';
-import { animusVersion } from './version.ts';
+import { animusVersion, factoryVersion } from './version.ts';
 import { describeShots, takeShots, uiDown, uiTarget, uiUp } from './ui.ts';
 import { basename, join } from 'node:path';
 
@@ -62,6 +62,11 @@ const USAGE = `animus: a spec goes in, a pull request with proof comes out
         Pick up a job that asked a question or was interrupted.
   animus runs [-n <count>] [--json]
         The run log, newest last.
+  animus tools <job> [--json]
+        Each agent session of the job (stage, role, tier, model) with its tool
+        calls counted by tool and its failed calls, then every call in order:
+        when, which tool, what it touched, and whether it failed. --json
+        prints the lines of the job's tools.jsonl.
   animus outcomes [--json]
         What became of each pull request, read from GitHub (merged or closed,
         time to merge, human commits, reverted or reworked within 30 days),
@@ -341,6 +346,15 @@ async function main(argv: string[]): Promise<number> {
     case 'runs': {
       const runs = readRuns().slice(-Number(values.n ?? 20));
       console.log(values.json ? JSON.stringify(runs, null, 2) : describeRuns(runs));
+      return 0;
+    }
+    case 'tools': {
+      const job = positionals[0];
+      if (!job) throw new AnimusError('usage: animus tools <job> [--json]');
+      const runs = readRuns().filter((r) => r.job === job);
+      const lines = readTools(job);
+      if (!runs.length && !lines.length) throw new AnimusError(`no run of job ${job} in the run log`);
+      console.log(values.json ? lines.map((l) => JSON.stringify(l)).join('\n') : describeTools(runs.flatMap((r) => r.agents), lines));
       return 0;
     }
     case 'outcomes': {

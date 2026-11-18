@@ -57,9 +57,11 @@ export type AgentResult = {
   transcript?: string;
   /** Tokens in the session's context when it ended, when the transcript says: what a resume would start from. */
   context?: number;
+  /** The session's tool calls, when the transcript says. */
+  tools?: ToolCall[];
 };
 
-export type Agent = (req: AgentRequest) => AgentResult;
+export type Agent= (req: AgentRequest) => AgentResult;
 
 const DEFAULT_TIMEOUT_MS = 60 * 60 * 1000;
 
@@ -129,10 +131,47 @@ export function claudeAgent(factory: Factory, command = process.env.ANIMUS_CLAUD
         result.transcript = file;
         const context = contextAtEnd(file);
         if (context !== undefined) result.context = context;
+        result.tools = toolCalls(file, started);
       }
     }
     return result;
   };
+}
+
+/** One tool call of a session, in no provider's words: when, which tool, what it touched, whether it failed, how long it took. */
+export type ToolCall = { at: string; tool: string; target: string; ok: boolean; ms: number };
+
+const TARGET_MAX = 300;
+/** What a tool call touched: a command, a file, a pattern, an address. Never the tool's output. */
+const targetOf = (input: Record<string, unknown>): string => {
+  const v = input.command ?? input.file_path ?? input.notebook_path ?? input.pattern ?? input.url ?? input.query ?? input.path;
+  return typeof v === 'string' ? v.slice(0, TARGET_MAX) : '';
+};
+
+/**
+ * The tool calls in a Claude Code transcript, in order. A call with no result (the session ended mid-call) counts as failed.
+ * Only calls made at or after `since` (ms): a resumed session's transcript also holds the turns before.
+ */
+export function toolCalls(transcript: string, since = 0): ToolCall[] {
+  let lines: string[];
+  try { lines = readFileSync(transcript, 'utf8').split('\n'); } catch { return []; }
+  const calls: (ToolCall & { id: string; start: number })[] = [];
+  for (const line of lines) {
+    if (!line.includes('"tool_use"') && !line.includes('"tool_result"')) continue;
+    let e: { timestamp?: string; message?: { content?: unknown } };
+    try { e = JSON.parse(line); } catch { continue; }
+    const at = e.timestamp ?? '';
+    const time = Date.parse(at);
+    if (!Array.isArray(e.message?.content)) continue;
+    for (const part of e.message.content as { type?: string; id?: string; name?: string; input?: Record<string, unknown>; tool_use_id?: string; is_error?: boolean }[]) {
+      if (part.type === 'tool_use' && part.id && part.name) calls.push({ id: part.id, start: time, at, tool: part.name, target: targetOf(part.input ?? {}), ok: false, ms: 0 });
+      else if (part.type === 'tool_result') {
+        const call = calls.find((c) => c.id === part.tool_use_id);
+        if (call) { call.ok = !part.is_error; call.ms = Number.isNaN(time) || Number.isNaN(call.start) ? 0 : Math.max(0, time - call.start); }
+      }
+    }
+  }
+  return calls.filter((c) => !(c.start < since)).map(({ at, tool, target, ok, ms }) => ({ at, tool, target, ok, ms }));
 }
 
 /**

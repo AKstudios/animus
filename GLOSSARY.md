@@ -70,6 +70,12 @@ Bringing what the base branch gained since a job started into the job's
 branch, just before its pull request opens.
 _Avoid_: Sync, rebase, update branch
 
+**Fix**:
+A job that continues an open pull request another job opened, from what a
+person asked on it, and updates that same pull request. Not a gate's fix
+round, which is a retry inside one job.
+_Avoid_: Follow-up, revision, amendment
+
 **Draft**:
 A spec written from a Slack message or a GitHub comment and its references,
 waiting for its person to submit, revise or discard it.

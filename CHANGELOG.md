@@ -9,6 +9,31 @@ clients with how to update.
 ## Unreleased
 
 - The display's overview is the same on `animus ui` and on Helix: Needs you, Working now, Queued, Open pull requests, Finished. Result tags are in sentence case, a Finished row says how long its PR took to merge, and the Projects panel has ticks and a key in place of the "All projects" button.
+- A spec refused at admission, and a job ended by SIGINT, SIGTERM or a Helix
+  cancel, now leave a run line with cause `admit`, `interrupted` or
+  `cancelled`. Helix writes a `cancelled` file beside the job's spec before it
+  kills the job.
+- The run log's `review` gains `log`: every finding as `{ round, severity,
+  file, line, fate }` (`fixed`, `open` or `not-acted-on`), the counts as
+  before. `factory_version` is the plugin's version plus the commit (and
+  `-dirty`) from a git checkout, never `unknown`. `animus outcomes` records
+  `human_lines` (lines added and removed by commits after the job's last
+  run) beside `human_commits`, and `--json` shows them.
+- Each agent session leaves its tool calls in `tools.jsonl` in the job's
+  folder, read by the script from the session's transcript when it ends, and
+  the run log's agent entries gain `tools: { calls, errors, by_tool }`.
+  `animus tools <job>` (and `--json`) shows the sessions and every call.
+- A gate check that fails is run once more on the same tree before the work
+  is sent back. Passing then, it counts as passed, the run log marks it
+  `flaky: true` in that gate run, and the job says `flaky: <check> failed,
+  then passed on the same code`.
+- Every run that does not end as a pull request has a `cause` in the run log,
+  set by script (`setup`, `plan`, `needs-input`, `gates` with
+  `failing_checks`, `review` with `blockers_left`, `budget`, `context`,
+  `agent-error`; `admit`, `cancelled` and `interrupted` are in the list but not
+  yet set), and `animus outcomes` counts each task class's jobs by cause. A
+  job whose setup fails now leaves a run.
+
 - **Breaking:** a spec's header is held to its keys. A key other than `title`,
   `size`, `difficulty`, `type`, `base`, `ui`, `after` and `design` (or, under
   `ui`, other than `target` and `pages`) is refused with "did you mean", where

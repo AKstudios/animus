@@ -93,3 +93,16 @@ export function fakeOpener(): { path: string; opened: () => Promise<string | und
 
 /** The animus command's entry point, for spawning. */
 export const cli = join(import.meta.dirname, '..', 'src', 'cli.ts');
+
+/** A Claude Code transcript with these tool calls, one second apart; `failed` marks the calls whose result is an error. */
+export function toolTranscript(calls: { tool: string; input: Record<string, unknown>; failed?: boolean }[]): string {
+  const dir = mkdtempSync(join(tmpdir(), 'animus-transcript-'));
+  const at = (n: number) => new Date(Date.UTC(2026, 0, 1, 0, 0, n)).toISOString();
+  const lines = calls.flatMap((c, i) => [
+    { type: 'assistant', timestamp: at(i * 2), message: { content: [{ type: 'tool_use', id: `t${i}`, name: c.tool, input: c.input }] } },
+    { type: 'user', timestamp: at(i * 2 + 1), message: { content: [{ type: 'tool_result', tool_use_id: `t${i}`, is_error: Boolean(c.failed), content: 'SECRET OUTPUT' }] } },
+  ]);
+  const file = join(dir, 'session.jsonl');
+  writeFileSync(file, lines.map((l) => JSON.stringify(l)).join('\n'));
+  return file;
+}

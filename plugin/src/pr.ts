@@ -159,14 +159,15 @@ export const prState: PrLookup = (url, cwd) => {
 };
 
 /** What GitHub records about a pull request. commits holds each commit's committer date. */
-export type PrFacts = { state: PrState; createdAt: string; closedAt?: string; mergedAt?: string; mergeCommit?: string; baseRefName: string; commits: string[] };
+export type PrFacts = { state: PrState; createdAt: string; closedAt?: string; mergedAt?: string; mergeCommit?: string; baseRefName: string; commits: string[]; /** The pull request's last commit. */ head?: string };
 
 export const prFacts = (url: string, cwd: string): PrFacts | undefined => {
-  const out = gh(cwd, ['pr', 'view', url, '--json', 'state,createdAt,closedAt,mergedAt,mergeCommit,baseRefName,commits'], undefined, true);
+  const out = gh(cwd, ['pr', 'view', url, '--json', 'state,createdAt,closedAt,mergedAt,mergeCommit,baseRefName,commits,headRefOid'], undefined, true);
   if (!out) return undefined;
-  const j = JSON.parse(out) as { state: PrState; createdAt: string; closedAt: string | null; mergedAt: string | null; mergeCommit: { oid: string } | null; baseRefName: string; commits: { committedDate: string }[] };
+  const j = JSON.parse(out) as { state: PrState; createdAt: string; closedAt: string | null; mergedAt: string | null; mergeCommit: { oid: string } | null; baseRefName: string; headRefOid?: string; commits: { committedDate: string }[] };
   return {
     state: j.state, createdAt: j.createdAt, baseRefName: j.baseRefName, commits: j.commits.map((c) => c.committedDate),
+    ...(j.headRefOid ? { head: j.headRefOid } : {}),
     ...(j.closedAt ? { closedAt: j.closedAt } : {}), ...(j.mergedAt ? { mergedAt: j.mergedAt } : {}), ...(j.mergeCommit ? { mergeCommit: j.mergeCommit.oid } : {}),
   };
 };

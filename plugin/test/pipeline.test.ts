@@ -77,7 +77,7 @@ test('every run writes one line to the run log', async () => {
   assert.equal(line.cost_usd, 0.02);
   assert.equal(line.turns, 6);
   assert.deepEqual(line.gates.map((g) => [g.attempt, g.ok]), [[1, true]]);
-  assert.deepEqual(line.review, { rounds: 1, findings: 0, blockers: 0, acted_on: 0, open: 0 });
+  assert.deepEqual(line.review, { rounds: 1, findings: 0, blockers: 0, acted_on: 0, open: 0, log: [] });
   assert.equal(line.fix_rounds, 0);
   assert.ok(line.factory_version && line.started && line.ms.total >= 0);
 });
@@ -144,7 +144,10 @@ test('review blockers go back once, the gates run again, and a second review set
   assert.match(calls[2]!.prompt, /It does not say please/);
   assert.doesNotMatch(calls[2]!.prompt, /Name it better/);
   assert.match(calls[3]!.prompt, /review 2, after a fix round/);
-  assert.deepEqual(run.review, { rounds: 2, findings: 2, blockers: 1, acted_on: 1, open: 0 });
+  assert.deepEqual(run.review, {
+    rounds: 2, findings: 2, blockers: 1, acted_on: 1, open: 0,
+    log: [{ round: 1, severity: 'blocker', file: 'src/feature.txt', fate: 'fixed' }, { round: 1, severity: 'should-fix', fate: 'not-acted-on' }],
+  });
   assert.equal(run.gates.length, 2);
 });
 
@@ -157,6 +160,7 @@ test('blockers still open after the one fix round end the job as a draft PR that
   assert.equal(run.outcome, 'draft-pr');
   assert.match(d.published[0]!.body, /Still open after the review's fix round: It is wrong\./);
   assert.equal(run.review?.open, 1);
+  assert.deepEqual(run.review?.log?.map((l) => l.fate), ['fixed', 'open']);
 });
 
 test('a trivial job skips the review and says so in the PR', async () => {

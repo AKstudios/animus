@@ -6,10 +6,10 @@
 import { spawn, type ChildProcess } from 'node:child_process';
 import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { uptime } from 'node:os';
-import { basename, dirname, join } from 'node:path';
+import { basename, dirname, isAbsolute, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { AnimusError } from '../../plugin/src/proc.ts';
-import { animusHome, loadProgress, type Progress } from '../../plugin/src/log.ts';
+import { animusHome, CANCELLED_MARKER, loadProgress, type Progress } from '../../plugin/src/log.ts';
 import type { PersonalSkill } from '../../plugin/src/personal.ts';
 import { loadFactory, resolvePlan, type Tier } from '../../plugin/src/profiles.ts';
 import { parseSpec } from '../../plugin/src/spec.ts';
@@ -75,7 +75,17 @@ export class Refused extends AnimusError {
   constructor(status: number, message: string) { super(message); this.status = status; }
 }
 
+/**
+ * Tells the job, before it is killed, that it was cancelled and not just stopped: it leaves this file beside its spec.
+ * Only beside a spec with an absolute path: a job with none has no folder, and a relative one would put the file wherever Helix runs.
+ */
+function markCancelled(job: Pick<HelixJob, 'spec'>): void {
+  if (!isAbsolute(job.spec)) return;
+  try { writeFileSync(join(dirname(job.spec), CANCELLED_MARKER), ''); } catch { /* the job's folder is gone: nothing is left to tell */ }
+}
+
 /** Ends a job's process. A job is a tree (animus, the agent, the project's checks): the whole group goes where there is one. */
+
 function kill(pid: number, child?: ChildProcess): void {
   try {
     if (process.platform !== 'win32') process.kill(-pid, 'SIGTERM');
@@ -98,6 +108,7 @@ export function cancelJobsOf(store: Store, person: string, reap: (id: number) =>
   for (const job of theirs) {
     const { pid, ...rest } = job;
     store.save({ ...rest, state: 'cancelled', ended: now, reason: `${person} was removed from Helix` });
+    markCancelled(job);
     if (pid) kill(pid);
     reap(job.id);
   }
@@ -306,6 +317,7 @@ export function supervise(opts: {
       const { pid, ...rest } = job;
       saveAndTell({ ...rest, state: 'cancelled', ended: now() });
       store.record(person, 'cancelled', { job: id });
+      markCancelled(job);
       if (pid) kill(pid, children.get(id));
       reap(id);
       return store.get(id)!;

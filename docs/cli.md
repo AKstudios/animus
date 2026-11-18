@@ -87,11 +87,20 @@ existing profile.
 The run log (`~/.animus/runs.jsonl`), newest last, 20 lines unless `-n`
 says otherwise.
 
+#### `animus tools <job> [--json]`
+
+Each agent session of the job in order (stage, role, tier, model) with its
+tool calls counted by tool and its failed calls, then every call in order:
+when, which tool, what it touched (a command, a file path, a search pattern,
+a URL) and whether it failed. `--json` prints the lines of the job's
+`tools.jsonl`.
+
 #### `animus outcomes [--json]`
 
 What became of each PR, read from GitHub with `gh`: merged or closed, time
 to merge, commits by people, reverted or reworked within 30 days. Then the
-five numbers split by task class. Without `gh`, it shows what it last read.
+five numbers split by task class, with how many jobs of each class stopped
+for each `cause` (the run log's, set by script). Without `gh`, it shows what it last read.
 
 #### `animus cleanup [<job>...] [--days <n>] [--dry-run]`
 
