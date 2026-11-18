@@ -21,6 +21,7 @@ import { describePlan, escalate, modelFor, PLUGIN_ROOT, raise, readPrompt, type 
 import { animusCommand, git, AnimusError, tryGit } from './proc.ts';
 import { factoryVersion } from './version.ts';
 import { asReport, asReview, blockers, criteriaList, listFindings, REPORT_SCHEMA, REVIEW_SCHEMA, type Finding, type Report, type Review } from './review.ts';
+import { countUses, GIVEN_FILE, lessonsForPrompt, lessonsSection, type Lesson } from './lessons.ts';
 import { loadJobSkills, saveJobSkills, type PersonalSkill } from './personal.ts';
 import { roleSkills } from './skills.ts';
 import { criteriaSoFar, isPlanned, oneSlice, planSlices, type Slicing } from './slices.ts';
@@ -292,7 +293,18 @@ async function runJobWith(opts: RunOptions, deps: Deps, live: { run?: Run; start
   const instructions = (role: string) => {
     const s = roleSkills(factory, role, plan.type, wt, personal);
     for (const name of s.names) if (!run.skills.includes(name)) run.skills.push(name);
-    return { system: [readPrompt(role), s.system].filter(Boolean).join('\n\n'), ...(s.dirs.length ? { addDirs: s.dirs } : {}) };
+    return { system: [readPrompt(role), s.system, lessonsFor(role)].filter(Boolean).join('\n\n'), ...(s.dirs.length ? { addDirs: s.dirs } : {}) };
+  };
+
+  /** The lessons an agent is given, as a section of its instructions. A lesson counts as used once for the job, however many agents get it. */
+  const lessonsFor = (role: string): string => {
+    const given = lessonsForPrompt(basename(repo), role === 'ui-reviewer' ? 'reviewer' : role as Lesson['agent'], Date.now());
+    const fresh = given.map((l) => l.id).filter((id) => !run.lessons?.includes(id));
+    if (fresh.length) {
+      if (!process.env[GIVEN_FILE]) countUses(fresh);
+      run.lessons = [...(run.lessons ?? []), ...fresh];
+    }
+    return lessonsSection(given);
   };
 
   const budget = factory.limits.context_budget;
@@ -505,7 +517,7 @@ async function runJobWith(opts: RunOptions, deps: Deps, live: { run?: Run; start
       state.slicing = prior ? oneSlice(spec) : await timed('plan', () => {
         try {
           if (isPlanned(factory, spec.size)) at('plan', `planner · ${factory.planner!.tier} tier`);
-          const planned = planSlices({ factory, agent: deps.agent, spec, cwd: wt, personal, log, record: (stage, r) => record(stage, 'planner', factory.planner!.tier, factory.planner!.effort, r) });
+          const planned = planSlices({ factory, agent: deps.agent, spec, cwd: wt, personal, lessons: () => lessonsFor('planner'), log, record: (stage, r) => record(stage, 'planner', factory.planner!.tier, factory.planner!.effort, r) });
           state.sliced_by = planned.by;
           if (planned.by === 'planner') for (const name of roleSkills(factory, 'planner', plan.type, wt, personal).names) if (!run.skills.includes(name)) run.skills.push(name);
           return planned.slicing;

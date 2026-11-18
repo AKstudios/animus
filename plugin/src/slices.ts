@@ -140,13 +140,13 @@ function planPrompt(spec: Spec, maxSlices: number): string {
  * Otherwise the planner proposes, the check decides, and a refused plan goes
  * back to the same session once with the reasons.
  */
-export function planSlices(p: { factory: Factory; agent: Agent; spec: Spec; cwd: string; personal?: readonly PersonalSkill[]; log?: (line: string) => void; record?: (stage: string, result: AgentResult) => void }): Planned {
+export function planSlices(p: { factory: Factory; agent: Agent; spec: Spec; cwd: string; personal?: readonly PersonalSkill[]; /** The planner's lessons, as a section of its instructions; asked for only when it is going to plan. */ lessons?: () => string; log?: (line: string) => void; record?: (stage: string, result: AgentResult) => void }): Planned {
   const { factory, spec } = p;
   const planner = factory.planner;
   if (!planner || !isPlanned(factory, spec.size)) return { slicing: oneSlice(spec), by: 'script', sessions: [] };
   const log = p.log ?? (() => {});
   const skills = roleSkills(factory, 'planner', spec.type, p.cwd, p.personal);
-  const system = [readPrompt('planner'), skills.system].filter(Boolean).join('\n\n');
+  const system = [readPrompt('planner'), skills.system, p.lessons?.()].filter(Boolean).join('\n\n');
   const sessions: Planned['sessions'] = [];
   let prompt = planPrompt(spec, planner.max_slices);
   let session: string | undefined;

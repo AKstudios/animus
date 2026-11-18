@@ -28,6 +28,7 @@ export type Factory = {
   /** The session that cuts a spec into slices, the sizes it runs for, and the most slices a plan may have. */
   planner?: Run & { sizes: string[]; max_slices: number };
   drafter?: Run & { max_usd: number };
+  retro?: Run & { max_usd: number };
   sizes: Record<string, SizeProfile>;
   difficulties: Record<string, DifficultyProfile>;
   types: Record<string, TypeProfile>;

@@ -102,6 +102,40 @@ to merge, commits by people, reverted or reworked within 30 days. Then the
 five numbers split by task class, with how many jobs of each class stopped
 for each `cause` (the run log's, set by script). Without `gh`, it shows what it last read.
 
+#### `animus retro [--project <name>] [--days <n>] [--json]`
+
+A read-only standard-tier session (role `retro`, no worktree) over the
+project's runs of the last `--days` days (default 7; the current repo's
+project unless named). A script assembles what it reads from the run log,
+the job folders and `outcomes.json`: how each job ended, its gate runs with
+failed and flaky checks, review findings and their fate, tool calls counted
+per session, questions with their answers, and what became of the PR. It
+proposes at most 5 lessons, each one sentence with a scope (`project` or
+`factory`), the agent it is for (`implementer`, `planner`, `reviewer` or
+`spec`) and the jobs it cites. The script drops one citing fewer than two
+jobs (unless its PR was reverted or reworked), one that repeats a kept,
+dismissed or waiting lesson, and any cite that is not a job of the window.
+Nothing is kept until a person accepts it. The retro is told the kept,
+dismissed and waiting lessons of its scope, and may report a kept lesson as
+seen again in new jobs, which starts its 60 days over. It reads PR outcomes
+as `animus outcomes` last saved them.
+
+#### `animus lessons [accept <id> | dismiss <id>]`
+
+The proposed, kept and expired lessons in `~/.animus/lessons.json`, with
+ids, cited jobs, uses and days left. A kept lesson expires 60 days after it
+was accepted or last seen again by a retro; `accept` on an expired one keeps
+it again, `dismiss` drops a lesson for good. From a checkout of a project on
+Helix (or with `--helix`) it lists, accepts and dismisses Helix's lessons
+instead, kept in Helix's own Animus home by its weekly retro
+([helix.md](helix.md#lessons)); `--local` reads this machine's.
+
+Every later job of the project (a factory lesson, every project's) gives its
+kept, unexpired lessons to the agent each is for, under "Lessons from earlier
+jobs" in that agent's instructions: at most 10 per agent, newest first. Each
+job a lesson is given to adds one to its uses, and the job's run line lists
+the ids as `lessons`. A job picked up again counts as a new job.
+
 #### `animus cleanup [<job>...] [--days <n>] [--dry-run]`
 
 Removes what finished jobs left behind. A job whose PR is merged or closed

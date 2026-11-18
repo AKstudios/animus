@@ -9,6 +9,28 @@ clients with how to update.
 ## Unreleased
 
 - The display's overview is the same on `animus ui` and on Helix: Needs you, Working now, Queued, Open pull requests, Finished. Result tags are in sentence case, a Finished row says how long its PR took to merge, and the Projects panel has ticks and a key in place of the "All projects" button.
+- `animus retro [--project <name>] [--days <n>]` runs a read-only `retro`
+  session (standard tier, a new role in profiles.yaml) over a project's runs
+  and proposes at most 5 lessons, each citing at least two jobs or one whose
+  PR was reverted or reworked; the script drops the rest. `animus lessons`
+  lists proposed, kept and expired lessons from the new
+  `ANIMUS_HOME/lessons.json`, and `animus lessons accept <id>` /
+  `dismiss <id>` keep or drop one. A kept lesson expires after 60 days
+  unless a retro sees it again. Every later job gives its project's and the
+  factory's kept lessons to the implementer, planner and reviewer they are for
+  (at most 10 each, newest first, under "Lessons from earlier jobs"), adds one
+  to each lesson's uses, and lists the ids as `lessons` on its run line.
+  `helix serve` runs a retro for each ready project once a week (as `animus
+  retro --project <name> --json`, which prints its counts as JSON), keeps the
+  lessons in Helix's own Animus home, and posts the count and `animus lessons`
+  to the project's Slack channel. New `GET /lessons[?project=<name>]` and
+  `POST /lessons/<id>` (`action`: `accept` or `dismiss`) take a person's
+  token, and `animus lessons` / `accept` / `dismiss` use them for a checkout
+  of a Helix project (`--local` or `--helix` decides), say where they acted,
+  and refuse to `accept` or `dismiss` on this machine when a Helix you are
+  signed in to does not answer. On a Helix with containers the retro also reads
+  each person's Animus home, jobs get Helix's `lessons.json` read-only, and
+  Helix counts their uses from the run line.
 - A spec refused at admission, and a job ended by SIGINT, SIGTERM or a Helix
   cancel, now leave a run line with cause `admit`, `interrupted` or
   `cancelled`. Helix writes a `cancelled` file beside the job's spec before it

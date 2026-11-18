@@ -286,6 +286,27 @@ out the tag and runs the tests, goes back if they fail, then stops `helix
 serve` for its service manager to start again. `npm run deploy -- <ssh-host>`
 moves it to the release `stable` points at ([releases.md](releases.md)).
 
+## Lessons
+
+`helix serve` looks hourly (first, fifteen minutes after it starts) for a
+ready project with no retro in the last 7 days and runs `animus retro
+--project <name> --json` for it, in a process of its own as Helix's account.
+The time is kept in `helix.db` when the retro starts, so one that fails, or
+has no runs to read, waits for next week. The lessons are kept in Helix's own
+Animus home (`ANIMUS_HOME`, `~/.animus` unless set). The retro reads the run
+records there and, with containers, in each person's Animus home too, where
+those jobs write theirs (Helix hands them over in `ANIMUS_RETRO_HOMES`). A
+container job gets Helix's `lessons.json` read-only (`ANIMUS_LESSONS_FILE`)
+once there is one, and Helix counts the uses from the `lessons` ids on the
+run line the job wrote when it ends. When a retro proposed any, the Slack
+channels set for the project with `/animus project <name>` get a message with
+the count and `animus lessons`. `animus lessons` and `accept` / `dismiss`
+from a checkout of a Helix project call `GET /lessons` and
+`POST /lessons/<id>` instead of reading the laptop's file. They say where they
+acted; `accept` and `dismiss` stop, rather than act on this machine's own
+lessons, when a Helix you are signed in to does not answer (`--local` is the
+way to say you mean this machine).
+
 ## Cleanup
 
 `helix serve` runs `helix cleanup` ten minutes after it starts and then
@@ -385,6 +406,8 @@ the display's own request for a job page's data sends none.
 | `POST /projects` | Add a project; its check runs in the background (202) |
 | `GET /projects/<name>` | One project, with its check's log |
 | `DELETE /projects/<name>` | Remove a project you added, or any for the owner |
+| `GET /lessons[?project=<name>]` | The lessons in Helix's Animus home, with a project's and the factory's only when one is named: `{ lessons }` |
+| `POST /lessons/<id>` | `action`: `accept` or `dismiss` (404 for an unknown id, 409 for one that cannot change that way); the lesson |
 | `GET /jobs` | The slots and your jobs; `?all`, every person's, for the owner only |
 | `POST /jobs` | Submit: `repo`, `spec`, and optionally `name`, `draft`, `skills`, `profile` (the checkout's profile text, to warn when it differs from the base branch's). The spec is admitted first: 400 with the list of problems when it is refused; the answer's `warnings` when it is admitted with any |
 | `GET /jobs/<id>` | One job, with the end of its log |
