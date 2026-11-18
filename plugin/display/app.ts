@@ -3,11 +3,12 @@
 // (pages.ts). The overview needs no sign-in; a job page needs the person's
 // token, sent with each request for its data.
 // It only reads. Sent to the browser with its types stripped (helix/src/ui.ts).
-import { forgetToken, jobNotice, jobsNotice, keepToken, peopleNotice, personNotice, readToken, route, takeToken } from './pages.ts';
+import { forgetToken, insightsNotice, jobNotice, jobsNotice, keepToken, peopleNotice, personNotice, readToken, route, takeToken } from './pages.ts';
 import { atEnd, jobView, type JobPageView } from './job-view.ts';
 import { keepOlder, peopleView, personView } from './people-view.ts';
+import { insightsView, scopeOf } from './insights-view.ts';
 import { filterOf, jobListView, queryOf, RESULTS, type JobRow } from './job-list.ts';
-import type { Display, JobListPage, JobPage, PeoplePage, PersonPage } from './shape.ts';
+import type { Display, InsightsPage, JobListPage, JobPage, PeoplePage, PersonPage } from './shape.ts';
 import { view, type Live, type Pr, type Project, type Need, type Recent, type View, type Waiting } from './view.ts';
 
 const POLL_MS = 2000;
@@ -41,6 +42,9 @@ const state: {
   listMore: boolean;
   listStatus?: number;
   personStatus?: number;
+  /** On the Insights page: its data for the address's scope, and how Helix last answered for it. */
+  insights?: InsightsPage;
+  insightsStatus?: number;
   /** Helix's clock minus this browser's, in ms. */
   skew: number;
   offline: boolean;
@@ -102,7 +106,7 @@ function header(v: View | undefined): string {
   return `<header class="head">
     <div class="brand">${LOGO}<div class="machine">${esc(v?.name ?? 'Helix')}</div></div>
     <nav class="tabs" aria-label="Pages">
-      ${[['Overview', '/', 'overview'], ['Jobs', '/jobs', 'jobs'], ...(v?.people === false ? [] : [['People', '/people', 'people']])].map(([name, href, key]) => `<a href="${href}"${at.page === key || (key === 'jobs' && at.page === 'job') ? ' aria-current="page"' : ''}>${name}</a>`).join('')}
+      ${[['Overview', '/', 'overview'], ['Jobs', '/jobs', 'jobs'], ['Insights', '/insights', 'insights'], ...(v?.people === false ? [] : [['People', '/people', 'people']])].map(([name, href, key]) => `<a href="${href}"${at.page === key || (key === 'jobs' && at.page === 'job') ? ' aria-current="page"' : ''}>${name}</a>`).join('')}
     </nav>
     <div class="stats">
       ${v?.local ? `<div><span class="k">running</span> <span class="b">${v.running}</span></div>`
@@ -337,12 +341,35 @@ function jobsMain(local: boolean): string {
   return `<main class="main"><div class="scope"><div><h1>Jobs</h1></div></div>${bar}${body}</main>`;
 }
 
+const tone = (t: string) => (t === 'good' ? ' good' : t === 'bad' ? ' bad' : '');
+
+function insightsMain(local: boolean, now: number): string {
+  const notice = insightsNotice(readToken(storage) !== null, state.insightsStatus, local);
+  const head = `<div class="scope"><div><h1>Insights</h1><p class="last">Is the factory getting better? Last 30 days against the 30 before.</p></div></div>`;
+  if (notice) return `<main class="main">${head}<div class="none boxed">${esc(notice)}</div>${local ? '' : signIn}</main>`;
+  if (!state.insights) return '';
+  const v = insightsView(state.insights, now);
+  const scopes = `<nav class="segmented" aria-label="Scope" data-key="scopes">${v.scopes.map((s) => `<a href="${esc(s.href)}"${s.on ? ' aria-current="true"' : ''}>${esc(s.name)}</a>`).join('')}</nav>`;
+  if (v.none) return `<main class="main">${head}${scopes}${none('No job ended in the last 30 days.')}</main>`;
+  const tiles = `<div class="tiles">${v.tiles.map((t) => `<div class="tile" data-key="t-${esc(t.label)}"><span class="mute">${esc(t.label)}</span><b>${esc(t.value)}</b><span class="note">${esc(t.note)}</span>${t.change ? `<span class="delta${tone(t.change.tone)}">${esc(t.change.text)}</span>` : ''}</div>`).join('')}</div>`;
+  const classes = `<div class="scroll"><table class="grid"><thead><tr><th>Task class</th><th class="num">Jobs</th><th class="num">Merged</th><th class="num">First pass</th><th class="num">$ / merged</th></tr></thead><tbody>${v.classes.map((c) => `<tr data-key="c-${esc(c.name)}"><td>${esc(c.name)}</td><td class="num">${esc(c.jobs)}</td><td class="num">${esc(c.merged)}</td><td class="num">${esc(c.firstPass)}</td><td class="num">${esc(c.perMerged)}</td></tr>`).join('')}</tbody></table></div>`;
+  const causes = v.causes.map((c) => `<div class="cause" data-key="k-${esc(c.label)}"><span>${esc(c.label)}</span><svg class="bar tone-${c.tone}" viewBox="0 0 100 6" preserveAspectRatio="none" aria-hidden="true"><rect width="100" height="6" class="rail"></rect><rect width="${c.pct}" height="6" class="fill"></rect></svg><span class="mono mute">${c.count}</span></div>`).join('');
+  const agents = `<div class="scroll"><table class="grid"><thead><tr><th>Agent</th><th>Tier</th><th class="num">Cost</th><th class="num">Tool calls</th><th class="num">Failed</th></tr></thead><tbody>${v.agents.map((a) => `<tr data-key="a-${esc(a.role)}-${esc(a.tier)}"><td>${esc(a.role)}</td><td class="mute">${esc(a.tier)}</td><td class="num">${esc(a.cost)}</td><td class="num">${esc(a.calls)}</td><td class="num">${esc(a.failed)}</td></tr>`).join('')}</tbody></table></div>${v.findings ? `<p class="note">Review findings acted on: <b>${esc(v.findings)}</b></p>` : ''}`;
+  const flaky = v.flaky.map((f) => `<div class="li" data-key="f-${esc(f.name)}-${esc(f.where)}"><span class="mono">${esc(f.name)}</span><span class="mute">${esc(f.times)} · ${esc(f.where)}</span></div>`).join('');
+  const lessons = v.proposed.map((l) => `<div class="lesson" data-key="lp-${l.id}"><span class="tag tone-open">proposed</span><span class="text">${esc(l.text)}</span><span class="mute">${esc(l.scope)} · ${esc(l.source)}</span><code class="cmd">${esc(l.command)}</code></div>`).join('')
+    + v.kept.map((l) => `<div class="lesson" data-key="lk-${l.id}"><span class="tag tone-merged">kept</span><span class="text">${esc(l.text)}</span><span class="mute">${esc(l.where)}</span><span class="mono mute">${esc(l.uses)}</span></div>`).join('');
+  return `<main class="main">${head}${scopes}${tiles}
+    <div class="two">${section('classes', 'By task class', classes)}${section('causes', 'Why jobs did not deliver', (causes || none('Every job delivered.')) + (v.causeCount ? `<p class="note">${esc(v.causeCount)} did not deliver.</p>` : ''))}</div>
+    <div class="two">${section('agents', 'Agents', agents)}${section('flaky', 'Flaky checks', flaky || none('No flaky check.'))}</div>
+    ${section('lessons', 'Lessons', lessons || none('No lesson yet.'))}</main>`;
+}
+
 function page(): string {
   // While Helix is out of reach the clock it was last read at stands still, and so does every count of time.
   const now = (state.offline && state.heard ? state.heard.getTime() : Date.now()) + state.skew;
   const v = state.display ? view(state.display, picked(), now) : undefined;
   // A job page waits for the display: whether it needs a sign-in depends on the source it answers.
-  const body = at.page === 'job' ? (state.display ? jobMain(at.id, now, state.display.local === true) : '') : at.page === 'jobs' ? (state.display ? jobsMain(state.display.local === true) : '') : at.page === 'people' ? (state.display ? peopleMain(state.display.local === true, at.name) : '') : v ? `${main(v)}${nav(v)}` : '';
+  const body = at.page === 'job' ? (state.display ? jobMain(at.id, now, state.display.local === true) : '') : at.page === 'jobs' ? (state.display ? jobsMain(state.display.local === true) : '') : at.page === 'people' ? (state.display ? peopleMain(state.display.local === true, at.name) : '') : at.page === 'insights' ? (state.display ? insightsMain(state.display.local === true, now) : '') : v ? `${main(v)}${nav(v)}` : '';
   return [
     header(v),
     state.offline ? offline() : '',
@@ -462,6 +489,15 @@ async function readJobs(before?: string): Promise<void> {
   }
 }
 
+/** The Insights page's data for the address's scope, with the token as it is kept now; a token Helix refuses is forgotten. */
+async function readInsights(): Promise<void> {
+  const token = readToken(storage);
+  const res = await fetch(`/insights-data?scope=${encodeURIComponent(scopeOf(location.search))}`, { cache: 'no-store', headers: auth(token) });
+  state.insightsStatus = res.status === 401 && !token ? undefined : res.status;
+  if (res.status === 401 && token) forgetToken(storage);
+  if (res.ok) state.insights = (await res.json()) as InsightsPage;
+}
+
 /** Fetches with the token (if there is one) each screenshot this browser does not hold yet, and lets go of the ones the job no longer has. */
 async function readShots(page: JobPage, token: string | null): Promise<void> {
   const srcs = jobView(page, 0).shots.map((s) => s.src);
@@ -482,7 +518,7 @@ function forgetShots(): void {
 async function poll(): Promise<void> {
   window.clearTimeout(timer);
   try {
-    const [res] = await Promise.all([fetch('/display', { cache: 'no-store' }), at.page === 'job' ? readJob(at.id) : at.page === 'jobs' ? readJobs() : at.page === 'people' ? (at.name ? readPerson(at.name) : readPeople()) : undefined]);
+    const [res] = await Promise.all([fetch('/display', { cache: 'no-store' }), at.page === 'job' ? readJob(at.id) : at.page === 'jobs' ? readJobs() : at.page === 'insights' ? readInsights() : at.page === 'people' ? (at.name ? readPerson(at.name) : readPeople()) : undefined]);
     if (!res.ok) throw new Error(`Helix answered ${res.status}`);
     const display = (await res.json()) as Display;
     Object.assign(state, { display, skew: Date.parse(display.at) - Date.now(), offline: false, heard: new Date() });
@@ -498,7 +534,7 @@ root.addEventListener('submit', (event) => {
   if (!form) return;
   event.preventDefault();
   keepToken(storage, (form.querySelector('input') as HTMLInputElement).value);
-  Object.assign(state, { jobStatus: undefined, listStatus: undefined, peopleStatus: undefined, personStatus: undefined });
+  Object.assign(state, { jobStatus: undefined, listStatus: undefined, peopleStatus: undefined, personStatus: undefined, insightsStatus: undefined });
   void poll();
 });
 
@@ -514,7 +550,7 @@ root.addEventListener('click', (event) => {
   if ((event.target as Element).closest('[data-sign-out]')) {
     forgetToken(storage);
     forgetShots();
-    Object.assign(state, { job: undefined, jobStatus: undefined, list: undefined, listStatus: undefined, listOlder: [], listMore: false, people: undefined, peopleStatus: undefined, person: undefined, personStatus: undefined, older: { jobs: [], more: false } });
+    Object.assign(state, { job: undefined, jobStatus: undefined, list: undefined, listStatus: undefined, listOlder: [], listMore: false, people: undefined, peopleStatus: undefined, person: undefined, personStatus: undefined, older: { jobs: [], more: false }, insights: undefined, insightsStatus: undefined });
     draw();
     return;
   }
