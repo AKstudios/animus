@@ -229,7 +229,7 @@ const pre = (text: string, attrs = '') => `<pre class="text"${attrs}>${esc(text)
 const none = (text: string) => `<div class="none">${esc(text)}</div>`;
 
 function jobSections(v: JobPageView): string {
-  const stages = v.bar.length ? `<div class="timebar" role="img" aria-label="Where the time went">${v.bar.map((s, i) => `<span class="seg-${i % 7}" style="width:${s.pct}%"></span>`).join('')}</div>
+  const stages = v.bar.length ? `<svg class="timebar" viewBox="0 0 100 1" preserveAspectRatio="none" role="img" aria-label="Where the time went">${v.bar.map((s, i) => `<rect class="seg-${i % 7}" x="${v.bar.slice(0, i).reduce((a, b) => a + b.pct, 0)}" width="${s.pct}" height="1"/>`).join('')}</svg>
     <div class="timekey">${v.bar.map((s, i) => `<span class="${s.on ? 'on' : ''}"><i class="seg-${i % 7}"></i>${esc(s.name)} <code>${s.on ? 'now' : esc(s.took)}</code></span>`).join('')}</div>` : '';
   const fold = (name: string, title: string, body: string, open = false) => `<details class="fold ${name}" data-key="fold-${name}"${open ? ' open' : ''}><summary>${title}</summary>${body}</details>`;
   const criteria = v.criteria.map((c) => `<div class="criterion"><span class="tag tone-${c.tone}">${esc(c.tag)}</span><span class="what">${esc(c.text)}</span>${c.command ? `<code>${esc(c.command)}</code>` : ''}${c.output ? `<details class="out"><summary>Output</summary>${pre(c.output)}</details>` : ''}</div>`).join('');
