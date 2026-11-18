@@ -19,6 +19,13 @@ clients with how to update.
   factory's kept lessons to the implementer, planner and reviewer they are for
   (at most 10 each, newest first, under "Lessons from earlier jobs"), adds one
   to each lesson's uses, and lists the ids as `lessons` on its run line.
+  `helix serve` runs a retro for each ready project once a week (as `animus
+  retro --project <name> --json`, which prints its counts as JSON), keeps the
+  lessons in Helix's own Animus home, and posts the count and `animus lessons`
+  to the project's Slack channel. New `GET /lessons[?project=<name>]` and
+  `POST /lessons/<id>` (`action`: `accept` or `dismiss`) take a person's
+  token, and `animus lessons` / `accept` / `dismiss` use them for a checkout
+  of a Helix project (`--local` or `--helix` decides).
 - A spec refused at admission, and a job ended by SIGINT, SIGTERM or a Helix
   cancel, now leave a run line with cause `admit`, `interrupted` or
   `cancelled`. Helix writes a `cancelled` file beside the job's spec before it

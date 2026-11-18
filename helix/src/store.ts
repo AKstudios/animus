@@ -172,6 +172,11 @@ export type Store = {
   /** The project a channel's drafts are for when their message links no issue: /helix project. */
   channelProject(channel: string): string | undefined;
   setChannelProject(channel: string, project: string): void;
+  /** The channels whose drafts are for this project: where its weekly retro says what it proposed. */
+  channelsOf(project: string): string[];
+  /** When this project's retro last started (an ISO time), if ever. */
+  lastRetro(project: string): string | undefined;
+  setLastRetro(project: string, at: string): void;
   /** Keeps what a person did, as of now. */
   record(who: string, kind: ActivityKind, detail?: Activity['detail']): void;
   /** Everyone's activity, or one person's, newest first. */
@@ -201,6 +206,7 @@ export function openStore(file: string): Store {
   db.exec('create table if not exists drafts (id integer primary key autoincrement, state text not null, data text not null)');
   db.exec('create table if not exists channel_projects (channel text primary key, project text not null)');
   db.exec('create table if not exists comment_watch (project text primary key, data text not null)');
+  db.exec('create table if not exists retros (project text primary key, at text not null)');
   const data = <T>(r: unknown): T => JSON.parse((r as { data: string }).data) as T;
   const asInvite = (r: unknown): Invite => JSON.parse((r as { data: string }).data) as Invite;
   const live = (i: Invite, at: Date) => Date.parse(i.expires) > at.getTime();
@@ -255,6 +261,7 @@ export function openStore(file: string): Store {
     dropProject(name) {
       // A project added again is watched from then, not from where the old one was read to.
       db.prepare('delete from comment_watch where project = ?').run(name);
+      db.prepare('delete from retros where project = ?').run(name);
       return Number(db.prepare('delete from projects where name = ?').run(name).changes) > 0;
     },
     commentWatch: (project) => { const r = db.prepare('select data from comment_watch where project = ?').get(project); return r ? data<CommentWatch>(r) : undefined; },
@@ -274,6 +281,9 @@ export function openStore(file: string): Store {
     saveDraft(d) { db.prepare('update drafts set state = ?, data = ? where id = ?').run(d.state, JSON.stringify(d), d.id); },
     channelProject: (channel) => (db.prepare('select project from channel_projects where channel = ?').get(channel) as { project: string } | undefined)?.project,
     setChannelProject(channel, project) { db.prepare('insert or replace into channel_projects (channel, project) values (?, ?)').run(channel, project); },
+    channelsOf: (project) => db.prepare('select channel from channel_projects where project = ? order by channel').all(project).map((r) => (r as { channel: string }).channel),
+    lastRetro: (project) => (db.prepare('select at from retros where project = ?').get(project) as { at: string } | undefined)?.at,
+    setLastRetro(project, at) { db.prepare('insert or replace into retros (project, at) values (?, ?)').run(project, at); },
     record(who, kind, detail) { db.prepare('insert into activity (who, at, kind, detail) values (?, ?, ?, ?)').run(who, new Date().toISOString(), kind, detail ? JSON.stringify(detail) : null); },
     activity: (who, limit = -1) => db.prepare(`select * from activity ${who === undefined ? '' : 'where who = ?'} order by id desc limit ?`).all(...(who === undefined ? [limit] : [who, limit]))
       .map((r) => { const { id, who: w, at, kind, detail } = r as { id: number; who: string; at: string; kind: ActivityKind; detail: string | null }; return { id, who: w, at, kind, ...(detail ? { detail: JSON.parse(detail) as Activity['detail'] } : {}) }; }),

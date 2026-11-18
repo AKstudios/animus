@@ -85,6 +85,8 @@ const USAGE = `animus: a spec goes in, a pull request with proof comes out
         and days left (a kept lesson expires 60 days after it was accepted or
         a retro saw it again). accept keeps a proposed or expired lesson;
         dismiss drops it, and the retro is told not to propose it again.
+        For a checkout of a project on Helix these go to Helix, which runs
+        its own retro each week; --local or --helix decides.
   animus cleanup [<job>...] [--days <n>] [--dry-run]
         Remove what finished jobs left: the worktree of a job whose pull
         request merged or closed, and its branches (here and on origin) once
@@ -383,19 +385,25 @@ async function main(argv: string[]): Promise<number> {
       if (!Number.isFinite(days) || days <= 0) throw new AnimusError(`--days takes a number of days, not ${values.days}`);
       const project = values.project ?? basename(mainCheckout(cwd));
       const { proposed, seen, result } = runRetro({ ...deps(), project, days });
+      if (values.json) { console.log(JSON.stringify({ project, proposed: proposed.length, seen: seen.length, cost_usd: result.cost_usd })); return 0; }
       console.log(`${proposed.length} lesson${proposed.length === 1 ? '' : 's'} proposed for ${project}${seen.length ? `, ${seen.length} kept seen again` : ''} ($${result.cost_usd.toFixed(2)})${proposed.length ? ': animus lessons' : ''}`);
       return 0;
     }
     case 'lessons': {
-      const [sub, id] = positionals;
-      if (sub === 'accept' || sub === 'dismiss') {
-        if (!/^\d+$/.test(id ?? '')) throw new AnimusError(`usage: animus lessons ${sub} <id>`);
-        const l = sub === 'accept' ? accept(Number(id), Date.now()) : dismiss(Number(id));
+      const [word, id] = positionals;
+      const sub = word === 'accept' || word === 'dismiss' ? word : undefined;
+      if (word && !sub) throw new AnimusError('usage: animus lessons [accept <id> | dismiss <id>]');
+      if (sub && !/^\d+$/.test(id ?? '')) throw new AnimusError(`usage: animus lessons ${sub} <id>`);
+      if (values.local && values.helix) throw new AnimusError('--local or --helix, not both');
+      // As `animus start` decides: on Helix when this checkout's project is there, else on this machine. Outside a checkout, here.
+      const choice = await whereToRun({ ...(values.local ? { asked: 'local' as const } : values.helix ? { asked: 'helix' as const } : {}), checkout: cwd }).catch(() => ({ where: 'local' as Where, project: undefined as string | undefined }));
+      const remote = choice.where === 'helix';
+      if (sub) {
+        const l = remote ? await helix.decideLesson(Number(id), sub) : sub === 'accept' ? accept(Number(id), Date.now()) : dismiss(Number(id));
         console.log(`lesson ${l.id} is ${sub === 'accept' ? 'kept' : 'dismissed'}`);
         return 0;
       }
-      if (sub) throw new AnimusError('usage: animus lessons [accept <id> | dismiss <id>]');
-      console.log(describeLessons(readLessons(), Date.now()));
+      console.log(describeLessons(remote ? (await helix.lessons(choice.project)).lessons : readLessons(), Date.now()));
       return 0;
     }
     case 'cleanup': {
