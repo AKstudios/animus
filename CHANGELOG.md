@@ -8,6 +8,14 @@ clients with how to update.
 
 ## Unreleased
 
+- `animus draft <folder>` writes a spec, `draft.md`, from a message and the
+  references fetched beside it: one fast session (the new `drafter` profile,
+  stopped at $0.50) that reads files and nothing else, refuses to start with
+  a GitHub token, and leaves the earlier draft when it stops. The fetching
+  (GitHub issues and pull requests, Slack files, public pages but never a
+  private address) and the draft's container are there for Helix; starting a
+  draft from Slack comes next.
+
 ## 0.4.5 (2026-11-18)
 
 - `after:` finds the earlier spec's pull request on GitHub, by the spec's

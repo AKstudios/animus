@@ -8,7 +8,7 @@
 // port. The container is removed when the job ends.
 import { spawnSync } from 'node:child_process';
 import { mkdirSync } from 'node:fs';
-import { dirname, join } from 'node:path';
+import { basename, dirname, join } from 'node:path';
 import { AnimusError } from '../../plugin/src/proc.ts';
 import type { Config } from './config.ts';
 import type { HelixJob } from './store.ts';
@@ -102,6 +102,34 @@ export function containerProblem(image: string): string | undefined {
   const why = `${info.stderr ?? ''}`.trim();
   if (/permission denied/i.test(why)) return `this account may not use Docker (${why.split('\n')[0]}): add it to the docker group`;
   return `there is no image ${image}: build it with helix image`;
+}
+
+/** What a draft session may know of its person: their Claude sign-in and who they are. Never a GitHub token. */
+const DRAFT_ENV = ['ANTHROPIC_API_KEY', 'CLAUDE_CODE_OAUTH_TOKEN', 'ANIMUS_USER'];
+
+/**
+ * Starts `animus draft` for one draft (plugin/src/draft.ts) in a container of
+ * its own. It reads the repository from a clone of the machine's mirror,
+ * mounted read-only and checked out at the base commit (the caller resolves
+ * it, so the container needs no network but Claude's), and writes only the
+ * draft's folder and the person's Claude config. Its references were fetched
+ * before it started, by Helix, with the tokens that stay out here.
+ */
+export function draftLaunch(opts: { home: string; animusRoot: string; image: string; limits: ContainerConfig; uid: number; gid: number }) {
+  return (draft: { id: string; person: string; folder: string; mirror: string; base: string }, env: Record<string, string>) => {
+    const person = personDirs(opts.home, draft.person);
+    makePersonDirs(person);
+    const clone = join('/tmp', basename(draft.mirror));
+    const extra = { CLAUDE_CONFIG_DIR: person.claude };
+    const script = 'git clone --quiet --shared --no-checkout "$1" "$2" && git -C "$2" checkout --quiet --detach "$3" || exit 1; shift 3; exec "$@"';
+    const command = ['sh', '-c', script, 'sh', draft.mirror, clone, draft.base, 'node', '--disable-warning=ExperimentalWarning', join(opts.animusRoot, 'plugin', 'src', 'cli.ts'), 'draft', draft.folder, '--repo', clone];
+    const args = runArgs({
+      name: `helix-draft-${draft.id}`, image: opts.image, limits: opts.limits, uid: opts.uid, gid: opts.gid,
+      mounts: [{ path: opts.animusRoot, readOnly: true }, { path: draft.mirror, readOnly: true }, { path: person.claude }, { path: draft.folder }],
+      envNames: [...Object.keys(env).filter((n) => DRAFT_ENV.includes(n)), ...Object.keys(extra)].sort(), workdir: draft.folder, command,
+    });
+    return { command: 'docker', args, env: extra, cwd: opts.home };
+  };
 }
 
 /**
