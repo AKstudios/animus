@@ -148,8 +148,10 @@ const targetOf = (input: Record<string, unknown>): string => {
   return typeof v === 'string' ? v.slice(0, TARGET_MAX) : '';
 };
 
-/** The tool calls in a Claude Code transcript, in order. A call with no result (the session ended mid-call) counts as failed. */
-/** Only calls made at or after `since` (ms): a resumed session's transcript also holds the turns before. */
+/**
+ * The tool calls in a Claude Code transcript, in order. A call with no result (the session ended mid-call) counts as failed.
+ * Only calls made at or after `since` (ms): a resumed session's transcript also holds the turns before.
+ */
 export function toolCalls(transcript: string, since = 0): ToolCall[] {
   let lines: string[];
   try { lines = readFileSync(transcript, 'utf8').split('\n'); } catch { return []; }

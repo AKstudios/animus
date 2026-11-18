@@ -6,7 +6,7 @@
 import { spawn, type ChildProcess } from 'node:child_process';
 import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { uptime } from 'node:os';
-import { basename, dirname, join } from 'node:path';
+import { basename, dirname, isAbsolute, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { AnimusError } from '../../plugin/src/proc.ts';
 import { animusHome, CANCELLED_MARKER, loadProgress, type Progress } from '../../plugin/src/log.ts';
@@ -75,11 +75,16 @@ export class Refused extends AnimusError {
   constructor(status: number, message: string) { super(message); this.status = status; }
 }
 
-/** Ends a job's process. A job is a tree (animus, the agent, the project's checks): the whole group goes where there is one. */
-/** Tells the job, before it is killed, that it was cancelled and not just stopped: it leaves this file beside its spec. */
+/**
+ * Tells the job, before it is killed, that it was cancelled and not just stopped: it leaves this file beside its spec.
+ * Only beside a spec with an absolute path: a job with none has no folder, and a relative one would put the file wherever Helix runs.
+ */
 function markCancelled(job: Pick<HelixJob, 'spec'>): void {
+  if (!isAbsolute(job.spec)) return;
   try { writeFileSync(join(dirname(job.spec), CANCELLED_MARKER), ''); } catch { /* the job's folder is gone: nothing is left to tell */ }
 }
+
+/** Ends a job's process. A job is a tree (animus, the agent, the project's checks): the whole group goes where there is one. */
 
 function kill(pid: number, child?: ChildProcess): void {
   try {
