@@ -139,14 +139,11 @@ h1 em { font-style: normal; color: var(--ask); }
 .stats div { background: var(--panel); padding: 14px 16px; }
 .stats b { display: block; font: 600 20px var(--mono); }
 .tl { display: flex; height: 28px; border-radius: 6px; overflow: hidden; gap: 2px; }
-.tl span { display: flex; align-items: center; padding: 0 8px; font-size: 11px; font-weight: 600; white-space: nowrap; overflow: hidden; color: var(--bg); }
-.tl .s1 { background: color-mix(in srgb, var(--run) 35%, var(--bg)); }
-.tl .s2 { background: color-mix(in srgb, var(--run) 55%, var(--bg)); }
-.tl .s3 { background: var(--run); }
-.tl .s4 { background: color-mix(in srgb, var(--run) 75%, var(--bg)); }
-.tl .s5 { background: color-mix(in srgb, var(--run) 60%, var(--bg)); }
-.tl .s6 { background: color-mix(in srgb, var(--run) 45%, var(--bg)); }
-.tl .s7 { background: color-mix(in srgb, var(--run) 30%, var(--bg)); }
+.tl span { display: flex; align-items: center; padding: 0 8px; font-size: 11px; font-weight: 600; white-space: nowrap; overflow: hidden; color: #0b0d10; }
+/* Where the time went: a colour per stage, as the design canvas draws it, the same in both themes. */
+.s-setup { background: #3a4450; } .s-plan { background: #7fa7b3; } .s-implement { background: #22c3ee; }
+.s-gates { background: #f5a524; } .s-review { background: #b79cff; } .s-evidence { background: #4ade80; } .s-pr { background: #3a4450; }
+.legend i { display: inline-block; width: 8px; height: 8px; border-radius: 2px; margin-right: 6px; }
 .legend { display: flex; flex-wrap: wrap; gap: 6px 18px; margin-top: 10px; font: 12px var(--mono); color: var(--mute); }
 .ac { display: flex; flex-direction: column; gap: 1px; border: 1px solid var(--line); border-radius: 12px; overflow: hidden; background: var(--line); }
 .ac > div { background: var(--panel); padding: 14px 16px; display: grid; grid-template-columns: 22px minmax(0, 1fr) auto; gap: 12px; align-items: start; }
