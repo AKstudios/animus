@@ -7,6 +7,7 @@
 import { AnimusError } from '../../plugin/src/proc.ts';
 import { SOURCE } from '../../plugin/src/setup.ts';
 import type { Config } from './config.ts';
+import { DISCARD, OPEN, PICK, SUBMIT, type Drafts } from './drafts.ts';
 import { INVITE_HOURS, invite } from './join.ts';
 import { isOwner } from './owner.ts';
 import { SLACK_USER, type SlackEvent, type Transport } from './slack-api.ts';
@@ -14,14 +15,14 @@ import type { HelixJob, Store } from './store.ts';
 import type { Supervisor } from './supervisor.ts';
 import { animusVersion } from '../../plugin/src/version.ts';
 
-const USAGE = 'Usage: /helix jobs, /helix status, /helix invite @user <github-login>, /helix link @user <person>, or /helix notify off|on';
+const USAGE = 'Usage: /helix draft <what you want, with links>, /helix project <name>, /helix jobs, /helix status, /helix invite @user <github-login>, /helix link @user <person>, or /helix notify off|on';
 const INVITE_USAGE = 'An invite sent on Slack names their GitHub login, so only a token that signs in as it is taken: /helix invite @user <github-login>';
 const INSTALL = `https://raw.githubusercontent.com/${SOURCE.repo}/${SOURCE.ref}/install.sh`;
 
 type Core = { store: Store; config: Config };
 
-/** What answering and cancelling a job go through, the same calls `animus answer` and `animus cancel` reach on Helix. */
-type Jobs = Pick<Supervisor, 'answer' | 'cancel'>;
+/** What answering, cancelling and submitting a job go through, the same calls `animus answer`, `animus cancel` and `animus run` reach on Helix. */
+type Jobs = Pick<Supervisor, 'answer' | 'cancel' | 'submit'>;
 
 const CANCEL = 'cancel_job';
 const cancelBlocks = (id: number, text: string) => [
@@ -37,8 +38,8 @@ const threadLink = (t: { channel: string; ts: string }) => `https://slack.com/ap
  * each event, so helix owner or a new link changes who it is. Without
  * `supervisor`, jobs can be neither answered nor cancelled from Slack.
  */
-export function slackBot(transport: Transport, opts: Core & { supervisor?: Jobs }): void {
-  const { store, config, supervisor } = opts;
+export function slackBot(transport: Transport, opts: Core & { supervisor?: Jobs; drafts?: Drafts }): void {
+  const { store, config, supervisor, drafts } = opts;
   transport.onEvent(async (event) => {
     const ownerUser = config.owner ? store.slackOf(config.owner) : undefined;
     const owner = ownerUser ? `<@${ownerUser}>` : 'the owner';
@@ -47,8 +48,35 @@ export function slackBot(transport: Transport, opts: Core & { supervisor?: Jobs 
     const person = store.personBySlack(event.user);
     if (!person) return reply(`You're not on this Helix. Ask ${owner} for an invite.`);
     const byOwner = isOwner(config, person);
-    if (event.kind === 'message') return supervisor && answer(transport, store, supervisor, event, person);
+    const draft = async (text: string) => {
+      if (!drafts) return;
+      if (!text) return reply(USAGE);
+      const said = await drafts.start(person, event.user, event.channel, text);
+      if (said) await reply(said);
+    };
+    if (event.kind === 'message') {
+      const text = event.text.replace(/<@[A-Z0-9]+>/g, '').trim();
+      // A mention outside a thread asks for a draft; one in an open draft's thread revises it, in a job's may answer it.
+      if (event.mentioned && !event.thread) return draft(text);
+      const open = event.thread && drafts ? store.draftOfThread(event.channel, event.thread) : undefined;
+      if (open && drafts && OPEN.includes(open.state)) {
+        // As with a job's thread: any reply in a DM, in a channel only one to the bot.
+        if (!(event.mentioned || event.channel.startsWith('D'))) return;
+        const said = await drafts.reply(person, open, text);
+        return said ? reply(said) : undefined;
+      }
+      return supervisor && answer(transport, store, supervisor, event, person);
+    }
     if (event.kind === 'action') {
+      if (event.action === PICK && drafts) {
+        const said = await drafts.pick(person, event.value);
+        return said ? reply(said) : undefined;
+      }
+      if ((event.action === SUBMIT || event.action === DISCARD) && drafts) {
+        const said = event.action === DISCARD ? await drafts.discard(person, event.user, event.value)
+          : supervisor ? await drafts.submit(person, event.value, supervisor) : 'Helix takes no jobs from this Slack bot.';
+        return said ? reply(said) : undefined;
+      }
       if (event.action !== CANCEL || !supervisor) return;
       const job = store.get(Number(event.value));
       if (!job) return reply(`There is no job ${event.value}.`);
@@ -69,6 +97,8 @@ export function slackBot(transport: Transport, opts: Core & { supervisor?: Jobs 
     if (sub === 'invite') return reply(byOwner ? await inviteCommand(transport, opts, args) : `Only ${owner} invites people to this Helix.`);
     if (sub === 'link') return reply(byOwner ? link(store, args) : `Only ${owner} links Slack users to people on this Helix.`);
     if (sub === 'notify') return reply(notifyCommand(store, person, args));
+    if (sub === 'draft') return draft(event.text.trim().slice(sub.length).trim());
+    if (sub === 'project') return reply(projectCommand(store, person, event.channel, args));
     return reply(USAGE);
   });
 }
@@ -110,6 +140,16 @@ function notifyCommand(store: Store, name: string, args: string[]): string {
   if (args.length !== 1 || (args[0] !== 'on' && args[0] !== 'off')) return USAGE;
   store.setNotify(name, args[0] === 'on');
   return args[0] === 'on' ? 'Job notifications are on: each of your jobs posts its progress to a thread in our DM.' : 'Job notifications are off. /helix notify on starts them again.';
+}
+
+/** /helix project <name>: the project drafts started in this channel are for, when their message links no issue of another. */
+function projectCommand(store: Store, person: string, channel: string, args: string[]): string {
+  const name = args[0];
+  if (!name || args.length > 1) return USAGE;
+  if (store.project(name)?.state !== 'ready') return `Helix has no project named ${name}.`;
+  store.setChannelProject(channel, name);
+  store.record(person, 'channel-project', { project: name });
+  return `Drafts started here are for ${name} now, unless their message links an issue of another project.`;
 }
 
 /** What a job that just started or ended says in its thread; nothing for a state no one is told of. */

@@ -5,6 +5,7 @@ import { parseArgs } from 'node:util';
 import { claudeAgent } from './agent.ts';
 import { cleanup, describeCleanup, KEEP_DAYS, type PrEnd } from './cleanup.ts';
 import { describeFindings, doctor } from './doctor.ts';
+import { writeDraft } from './draft.ts';
 import { enable, realRun, setup, terminalIo, thisMachine } from './setup.ts';
 import { initProfile } from './init.ts';
 import { githubLogin, joinHelix, leaveHelix, openPage } from './join.ts';
@@ -48,6 +49,10 @@ const USAGE = `animus: a spec goes in, a pull request with proof comes out
         Check a spec and print what its labels would run. Starts no job.
         --slices also asks the planner how it would cut the spec (one
         read-only session in the repo) and prints the checked plan.
+  animus draft <folder> [--repo <dir>]
+        Write <folder>/draft.md, a spec, from <folder>/message.md and the
+        references fetched beside it: one fast session that reads files and
+        nothing else, with no GitHub token, stopped at $0.50. Helix runs it.
   animus init [--repo <dir>] [--force]
         Draft .animus/animus.yaml from the repo's package.json, pyproject.toml,
         go.mod or Cargo.toml. Runs nothing; --force replaces a profile.
@@ -233,6 +238,12 @@ async function main(argv: string[]): Promise<number> {
         console.log(`\n${describeSlicing(spec, planned)}`);
         for (const s of planned.sessions) say(`${s.stage}: $${s.result.cost_usd.toFixed(4)}${s.result.context !== undefined ? `, ${Math.round(s.result.context / 1000)}k tokens of context at the end` : ''}`);
       }
+      return 0;
+    }
+    case 'draft': {
+      if (!positionals[0]) throw new AnimusError('usage: animus draft <folder> [--repo <dir>]');
+      const r = writeDraft({ ...deps(), folder: resolve(positionals[0]), cwd: resolve(values.repo ?? cwd) });
+      console.log(JSON.stringify({ draft: join(resolve(positionals[0]), 'draft.md'), status: r.status, cost_usd: r.cost_usd }, null, 2));
       return 0;
     }
     case 'submit': {

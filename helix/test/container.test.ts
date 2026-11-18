@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
 import { saveProgress } from '../../plugin/src/log.ts';
-import { containerLaunch, dockerArgs, originOf, personDirs } from '../src/container.ts';
+import { containerLaunch, dockerArgs, draftLaunch, originOf, personDirs } from '../src/container.ts';
 import { openStore } from '../src/store.ts';
 import { cancelJobsOf, supervise } from '../src/supervisor.ts';
 import type { HelixJob } from '../src/store.ts';
@@ -58,6 +58,29 @@ test('a job signed in with the GitHub App gets its person\'s live token folder r
   assert.ok(signedIn.includes('-v /h/tokens/ana:/h/tokens/ana:ro'), signedIn);
   assert.ok(signedIn.includes('-e ANIMUS_GH_TOKEN_FILE'));
   assert.ok(!pasted.includes('/tokens/'));
+});
+
+// Protects: criterion 2's "no GitHub token" in the draft's container. Fails when: a GitHub token, its folder or any other of the person's variables reaches a draft container, the mirror is writable, or the session is not animus draft on a clone at the base commit.
+test('a draft\'s container gets Claude\'s sign-in and the draft folder, the mirror read-only, and no GitHub token', () => {
+  const home = mkdtempSync(join(tmpdir(), 'helix-'));
+  const ana = personDirs(home, 'ana');
+  const folder = join(ana.animus, 'drafts', 'd1');
+  const env = { CLAUDE_CODE_OAUTH_TOKEN: 'sk-secret', ANIMUS_GH_TOKEN_FILE: '/h/tokens/ana/gh-token', GH_TOKEN: 'ghp_secret', GITHUB_TOKEN: 'ghp_secret', GIT_CONFIG_COUNT: '2', ANIMUS_USER: 'ana' };
+
+  const started = draftLaunch({ home, animusRoot: '/srv/animus', image: 'animus-job:0.5.0', limits: {}, uid: 1001, gid: 1001 })({ id: 'd1', person: 'ana', folder, mirror: '/h/repos/app', base: 'abc123' }, env);
+  const args = started.args.join(' ');
+
+  assert.equal(started.command, 'docker');
+  assert.deepEqual(started.env, { CLAUDE_CONFIG_DIR: ana.claude });
+  assert.ok(!args.includes('secret'), 'no credential value on the command line');
+  for (const name of ['CLAUDE_CODE_OAUTH_TOKEN', 'CLAUDE_CONFIG_DIR', 'ANIMUS_USER']) assert.ok(args.includes(`-e ${name}`), name);
+  for (const name of ['ANIMUS_GH_TOKEN_FILE', 'GH_TOKEN', 'GITHUB_TOKEN', 'GIT_CONFIG_COUNT']) assert.ok(!args.includes(`-e ${name}`), name);
+  assert.ok(!args.includes('/tokens/') && !args.includes(`-v ${ana.root}:`), args);
+  for (const mount of ['/srv/animus:/srv/animus:ro', '/h/repos/app:/h/repos/app:ro', `${ana.claude}:${ana.claude} `, `${folder}:${folder} `]) assert.ok(args.includes(`-v ${mount}`), mount);
+  assert.ok(args.includes('--name helix-draft-d1'));
+  const tail = started.args.slice(started.args.indexOf('animus-job:0.5.0') + 1);
+  assert.deepEqual(tail.slice(4, 7), ['/h/repos/app', '/tmp/app', 'abc123']);
+  assert.deepEqual(tail.slice(-4), ['draft', folder, '--repo', '/tmp/app']);
 });
 
 test('a clone made with a person\'s token needs an https origin', () => {

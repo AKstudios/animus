@@ -14,6 +14,31 @@ clients with how to update.
   job held for room says why in `animus status <id>` and on the display, and
   Helix checks again every 30 seconds. With nothing running, the first queued
   job starts regardless.
+- `animus draft <folder>` writes a spec, `draft.md`, from a message and the
+  references fetched beside it: one fast session (the new `drafter` profile,
+  stopped at $0.50) that reads files and nothing else, refuses to start with
+  a GitHub token, and leaves the earlier draft when it stops. The fetching
+  (GitHub issues and pull requests, Slack files, public pages but never a
+  private address) and the draft's container are there for Helix.
+- Helix drafts from Slack: `/helix draft <text>` or `@Helix <text>` from a
+  linked person posts a thread, fetches what the message links to with the
+  person's GitHub sign-in, runs `animus draft` (without it), and posts the
+  draft in the thread as text and as `draft.md`, with Submit and Discard.
+  The project is the linked issue's repository, else the channel's default
+  set with `/helix project <name>`, else the one the person picks from those
+  the GitHub App lets them push to. `draft_slots` in config.yaml (1 when
+  unset) is how many drafts run at once, apart from jobs.
+- A draft's person revises it by replying in its thread (any reply in a DM,
+  one mentioning @Helix in a channel), and the revision replaces the draft's
+  post and file. Submit runs the check `animus plan` does and wants a
+  `$ command` under every criterion; it says what is missing in the thread,
+  or queues the draft as the person's job, whose progress then posts in that
+  thread. Discard closes a draft, a person has at most 3 open, a waiting draft
+  says how many are ahead of it, and a draft untouched for 7 days is
+  discarded.
+- The Slack app needs the `files:read` and `files:write` scopes and the new
+  `/helix` usage line: update it from
+  `helix/deploy/slack/manifest.yaml` and reinstall it to the workspace.
 - `after:` keeps waiting on an earlier spec that is not a valid spec, instead
   of failing the job. The waiting line names the file and why it could not be
   read, and the file is read again on every check.

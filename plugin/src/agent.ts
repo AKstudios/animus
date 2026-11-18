@@ -26,6 +26,8 @@ export type AgentRequest = {
   addDirs?: string[];
   /** No file edits: the reviewer's sessions. */
   readOnly?: boolean;
+  /** Read, Glob and Grep and no other tool, so nothing reaches past the files: a draft session, whose prompt quotes other people. */
+  filesOnly?: boolean;
   timeoutMs?: number;
   /** Tokens of context at which the provider compacts the session while it runs. */
   compactAt?: number;
@@ -88,7 +90,8 @@ export function claudeAgent(factory: Factory, command = process.env.ANIMUS_CLAUD
     if (req.compactAt) args.push('--autocompact', String(req.compactAt));
     if (req.maxUsd) args.push('--max-budget-usd', String(req.maxUsd));
     const noGit = ['Bash(git push:*)', 'Bash(git checkout:*)', 'Bash(git switch:*)', 'Bash(git worktree:*)', 'Bash(gh:*)'];
-    if (req.readOnly) args.push('--allowedTools', 'Bash', 'Read', 'Glob', 'Grep', '--disallowedTools', 'Edit', 'Write', 'NotebookEdit', 'Bash(git commit:*)', ...noGit);
+    if (req.filesOnly) args.push('--allowedTools', 'Read', 'Glob', 'Grep', '--disallowedTools', 'Bash', 'Edit', 'Write', 'NotebookEdit', 'WebFetch', 'WebSearch');
+    else if (req.readOnly) args.push('--allowedTools', 'Bash', 'Read', 'Glob', 'Grep', '--disallowedTools', 'Edit', 'Write', 'NotebookEdit', 'Bash(git commit:*)', ...noGit);
     else args.push('--allowedTools', 'Bash', 'Read', 'Write', 'Edit', 'Glob', 'Grep', '--disallowedTools', ...noGit);
 
     const started = Date.now();

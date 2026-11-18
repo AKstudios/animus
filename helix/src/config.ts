@@ -29,6 +29,8 @@ export type Config = {
   port: number;
   /** Jobs that run at once; set by the machine's memory. */
   slots: number;
+  /** Draft sessions from Slack (drafts.ts) that run at once, apart from job slots so drafts never delay jobs; 1 when unset. */
+  draft_slots?: number;
   /**
    * Run each job in a container of its own (container.ts), with these limits.
    * Left out, jobs run on the machine as Helix's account, sharing it.
@@ -86,6 +88,7 @@ export function loadConfig(file = configFile()): Config {
     if (!(TIERS as readonly string[]).includes(tier)) throw new AnimusError(`${file}: tier_limits has ${tier}, which is not one of ${TIERS.join(', ')}`);
     if (!Number.isInteger(n) || (n as number) < 1) throw new AnimusError(`${file}: tier_limits.${tier} must be a whole number, 1 or more`);
   }
+  if (config.draft_slots !== undefined && (!Number.isInteger(config.draft_slots) || config.draft_slots < 1)) throw new AnimusError(`${file}: draft_slots must be a whole number, 1 or more`);
   return config;
 }
 

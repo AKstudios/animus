@@ -20,7 +20,7 @@ Both modes call the same core command. Office mode is a queue and a container pl
 | --- | --- | --- |
 | Start it with | `animus run spec.md` from a Claude Code session | `animus submit spec.md`, a Slack message, or a GitHub issue comment |
 | Your laptop | Stays on and awake until the PR opens | Free once the job is submitted, or never needed |
-| Spec | Shaped with you in conversation | Shaped in conversation, or the message or issue is the spec |
+| Spec | Shaped with you in conversation | Shaped in conversation, drafted from a Slack message and confirmed in its thread, or the issue is the spec |
 | Jobs at once | One or two, limited by the laptop | Several, each in its own container, from several people |
 | Pipeline | Set up, implement, gates, review, catch up with the base, open the PR | The same |
 | Good for | Trying the factory, small changes, working away from the office network | Bigger jobs, overnight work, starting work from a phone, teammates |
@@ -32,7 +32,7 @@ Three triggers feed one queue. Whatever the trigger, the job is the same record:
 | Trigger | What the spec is | How it reaches the office machine | Where the result shows up |
 | --- | --- | --- | --- |
 | Claude Code session | `spec.md`, written after the agent interviews you | `animus submit` over your private network (Tailscale), by CLI or a small MCP tool | GitHub PR notification |
-| Slack message | The message itself, with its own acceptance criteria | A bot on the office machine that connects outward to Slack | Reply in the same thread, plus the PR |
+| Slack message | A draft spec written from the message and what it links to, revised by replies in its thread until you press Submit | A bot on the office machine that connects outward to Slack | Reply in the same thread, plus the PR |
 | GitHub issue comment | The issue body; a `/animus` comment starts it | The machine polls GitHub or runs a self-hosted Actions runner | Comment on the issue, plus the PR |
 
 Rules that apply to every trigger:
@@ -40,7 +40,8 @@ Rules that apply to every trigger:
 - **Allow list.** Only named people can start jobs. A trigger launches an agent with open permissions inside its container, so treat it like remote code execution.
 - **No inbound ports.** The Slack bot and the GitHub pickup both connect outward. Nothing on the office machine is exposed to the internet.
 - **No mid-run questions.** A job that cannot proceed ends as "needs input" with its question. You answer and resubmit.
-- **Slack and issue jobs suit well-described work.** Nobody interviews you there, so vague requests come back as questions.
+- **Issue jobs suit well-described work.** Nobody interviews you there, so vague requests come back as questions.
+- **A Slack job starts from a draft you confirm, never from the message.** `/helix draft <text>` or `@Helix <text>` gets a draft spec in a thread, from a fast session ($0.50 at most) that reads only the message, the repository and what a script fetched from its links. Reply in the thread (any reply in a DM, one mentioning @Helix in a channel) to have it rewritten. Submit runs the check `animus plan` does and wants a `$ command` under every criterion; a complete draft becomes your job, and its thread the job's. A person has at most 3 open drafts, `draft_slots` (1 by default) run at once, and a draft untouched for 7 days is discarded.
 
 ## The pipeline
 
@@ -50,7 +51,7 @@ Scripts do everything that needs no judgment, one agent implements, a fresh agen
 
 | Stage | Done by | What happens |
 | --- | --- | --- |
-| Shape the spec | You, with an agent | The agent interviews you and writes `spec.md` with acceptance criteria. For Slack and issue triggers, the message or issue is the spec. |
+| Shape the spec | You, with an agent | The agent interviews you and writes `spec.md` with acceptance criteria. For Slack, a draft session writes it from the message and you confirm it in the thread; for issues, the issue is the spec. |
 | Queue the job | Script | Office mode only. Records the job, checks the allow list, waits for a free slot. |
 | Set up workspace | Script | Fresh container, clone, database, storage, migrations, seed. |
 | Plan | Agent proposes, script decides | A medium spec is cut into slices: a read-only session proposes the cut, and a script takes it only if every criterion is held by exactly one slice. |
@@ -105,7 +106,7 @@ This keeps every session short, which is where a model works best, and it is why
 The profiles are predefined in one config file. An agent only picks and adjusts, because fully agent-decided routing is not repeatable and the run log could not compare like with like.
 
 1. The spec-shaping agent proposes size, difficulty and type in the spec header, where you can change them.
-2. Slack and issue jobs take tags in the message, such as `[bug, small]`. Untagged jobs go through a fast-tier classifier and default to medium, routine.
+2. A Slack draft's session proposes them in the draft's header, where a reply in the thread changes them. Issue jobs take tags in the issue, such as `[bug, small]`; untagged ones go through a fast-tier classifier and default to medium, routine.
 3. The implementer may escalate a profile and logs why. It never downgrades.
 4. A failed first gate round raises the model tier by one for the second round.
 
@@ -134,7 +135,7 @@ A `/animus fix` comment on the PR starts a follow-up job on the same branch, wit
 
 **Triggers from Slack and issues**
 
-The person who submits vouches for the content, and the allow list covers who can submit. A `/animus` comment therefore vouches for the whole issue body, including text other people wrote.
+The person who submits vouches for the content, and the allow list covers who can submit. A `/animus` comment therefore vouches for the whole issue body, including text other people wrote. A Slack job runs the draft its person submitted, not the message or the pages it links to: the draft session reads those with no GitHub token and no tool that reaches past its files, and the job never sees them.
 
 **Logging**
 

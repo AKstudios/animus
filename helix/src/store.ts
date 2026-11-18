@@ -1,5 +1,5 @@
 // Helix's record: the queue (one row per submitted job), the people who may
-// submit and their Slack links, each job's Slack thread, the projects they may submit for, and open invites, all in one
+// submit and their Slack links, each job's Slack thread, the projects they may submit for, drafts from Slack, and open invites, all in one
 // SQLite file. It is kept apart from the supervisor, so a supervisor that dies
 // is started again and carries on from what the tables say, and the helix
 // command changes it beside a running `helix serve`, which sees the change on
@@ -60,7 +60,7 @@ export type Person = { token_sha256: string; env_file?: string; github?: string;
  * theirs). detail: what the kind adds: the job and repo, an answer's text, a
  * project's name.
  */
-export type ActivityKind = 'submitted' | 'answered' | 'cancelled' | 'joined' | 'left' | 'project-added' | 'project-removed';
+export type ActivityKind = 'submitted' | 'answered' | 'cancelled' | 'joined' | 'left' | 'project-added' | 'project-removed' | 'drafted' | 'draft-revised' | 'draft-discarded' | 'channel-project';
 export type Activity = { id: number; who: string; at: string; kind: ActivityKind; detail?: Record<string, string | number> };
 
 /**
@@ -86,6 +86,21 @@ export type Upgrade = { tag: string; at: string; ok: boolean; detail?: string };
 
 /** A DM channel and the ts of the message that opened the thread in it. */
 export type SlackThread = { channel: string; ts: string };
+
+/**
+ * A draft spec being written from a Slack message (drafts.ts), in the thread
+ * at channel and ts. picking: its person has yet to choose the project;
+ * queued and running: waiting for, then holding, one of draft_slots; ready:
+ * its draft.md is posted, as the message post with the file file; failed:
+ * why is in reason; submitted: queued as job; discarded: by its person, or
+ * after 7 days untouched. folder: message.md, references/, draft.md and the
+ * reply.md to revise it with (plugin/src/draft.ts), gone once it is closed.
+ */
+export type Draft = {
+  id: number; state: 'picking' | 'queued' | 'running' | 'ready' | 'failed' | 'submitted' | 'discarded';
+  person: string; channel: string; ts: string; project?: string; folder: string;
+  created: string; touched: string; reason?: string; post?: string; file?: string; job?: number;
+};
 
 export type Store = {
   add(job: Omit<HelixJob, 'id'>): HelixJob;
@@ -131,6 +146,15 @@ export type Store = {
   upgrade(tag: string): Upgrade | undefined;
   /** Keeps a try at a release, replacing any earlier one at the same tag. */
   putUpgrade(upgrade: Upgrade): void;
+  addDraft(draft: Omit<Draft, 'id'>): Draft;
+  draft(id: number): Draft | undefined;
+  draftsIn(state: Draft['state']): Draft[];
+  /** The draft whose thread this is. */
+  draftOfThread(channel: string, ts: string): Draft | undefined;
+  saveDraft(draft: Draft): void;
+  /** The project a channel's drafts are for when their message links no issue: /helix project. */
+  channelProject(channel: string): string | undefined;
+  setChannelProject(channel: string, project: string): void;
   /** Keeps what a person did, as of now. */
   record(who: string, kind: ActivityKind, detail?: Activity['detail']): void;
   /** Everyone's activity, or one person's, newest first. */
@@ -157,6 +181,8 @@ export function openStore(file: string): Store {
   // Append-only: no one's activity is changed or removed, not even when they leave.
   db.exec('create table if not exists activity (id integer primary key autoincrement, who text not null, at text not null, kind text not null, detail text)');
   db.exec('create index if not exists activity_who on activity (who, id)');
+  db.exec('create table if not exists drafts (id integer primary key autoincrement, state text not null, data text not null)');
+  db.exec('create table if not exists channel_projects (channel text primary key, project text not null)');
   const data = <T>(r: unknown): T => JSON.parse((r as { data: string }).data) as T;
   const asInvite = (r: unknown): Invite => JSON.parse((r as { data: string }).data) as Invite;
   const live = (i: Invite, at: Date) => Date.parse(i.expires) > at.getTime();
@@ -211,6 +237,19 @@ export function openStore(file: string): Store {
     dropProject: (name) => Number(db.prepare('delete from projects where name = ?').run(name).changes) > 0,
     upgrade: (tag) => { const r = db.prepare('select data from upgrades where tag = ?').get(tag); return r ? data<Upgrade>(r) : undefined; },
     putUpgrade(u) { db.prepare('insert into upgrades (tag, data) values (?, ?) on conflict (tag) do update set data = excluded.data').run(u.tag, JSON.stringify(u)); },
+    addDraft(d) {
+      const r = db.prepare('insert into drafts (state, data) values (?, ?) returning id').get(d.state, JSON.stringify(d)) as { id: number };
+      return { ...d, id: r.id };
+    },
+    draft: (id) => { const r = db.prepare('select * from drafts where id = ?').get(id) as { id: number; data: string } | undefined; return r ? { ...data<Draft>(r), id: r.id } : undefined; },
+    draftsIn: (state) => db.prepare('select * from drafts where state = ? order by id').all(state).map((r) => ({ ...data<Draft>(r), id: (r as { id: number }).id })),
+    draftOfThread(channel, ts) {
+      const r = db.prepare("select * from drafts where json_extract(data, '$.channel') = ? and json_extract(data, '$.ts') = ?").get(channel, ts) as { id: number; data: string } | undefined;
+      return r ? { ...data<Draft>(r), id: r.id } : undefined;
+    },
+    saveDraft(d) { db.prepare('update drafts set state = ?, data = ? where id = ?').run(d.state, JSON.stringify(d), d.id); },
+    channelProject: (channel) => (db.prepare('select project from channel_projects where channel = ?').get(channel) as { project: string } | undefined)?.project,
+    setChannelProject(channel, project) { db.prepare('insert or replace into channel_projects (channel, project) values (?, ?)').run(channel, project); },
     record(who, kind, detail) { db.prepare('insert into activity (who, at, kind, detail) values (?, ?, ?, ?)').run(who, new Date().toISOString(), kind, detail ? JSON.stringify(detail) : null); },
     activity: (who, limit = -1) => db.prepare(`select * from activity ${who === undefined ? '' : 'where who = ?'} order by id desc limit ?`).all(...(who === undefined ? [limit] : [who, limit]))
       .map((r) => { const { id, who: w, at, kind, detail } = r as { id: number; who: string; at: string; kind: ActivityKind; detail: string | null }; return { id, who: w, at, kind, ...(detail ? { detail: JSON.parse(detail) as Activity['detail'] } : {}) }; }),
