@@ -16,6 +16,12 @@ clients with how to update.
   is sent back. Passing then, it counts as passed, the run log marks it
   `flaky: true` in that gate run, and the job says `flaky: <check> failed,
   then passed on the same code`.
+- Every run that does not end as a pull request has a `cause` in the run log,
+  set by script (`setup`, `plan`, `needs-input`, `gates` with
+  `failing_checks`, `review` with `blockers_left`, `budget`, `context`,
+  `agent-error`; `admit`, `cancelled` and `interrupted` are in the list but not
+  yet set), and `animus outcomes` counts each task class's jobs by cause. A
+  job whose setup fails now leaves a run.
 
 - **Breaking:** a spec's header is held to its keys. A key other than `title`,
   `size`, `difficulty`, `type`, `base`, `ui`, `after` and `design` (or, under

@@ -13,7 +13,7 @@ import { resolveAfter, waitForMerged } from './after.ts';
 import type { Agent, AgentResult } from './agent.ts';
 import { describe, failsOnBase, gateReport, jobChecks, LATER_SLICE, runChecks, type CheckResult } from './gates.ts';
 import { commitAll, mainCheckout, matchesAny, touchedFiles } from './git.ts';
-import { appendRun, jobDir, toolsLog, saveProgress, saveState, writeJson, type JobState, type Outcome, type Run, type Stage } from './log.ts';
+import { appendRun, jobDir, toolsLog, saveProgress, saveState, writeJson, type Cause, type JobState, type Outcome, type Run, type Stage } from './log.ts';
 import { evidenceBranch, findPrByTitle, prBody, prState, type PrFind, type Evidence, type PrLookup, type Publish } from './pr.ts';
 import { admitFile, profileOnBase, refusal, type Admitted } from './admit.ts';
 import { loadProfile } from './profile.ts';
@@ -64,11 +64,18 @@ export type RunOptions = {
 /** Ends the job where it is thrown, with an outcome that is not a pull request. */
 class Stop extends Error {
   outcome: 'needs-input' | 'failed';
-  constructor(outcome: 'needs-input' | 'failed', reason: string) {
+  cause: Cause;
+  detail: { failing_checks?: string[]; blockers_left?: number };
+  constructor(outcome: 'needs-input' | 'failed', reason: string, cause?: Cause, detail: Stop['detail'] = {}) {
     super(reason);
     this.outcome = outcome;
+    this.cause = outcome === 'needs-input' ? 'needs-input' : cause ?? 'agent-error';
+    this.detail = detail;
   }
 }
+
+/** The cause of a session that did not end well, from how the provider says it ended. */
+const sessionCause = (status: string): Cause => (/max_budget/.test(status) ? 'budget' : /context|prompt is too long/i.test(status) ? 'context' : 'agent-error');
 
 const REVIEW_TIMEOUT_MS = 30 * 60 * 1000;
 const MARKER = 'animus-job.json';
@@ -184,7 +191,11 @@ export async function runJob(opts: RunOptions, deps: Deps): Promise<Run> {
     });
   } catch (err) {
     if (!(err instanceof AnimusError)) throw err;
-    throw new AnimusError(`job ${job} could not start: ${err.message}`);
+    const reason = `job ${job} could not start: ${err.message}`;
+    Object.assign(run, { outcome: 'failed', cause: 'setup', reason, ended: new Date().toISOString() });
+    run.ms.total = Date.now() - startedAt;
+    appendRun(run);
+    throw new AnimusError(reason);
   }
   const wt = ws.worktree;
   run.branch = ws.branch;
@@ -279,7 +290,7 @@ export async function runJob(opts: RunOptions, deps: Deps): Promise<Run> {
     // The implementer commits at each working step; whatever it left is kept too, so a retry starts from it.
     commitAll(wt, `${spec.title}: work left uncommitted at the end of ${stage}`);
     const changed = git(wt, ['rev-parse', 'HEAD']) !== before;
-    if (!r.ok) throw new Stop('failed', `the implementer's session ended with ${r.status}${r.text ? `: ${r.text.slice(0, 300)}` : ''}`);
+    if (!r.ok) throw new Stop('failed', `the implementer's session ended with ${r.status}${r.text ? `: ${r.text.slice(0, 300)}` : ''}`, sessionCause(r.status));
     const report = asReport(r.output) ?? { status: 'done', summary: r.text.trim().split('\n')[0] ?? '' };
     if (report.escalate?.why) {
       const e = escalate(factory, plan, report.escalate);
@@ -345,7 +356,7 @@ export async function runJob(opts: RunOptions, deps: Deps): Promise<Run> {
       for (const line of describe(lastGates).split('\n').slice(0, lastGates.length)) log(`  ${line}`);
       if (ok) return;
       const used = slice ? rounds : run.fix_rounds - spentBefore;
-      if (used >= factory.limits.gate_rounds) throw new Stop(exhausted, `the gates${of} still fail after ${used} fix round(s):\n${describe(lastGates.filter((r) => !r.ok))}`);
+      if (used >= factory.limits.gate_rounds) throw new Stop(exhausted, `the gates${of} still fail after ${used} fix round(s):\n${describe(lastGates.filter((r) => !r.ok))}`, 'gates', { failing_checks: lastGates.filter((r) => !r.ok).map((r) => r.name) });
       run.fix_rounds++;
       if (slice) { rounds++; spentBefore++; }
       // A failed gate round raises the model tier by one for the next.
@@ -436,8 +447,11 @@ export async function runJob(opts: RunOptions, deps: Deps): Promise<Run> {
 
   let outcome: Outcome = 'failed';
   let reason: string | undefined;
+  let stopped: Stop | undefined;
   try {
-    await timed('setup', () => ensureSetup(wt, repoProfile, log));
+    await timed('setup', () => {
+      try { ensureSetup(wt, repoProfile, log); } catch (err) { throw err instanceof AnimusError ? new Stop('failed', err.message, 'setup') : err; }
+    });
 
     // ------------------------------------------------------------ implement
     const profile = repoProfile;
@@ -457,7 +471,7 @@ export async function runJob(opts: RunOptions, deps: Deps): Promise<Run> {
         } catch (err) {
           if (!(err instanceof AnimusError)) throw err;
           // A large spec does not fit one session, so with no cut there is no way to run it.
-          if (spec.size === 'large') throw new Stop('failed', `a large spec runs only as slices, and no cut was taken: ${err.message}`);
+          if (spec.size === 'large') throw new Stop('failed', `a large spec runs only as slices, and no cut was taken: ${err.message}`, 'plan');
           // Smaller work a planner could not cut is done the way it was before there was a planner.
           planFallback = err.message;
           log(`no plan was taken, so the job runs as one slice: ${err.message.split('\n')[0]}`);
@@ -531,22 +545,24 @@ export async function runJob(opts: RunOptions, deps: Deps): Promise<Run> {
         at('review', `${role} · ${tier} tier${round > 1 ? ` · round ${round}` : ''}`);
         const prompt = reviewPrompt({ spec, ws, round, earlier: open, shots: seen, answers });
         let said: Review | undefined;
+        let ended = 'success';
         for (let tries = 0; tries < 2 && !said; tries++) {
           const r = await timed('review', () => deps.agent({ role, tier, effort, prompt, cwd: wt, ...instructions(role), schema: REVIEW_SCHEMA, readOnly: true, timeoutMs: REVIEW_TIMEOUT_MS, ...caps(tier) }));
           record(`review-${round}${tries ? '-retry' : ''}`, role, tier, effort, r);
           restore(wt);
           said = asReview(r.output);
+          ended = r.status;
         }
-        if (!said) throw new Stop('failed', 'the reviewer gave no review in two tries');
+        if (!said) throw new Stop('failed', 'the reviewer gave no review in two tries', sessionCause(ended));
         review = said;
         reviewRounds = round;
         writeJson(join(dir, `review-${round}.json`), said);
         for (const f of said.findings) found.set(`${f.file ?? ''}:${f.problem}`, f);
-        if (said.status === 'not-ready') throw new Stop('failed', `the reviewer says the work is not ready: ${said.summary}`);
         open = blockers(said.findings);
+        if (said.status === 'not-ready') throw new Stop('failed', `the reviewer says the work is not ready: ${said.summary}`, 'review', { blockers_left: open.length });
         log(`review ${round}: ${said.findings.length} finding(s), ${open.length} to fix`);
         if (!open.length) break;
-        if (round > factory.limits.review_rounds) throw new Stop('failed', `the review still found ${open.length} blocker(s) after its fix round`);
+        if (round > factory.limits.review_rounds) throw new Stop('failed', `the review still found ${open.length} blocker(s) after its fix round`, 'review', { blockers_left: open.length });
         actedOn += open.length;
         await implementer(`review-fix-${round}`, reviewFixPrompt(open), plan.implement.tier);
         await gate();
@@ -584,6 +600,7 @@ export async function runJob(opts: RunOptions, deps: Deps): Promise<Run> {
     if (!(err instanceof Stop) && !(err instanceof AnimusError)) throw err;
     outcome = err instanceof Stop ? err.outcome : 'failed';
     reason = err.message;
+    stopped = err instanceof Stop ? err : new Stop('failed', err.message);
     log(`${outcome === 'needs-input' ? 'needs input' : 'failed'}: ${reason.split('\n')[0]}`);
   }
 
@@ -643,6 +660,8 @@ export async function runJob(opts: RunOptions, deps: Deps): Promise<Run> {
 
   // -------------------------------------------------------------- the log
   run.outcome = outcome;
+  // A draft pull request still ended on its failure; a pull request that could not be opened has no cause but the failure before it, if any.
+  if (outcome !== 'pr' && outcome !== 'dry-run') Object.assign(run, { cause: (stopped ?? new Stop('failed', '')).cause }, stopped?.detail);
   if (reason) run[outcome === 'needs-input' ? 'question' : 'reason'] = reason;
   Object.assign(state, { outcome, ...(outcome === 'needs-input' ? { question: reason } : {}), ...(open.length ? { findings: open } : {}) });
   saveState(state);

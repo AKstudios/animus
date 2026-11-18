@@ -53,6 +53,10 @@ export type GateRun = { attempt: number; ok: boolean; ms: number; checks: { name
 
 export type Outcome = 'pr' | 'draft-pr' | 'dry-run' | 'needs-input' | 'failed';
 
+/** Why a run that did not end as a pull request stopped, by where it stopped. Script-set, never by a model. */
+export const CAUSES = ['setup', 'admit', 'plan', 'needs-input', 'gates', 'review', 'budget', 'context', 'agent-error', 'cancelled', 'interrupted'] as const;
+export type Cause = (typeof CAUSES)[number];
+
 /** One line of the run log. */
 export type Run = {
   job: string;
@@ -90,6 +94,12 @@ export type Run = {
   slices?: { by: 'planner' | 'script'; planned: number; done: number; fallback?: string };
   review: { rounds: number; findings: number; blockers: number; acted_on: number; open: number } | null;
   outcome: Outcome;
+  /** Set on every run that did not end as a pull request. */
+  cause?: Cause;
+  /** With cause `gates`: the checks still failing. */
+  failing_checks?: string[];
+  /** With cause `review`: the blockers left. */
+  blockers_left?: number;
   reason?: string;
   question?: string;
   pr?: string;

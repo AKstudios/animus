@@ -99,7 +99,8 @@ a URL) and whether it failed. `--json` prints the lines of the job's
 
 What became of each PR, read from GitHub with `gh`: merged or closed, time
 to merge, commits by people, reverted or reworked within 30 days. Then the
-five numbers split by task class. Without `gh`, it shows what it last read.
+five numbers split by task class, with how many jobs of each class stopped
+for each `cause` (the run log's, set by script). Without `gh`, it shows what it last read.
 
 #### `animus cleanup [<job>...] [--days <n>] [--dry-run]`
 

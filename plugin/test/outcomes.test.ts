@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import type { Run } from '../src/log.ts';
-import { numbers, refreshOutcomes, type Outcomes } from '../src/outcomes.ts';
+import { describeNumbers, numbers, refreshOutcomes, type Outcomes } from '../src/outcomes.ts';
 import { runJob } from '../src/pipeline.ts';
 import type { PrFacts } from '../src/pr.ts';
 import { git } from '../src/proc.ts';
@@ -79,7 +79,23 @@ test('the five numbers are counted per job and split by task class', () => {
   ], { ...outcome('a', {}), ...outcome('b', { human_commits: 2, reworked: true }), ...outcome('c', { state: 'CLOSED' }) });
 
   const [feature, ui, all] = rows;
-  assert.deepEqual(feature, { type: 'feature', jobs: 4, prs: 3, open: 0, merged: 2, closed: 1, untouched: 1, gated: 4, first_time: 3, cost_usd: 5, ms: 300_000, watched: 2, reverted_or_reworked: 1 });
+  assert.deepEqual(feature, { type: 'feature', jobs: 4, prs: 3, open: 0, merged: 2, closed: 1, untouched: 1, gated: 4, first_time: 3, cost_usd: 5, ms: 300_000, watched: 2, reverted_or_reworked: 1, causes: {} });
   assert.deepEqual([ui!.jobs, ui!.prs, ui!.open, ui!.merged], [1, 1, 1, 0]);
   assert.deepEqual([all!.type, all!.jobs, all!.merged, all!.cost_usd], ['all', 5, 2, 6]);
+});
+
+// Protects: criterion 3's per-class counts. Fails when: outcomes drops causes, counts a resumed job's earlier stop, or mixes classes.
+test('runs that did not deliver are counted per task class by the cause the job last stopped for', () => {
+  const run = (job: string, type: string, over: Partial<Run> = {}) => ({ job, type, cost_usd: 0, ms: { total: 0 }, gates: [], ...over }) as Run;
+  const [feature, ui, all] = numbers([
+    run('a', 'feature', { cause: 'gates' }),
+    run('b', 'feature', { cause: 'needs-input' }),
+    run('b', 'feature', { pr: 'b' }),             // resumed and delivered: no cause now
+    run('c', 'feature', { cause: 'gates' }),
+    run('d', 'ui', { cause: 'review' }),
+  ], {});
+  assert.deepEqual(feature!.causes, { gates: 2 });
+  assert.deepEqual(ui!.causes, { review: 1 });
+  assert.deepEqual(all!.causes, { gates: 2, review: 1 });
+  assert.match(describeNumbers([feature!]), /gates 2/);
 });

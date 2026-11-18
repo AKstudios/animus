@@ -126,9 +126,11 @@ export type ClassNumbers = {
   cost_usd: number; ms: number;
   /** Merged pull requests whose 30 days could be read, and those reverted or reworked in them. */
   watched: number; reverted_or_reworked: number;
+  /** Jobs whose last run did not end as a pull request, by the cause it stopped for. */
+  causes: Record<string, number>;
 };
 
-const empty = (type: string): ClassNumbers => ({ type, jobs: 0, prs: 0, open: 0, merged: 0, closed: 0, untouched: 0, gated: 0, first_time: 0, cost_usd: 0, ms: 0, watched: 0, reverted_or_reworked: 0 });
+const empty = (type: string): ClassNumbers => ({ type, jobs: 0, prs: 0, open: 0, merged: 0, closed: 0, untouched: 0, gated: 0, first_time: 0, cost_usd: 0, ms: 0, watched: 0, reverted_or_reworked: 0, causes: {} });
 
 /** The numbers per task class, then for all jobs together. A job that ran more than once counts once, with all its cost. */
 export function numbers(runs: readonly Run[], outcomes: Outcomes): ClassNumbers[] {
@@ -145,6 +147,8 @@ export function numbers(runs: readonly Run[], outcomes: Outcomes): ClassNumbers[
     for (const n of [classes.get(type)!, all]) {
       n.jobs += 1;
       for (const r of ofJob) { n.cost_usd += r.cost_usd; n.ms += r.ms.total; }
+      const cause = ofJob.at(-1)!.cause;
+      if (cause) n.causes[cause] = (n.causes[cause] ?? 0) + 1;
       if (firstGates) { n.gated += 1; if (firstGates.ok) n.first_time += 1; }
       if (!pr) continue;
       n.prs += 1;
@@ -167,12 +171,13 @@ const minutes = (ms: number) => `${(ms / 60_000).toFixed(1)}m`;
 export function describeNumbers(rows: readonly ClassNumbers[]): string {
   if (!rows.some((r) => r.jobs)) return 'no runs yet';
   const table = [
-    ['class', 'jobs', 'PRs', 'merged', 'no human commit', 'gates first time', 'per merged PR', 'reverted or reworked in 30d'],
+    ['class', 'jobs', 'PRs', 'merged', 'no human commit', 'gates first time', 'per merged PR', 'reverted or reworked in 30d', 'stopped for'],
     ...rows.map((n) => [
       n.type, String(n.jobs), `${n.prs}${n.open ? ` (${n.open} open)` : ''}`,
       share(n.merged, n.merged + n.closed), share(n.untouched, n.merged), share(n.first_time, n.gated),
       n.merged ? `$${(n.cost_usd / n.merged).toFixed(2)}, ${minutes(n.ms / n.merged)}` : `- ($${n.cost_usd.toFixed(2)}, ${minutes(n.ms)} spent)`,
       share(n.reverted_or_reworked, n.watched),
+      Object.entries(n.causes).map(([c, count]) => `${c} ${count}`).join(', ') || '-',
     ]),
   ];
   const widths = table[0]!.map((_, i) => Math.max(...table.map((row) => row[i]!.length)));
