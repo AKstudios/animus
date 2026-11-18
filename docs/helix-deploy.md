@@ -90,7 +90,10 @@ written `<org>` below.
 
 Each person's access and refresh tokens are in
 `~/.helix/credentials/<name>.env` (mode 600), never in the folder their jobs
-mount. A job fails with "run `animus github login`" when GitHub stops taking
+mount. Their current access token alone is also in
+`~/.helix/tokens/<name>/gh-token`, mounted read-only into their jobs, which
+read it each time they push: Helix renews it in its last hour, and GitHub ends
+the old one at once. A job fails with "run `animus github login`" when GitHub stops taking
 someone's sign-in (they revoked it, or it went unused for six months); that
 command signs them in again, as the same GitHub account.
 

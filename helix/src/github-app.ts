@@ -4,10 +4,11 @@
 // repositories the app reaches for them. No secret or key: GitHub needs none
 // for device-flow tokens. `helix github setup` is here too: it proves the
 // client ID with a device-code request before config.yaml keeps it.
-import { chmodSync, existsSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, renameSync, writeFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { AnimusError } from '../../plugin/src/proc.ts';
 import type { Finding } from './check.ts';
-import { envFileVars, updateConfig, type Config } from './config.ts';
+import { envFileVars, helixHome, updateConfig, type Config } from './config.ts';
 import type { Store } from './store.ts';
 
 /** Where GitHub's sign-in (web) and REST API live; tests point both at a fake. */
@@ -125,33 +126,67 @@ async function pages(path: string, key: string, token: string, urls: GitHubUrls)
 /** A repository's owner/name on GitHub, from its clone address (https or ssh). */
 export const githubRepo = (url: string) => /github\.com[:/]([^/]+\/[^/]+?)(?:\.git)?\/?$/.exec(url)?.[1];
 
-/** Puts a new pair in a person's credentials file, keeping its other lines, readable by Helix's account only. */
-export function keepTokens(file: string, tokens: Tokens): void {
-  const kept = { ...envFileVars(file), GH_TOKEN: tokens.access_token, GH_REFRESH_TOKEN: tokens.refresh_token };
+/**
+ * How long before its eight hours are up an access token is renewed. GitHub
+ * ends the old access token the moment its refresh token is used, so renewing
+ * is left as late as is safe, never done because a job starts.
+ */
+export const RENEW_WITHIN_MS = 60 * 60 * 1000;
+
+/**
+ * The folder holding a person's current access token, alone, in `gh-token`.
+ * It is mounted read-only into their jobs, which read the token from it each
+ * time they push or call gh, so a renewal during a job does not strand it with
+ * an ended token. The folder is mounted rather than the file: the file is
+ * replaced by a rename, which a mount of the file itself would not see.
+ */
+export const liveTokenDir = (name: string) => join(helixHome(), 'tokens', name);
+export const liveTokenFile = (name: string) => join(liveTokenDir(name), 'gh-token');
+
+/** Replaces the person's live token in one step, so a job never reads half of one. */
+export function keepLiveToken(name: string, token: string): void {
+  const dir = liveTokenDir(name);
+  mkdirSync(dir, { recursive: true, mode: 0o700 });
+  const next = join(dir, `.gh-token-${process.pid}`);
+  writeFileSync(next, token, { mode: 0o600 });
+  renameSync(next, liveTokenFile(name));
+}
+
+/** Puts a new pair, and when the access token ends, in a person's credentials file, keeping its other lines, readable by Helix's account only; and the access token in their live token file. */
+export function keepTokens(name: string, file: string, tokens: Tokens, now = Date.now()): void {
+  const kept = { ...envFileVars(file), GH_TOKEN: tokens.access_token, GH_REFRESH_TOKEN: tokens.refresh_token, GH_TOKEN_EXPIRES: new Date(now + tokens.expires_in * 1000).toISOString() };
   writeFileSync(file, Object.entries(kept).map(([k, v]) => `${k}=${v}\n`).join(''), { mode: 0o600 });
   chmodSync(file, 0o600);
+  keepLiveToken(name, tokens.access_token);
 }
 
 /** Each credentials file's refresh in this process, one after another: a refresh token works once. */
 const refreshing = new Map<string, Promise<unknown>>();
 
 /**
- * Trades the person's refresh token for a fresh access token, keeps the new
- * pair in their credentials file and returns the access token. Undefined on
- * a Helix without the app, or for a person who pasted a token instead.
- * GitHub's refusal (revoked, or unused for six months) is the person's to fix.
+ * The person's access token, good for at least RENEW_WITHIN_MS more: the one
+ * they have, or, within that last stretch of its eight hours (or with no end
+ * kept, from before ends were kept), a new one for their refresh token, with
+ * the new pair kept. Undefined on a Helix without the app, or for a person
+ * who pasted a token instead. GitHub's refusal (revoked, or unused for six
+ * months) is the person's to fix.
  */
-export function freshToken(store: Store, config: Pick<Config, 'github'>, name: string, urls = GITHUB): Promise<string | undefined> {
+export function freshToken(store: Store, config: Pick<Config, 'github'>, name: string, urls = GITHUB, now = Date.now): Promise<string | undefined> {
   const file = store.person(name)?.env_file;
   // A credentials file that is gone is said by whatever reads it next.
   if (!config.github || !file || !existsSync(file)) return Promise.resolve(undefined);
   const clientId = config.github.client_id;
   const next = (refreshing.get(file) ?? Promise.resolve()).catch(() => {}).then(async () => {
-    const used = envFileVars(file).GH_REFRESH_TOKEN;
+    const held = envFileVars(file);
+    const used = held.GH_REFRESH_TOKEN;
     if (!used) return undefined;
+    if (held.GH_TOKEN && Date.parse(held.GH_TOKEN_EXPIRES ?? '') - now() > RENEW_WITHIN_MS) {
+      if (!existsSync(liveTokenFile(name))) keepLiveToken(name, held.GH_TOKEN);
+      return held.GH_TOKEN;
+    }
     try {
       const tokens = await refreshTokens(clientId, used, urls);
-      keepTokens(file, tokens);
+      keepTokens(name, file, tokens, now());
       return tokens.access_token;
     } catch (err) {
       if (!(err instanceof GitHubRefused)) throw err;
@@ -179,10 +214,25 @@ export const beforeJob = (store: Store, config: Pick<Config, 'github'>, urls = G
   throw new AnimusError(`Helix's GitHub App cannot reach ${full} for you: ask its owner to install the app on it${reach.slug ? ` at ${installLink(reach.slug, urls)}` : ''}`);
 };
 
-/** helix check's line for a person who signed in with the app: their sign-in, refreshed. */
+/**
+ * Renews, when due, the token of everyone with a job running: a running job
+ * reads it from their live token file, so this keeps a job that runs past its
+ * token's eight hours able to push. helix serve runs it every few minutes.
+ */
+export async function renewForRunningJobs(store: Store, config: Pick<Config, 'github'>, say: (line: string) => void, urls = GITHUB, now = Date.now): Promise<void> {
+  if (!config.github) return;
+  const people = [...new Set(store.list().filter((j) => j.state === 'running').map((j) => j.person))];
+  await Promise.all(people.map((person) => freshToken(store, config, person, urls, now).catch((err: unknown) => {
+    say(`${person}'s GitHub sign-in could not be renewed: ${(err as Error).message}`);
+  })));
+}
+
+/** helix check's line for a person who signed in with the app: their sign-in, renewed when due, and tried. */
 export async function checkSignIn(store: Store, config: Pick<Config, 'github'>, name: string, urls = GITHUB): Promise<Finding[]> {
   try {
-    return (await freshToken(store, config, name, urls)) ? [{ what: 'GitHub sign-in', ok: true, detail: 'refreshed: a new access token for eight hours' }] : [];
+    const token = await freshToken(store, config, name, urls);
+    if (!token) return [];
+    return [{ what: 'GitHub sign-in', ok: true, detail: `signs in as ${(await githubUser(token, urls)).login}` }];
   } catch (err) {
     return [{ what: 'GitHub sign-in', ok: false, detail: (err as Error).message }];
   }

@@ -46,6 +46,20 @@ test('a job\'s container gets its person\'s folders at the same paths, Animus re
   assert.deepEqual(resumed.args.slice(-4), ['resume', 'app-1', '--answer', 'yes']);
 });
 
+// Protects: a token renewed during a contained job reaching it. Fails when: the person's live token folder is not mounted, is writable, or is the file itself (a rename that replaces it would not show through), or a job without one gets a mount anyway.
+test('a job signed in with the GitHub App gets its person\'s live token folder read-only, and no other job does', () => {
+  const home = mkdtempSync(join(tmpdir(), 'helix-'));
+  const launch = containerLaunch({ home, animusRoot: '/srv/animus', image: 'animus-job:0.4.3', limits: {}, uid: 1001, gid: 1001 });
+  const mirror = repoWithOrigin('https://github.com/o/app.git');
+
+  const signedIn = launch(job(), mirror, { ANIMUS_GH_TOKEN_FILE: '/h/tokens/ana/gh-token' }).args.join(' ');
+  const pasted = launch(job(), mirror, { GH_TOKEN: 'ghp_x' }).args.join(' ');
+
+  assert.ok(signedIn.includes('-v /h/tokens/ana:/h/tokens/ana:ro'), signedIn);
+  assert.ok(signedIn.includes('-e ANIMUS_GH_TOKEN_FILE'));
+  assert.ok(!pasted.includes('/tokens/'));
+});
+
 test('a clone made with a person\'s token needs an https origin', () => {
   assert.throws(() => originOf(repoWithOrigin('git@github.com:o/app.git')), /needs an https address/);
   assert.equal(dockerArgs({ job: { id: 1 }, image: 'i', limits: {}, uid: 1, gid: 1, animusRoot: '/a', person: personDirs('/h', 'p'), specDir: '/s', envNames: [], command: ['x'] }).includes('6g'), true);

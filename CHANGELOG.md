@@ -8,6 +8,17 @@ clients with how to update.
 
 ## Unreleased
 
+- Helix no longer ends a running job's GitHub token. GitHub ends an access
+  token the moment its refresh token is used, and Helix renewed before every
+  job, project check, `helix check`, daily cleanup and display refresh, so a
+  second job starting broke the first one's push ("Invalid username or
+  token"). Helix now renews only in a token's last hour, keeps when it ends
+  (`GH_TOKEN_EXPIRES` in the credentials file), and writes the current token
+  to `~/.helix/tokens/<name>/gh-token`, mounted read-only into that person's
+  jobs; git and Animus's `gh` calls read it each time, so a job outlives a
+  renewal, and a job past eight hours can still push. `helix check` now tries
+  the sign-in with GitHub instead of renewing it.
+
 ## 0.4.2 (2026-11-17)
 
 - `lan_url` in Helix's `config.yaml`: the address on the office network.

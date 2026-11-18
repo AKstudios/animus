@@ -57,10 +57,12 @@ export function runArgs(opts: {
 export function dockerArgs(opts: {
   job: Pick<HelixJob, 'id'>; image: string; limits: ContainerConfig; uid: number; gid: number;
   animusRoot: string; person: ReturnType<typeof personDirs>; specDir: string; envNames: string[]; command: string[];
+  /** The person's live token folder (github-app.ts liveTokenDir), read-only, when they signed in with the GitHub App. */
+  tokens?: string;
 }): string[] {
   return runArgs({
     name: containerName(opts.job.id), image: opts.image, limits: opts.limits, uid: opts.uid, gid: opts.gid,
-    mounts: [{ path: opts.animusRoot, readOnly: true }, { path: opts.person.root }, { path: opts.specDir, readOnly: true }],
+    mounts: [{ path: opts.animusRoot, readOnly: true }, { path: opts.person.root }, { path: opts.specDir, readOnly: true }, ...(opts.tokens ? [{ path: opts.tokens, readOnly: true }] : [])],
     envNames: opts.envNames, workdir: opts.person.root, command: opts.command,
   });
 }
@@ -117,7 +119,8 @@ export function containerLaunch(opts: { home: string; animusRoot: string; image:
       origin: job.animus_job ? '' : originOf(repoDir), animus: animusArgs(job, clone),
     });
     const envNames = [...new Set([...Object.keys(env), ...Object.keys(extra)])].sort();
-    const args = dockerArgs({ job, image: opts.image, limits: opts.limits, uid: opts.uid, gid: opts.gid, animusRoot: opts.animusRoot, person, specDir: dirname(job.spec), envNames, command });
+    const tokens = env.ANIMUS_GH_TOKEN_FILE ? dirname(env.ANIMUS_GH_TOKEN_FILE) : undefined;
+    const args = dockerArgs({ job, image: opts.image, limits: opts.limits, uid: opts.uid, gid: opts.gid, animusRoot: opts.animusRoot, person, specDir: dirname(job.spec), envNames, command, ...(tokens ? { tokens } : {}) });
     return { command: 'docker', args, env: extra, cwd: opts.home };
   };
 }

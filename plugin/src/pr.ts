@@ -3,7 +3,7 @@
 // A job that failed after its fix rounds gets a draft with the failure report,
 // so the work is not lost. The factory never merges.
 import { spawnSync } from 'node:child_process';
-import { rmSync } from 'node:fs';
+import { existsSync, readFileSync, rmSync } from 'node:fs';
 import { basename, join } from 'node:path';
 import type { CheckResult } from './gates.ts';
 import type { Plan } from './profiles.ts';
@@ -131,7 +131,10 @@ export const publish: Publish = ({ cwd, branch, baseBranch, title, body, draft }
 };
 
 function gh(cwd: string, args: string[], input?: string, quiet = false): string | undefined {
-  const r = spawnSync('gh', args, { cwd, input, encoding: 'utf8' });
+  // On Helix with its GitHub App, the token is read as it is now: it may have been renewed since the job started.
+  const live = process.env.ANIMUS_GH_TOKEN_FILE;
+  const env = live && existsSync(live) ? { ...process.env, GH_TOKEN: readFileSync(live, 'utf8').trim() } : undefined;
+  const r = spawnSync('gh', args, { cwd, input, encoding: 'utf8', ...(env ? { env } : {}) });
   if (r.error) throw new AnimusError((r.error as NodeJS.ErrnoException).code === 'ENOENT' ? 'gh is not installed; see https://cli.github.com' : `gh ${args.slice(0, 2).join(' ')}: ${r.error.message}`);
   if (r.status !== 0) {
     if (quiet) return undefined;

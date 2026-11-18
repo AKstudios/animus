@@ -65,8 +65,9 @@ export async function fakeGitHub(opts: { clientId?: string; deviceFlow?: boolean
     if (body.grant_type === 'refresh_token') {
       const login = refresh.get(body.refresh_token ?? '');
       if (!login) return [200, { error: 'bad_refresh_token', error_description: 'The refresh token passed is incorrect or expired.' }];
-      // Each refresh token works once; the new pair replaces it.
+      // Each refresh token works once; the new pair replaces it, and the access token issued with it ends at once, as on GitHub.
       refresh.delete(body.refresh_token!);
+      access.delete(body.refresh_token!.replace(/^ghr_/, 'ghu_'));
       return [200, issue(login)];
     }
     if (body.grant_type !== 'urn:ietf:params:oauth:grant-type:device_code') return [200, { error: 'unsupported_grant_type' }];

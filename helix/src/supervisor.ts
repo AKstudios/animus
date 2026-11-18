@@ -13,6 +13,7 @@ import { animusHome, loadProgress, type Progress } from '../../plugin/src/log.ts
 import type { PersonalSkill } from '../../plugin/src/personal.ts';
 import { parseSpec } from '../../plugin/src/spec.ts';
 import { credentialEnv, personEnv, readyRepos, type Config } from './config.ts';
+import { liveTokenFile } from './github-app.ts';
 import type { HelixJob, Store } from './store.ts';
 
 const PLUGIN = join(dirname(fileURLToPath(import.meta.url)), '..', '..', 'plugin');
@@ -139,7 +140,9 @@ export function supervise(opts: {
       // Taken off since the job was queued: it never runs, and never with the machine's own logins in place of theirs.
       if (!person) throw new AnimusError(`${job.person} is no longer on Helix`);
       if (!repoDir) throw new AnimusError(`Helix no longer has the project ${job.repo}`);
-      const theirs = personEnv(person);
+      const live = liveTokenFile(job.person);
+      // Signed in with the GitHub App: git and Animus's gh read the token as it is when they use it (github-app.ts liveTokenDir).
+      const theirs = { ...personEnv(person), ...(existsSync(live) ? { ANIMUS_GH_TOKEN_FILE: live } : {}) };
       const looked = opts.preflight?.(job.person, theirs, repoDir, job.repo) ?? {};
       if (looked.why) throw new AnimusError(looked.why);
       // What the person set themselves wins over what was looked up.

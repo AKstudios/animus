@@ -20,7 +20,7 @@ import { INVITE_HOURS, invite, takeOff } from './join.ts';
 import { ask } from '../../plugin/src/join.ts';
 import { describeInvite, describeRemoval } from '../../plugin/src/remote.ts';
 import { moveSlackOwner, setOwner } from './owner.ts';
-import { beforeJob, checkSignIn, freshToken, githubSetup } from './github-app.ts';
+import { beforeJob, checkSignIn, freshToken, githubSetup, renewForRunningJobs } from './github-app.ts';
 import { slackEnvFile, slackOwner, slackSetup, slackWeb } from './slack-api.ts';
 import { startSlack } from './slack-socket.ts';
 import { slackBot, slackInvite, slackNotifier } from './slack.ts';
@@ -186,11 +186,13 @@ function main(argv: string[]): number | undefined | Promise<number> {
       }
       // Only with slack.enabled in config.yaml; turning it on or off takes a restart.
       const slack = startSlack(config, { say });
-      // On a Helix with a GitHub App, each job and project check first trades the person's refresh token for a fresh access token.
+      // On a Helix with a GitHub App, each job and project check first makes sure the person's access token has an hour or more left.
       const supervisor = supervise({ store, config, home, preflight, prepare: beforeJob(store, config), say, ...isolation, ...(slack ? { notify: slackNotifier(slack, store, say) } : {}) });
       if (slack) slackBot(slack, { store, config, supervisor });
       const server = serve({ config, store, supervisor, home, startCheck: checkInChild(store, home, say, (person) => freshToken(store, config, person)),...(config.container ? { reap: removeContainer } : {}), ...(slack ? { slack } : {}) });
       server.listen(config.port, config.host, () => console.error(`helix ${animusVersion()}: listening on http://${config.host}:${config.port}, ${config.slots} job(s) at once${config.container ? ', each in a container' : ''}, projects: ${Object.keys(readyRepos(store)).join(', ') || 'none yet'}`));
+      // A running job reads its person's GitHub token from their live token file; renewing it when due lets a long job still push.
+      setInterval(() => { void renewForRunningJobs(store, config, say); }, 10 * 60 * 1000).unref();
       // Someone changed the slots or the container limits: the same config object, so everything sees it at once.
       watchFile(configFile(), { interval: 2000 }, () => {
         try {

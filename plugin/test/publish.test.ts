@@ -17,6 +17,7 @@ function setup(open: 'draft' | 'ready' | 'none') {
   const log = join(bin, 'calls.txt');
   writeFileSync(join(bin, 'gh'), `#!/bin/sh
 echo "$*" >> "${log}"
+echo "$GH_TOKEN" >> "${log}.tokens"
 # Read what Animus pipes in, as gh does: exiting with it unread breaks the pipe under load.
 case " $* " in *" - "*) cat >/dev/null ;; esac
 case "$1 $2" in
@@ -27,7 +28,8 @@ esac
   chmodSync(join(bin, 'gh'), 0o755);
   process.env.PATH = `${bin}${delimiter}${process.env.PATH}`;
   const calls = () => readFileSync(log, 'utf8').trim().split('\n').slice(1);
-  return { repo, calls };
+  const tokens = () => readFileSync(`${log}.tokens`, 'utf8').trim().split('\n');
+  return { repo, calls, tokens };
 }
 
 const input = (repo: string, draft: boolean) => ({ cwd: repo, branch: 'main', baseBranch: 'main', title: 't', body: 'b', draft });
@@ -48,4 +50,22 @@ test('an open pull request already in the right state is only updated', () => {
   const { repo, calls } = setup('ready');
   publish(input(repo, false));
   assert.deepEqual(calls(), ['pr edit main --body-file -']);
+});
+
+// Protects: a Helix job whose GitHub token was renewed while it ran. Fails when: gh is called with the token the job started with rather than the one in its live token file now.
+test('on Helix, each gh call uses the token in the live token file as it is at that moment', (t) => {
+  const { repo, tokens } = setup('none');
+  const live = join(mkdtempSync(join(tmpdir(), 'animus-live-')), 'gh-token');
+  writeFileSync(live, 'ghu_renewed\n');
+  const before = { file: process.env.ANIMUS_GH_TOKEN_FILE, token: process.env.GH_TOKEN };
+  process.env.ANIMUS_GH_TOKEN_FILE = live;
+  process.env.GH_TOKEN = 'ghu_from_the_start';
+  t.after(() => {
+    if (before.file === undefined) delete process.env.ANIMUS_GH_TOKEN_FILE; else process.env.ANIMUS_GH_TOKEN_FILE = before.file;
+    if (before.token === undefined) delete process.env.GH_TOKEN; else process.env.GH_TOKEN = before.token;
+  });
+
+  publish(input(repo, false));
+
+  assert.deepEqual([...new Set(tokens())], ['ghu_renewed']);
 });

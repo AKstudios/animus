@@ -109,7 +109,7 @@ export async function relogin(store: Store, github: JoinGitHub | undefined, name
   if (!person.env_file) throw new Refused(409, `Helix keeps no credentials file for ${name}: ask its owner to add you again`);
   const { tokens, login } = await approved(github, body.device_code, LOGIN_AGAIN);
   if (person.github && login.toLowerCase() !== person.github.toLowerCase()) throw new Refused(403, `you are on Helix as the GitHub account ${person.github}, and ${login} approved the sign-in. Run animus github login again and approve as ${person.github}`);
-  keepTokens(person.env_file, tokens);
+  keepTokens(name, person.env_file, tokens);
   if (!person.github) store.putPerson(name, { ...person, github: login });
   return { name, github: login };
 }
@@ -223,10 +223,10 @@ export async function joinHelix(opts: { store: Store; verify: Verify; at?: Date;
   if (!store.takeInvite(hash, opts.at)) throw new Refused(403, 'that code was used a moment ago');
   const file = credentialsFile(i.name);
   mkdirSync(dirname(file), { recursive: true, mode: 0o700 });
-  // The refresh token gets each job a fresh access token; it is kept here, never in their folder.
-  const kept = signedIn ? { ...env, GH_REFRESH_TOKEN: signedIn.tokens.refresh_token } : env;
-  writeFileSync(file, Object.entries(kept).map(([k, v]) => `${k}=${v}\n`).join(''), { mode: 0o600 });
+  // The refresh token renews the access token; it is kept here, never in their folder.
+  writeFileSync(file, Object.entries(env).map(([k, v]) => `${k}=${v}\n`).join(''), { mode: 0o600 });
   chmodSync(file, 0o600);
+  if (signedIn) keepTokens(i.name, file, signedIn.tokens, opts.at?.getTime());
   const token = addPerson(store, i.name, file, login);
   if (i.slack) store.linkSlack(i.name, i.slack);
   // A project the app cannot reach is named once, with its install link, not again as a push refused.

@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { execFileSync } from 'node:child_process';
 import { chmodSync, mkdirSync, mkdtempSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -9,9 +10,9 @@ import { describeUnreachable, githubLogin, signInWithGitHub } from '../../plugin
 import { inviteDetails } from '../../plugin/src/remote.ts';
 import type { Display } from '../../plugin/display/shape.ts';
 import { animusCleanups } from '../src/cleanup.ts';
-import { configFile, saveConfig, type Config } from '../src/config.ts';
+import { configFile, credentialEnv, saveConfig, type Config } from '../src/config.ts';
 import { personDirs } from '../src/container.ts';
-import { beforeJob, checkSignIn, deviceCode, freshToken, githubSetup, githubUser, pollDevice, reachableRepos, refreshTokens } from '../src/github-app.ts';
+import { beforeJob, checkSignIn, deviceCode, freshToken, githubSetup, githubUser, liveTokenFile, pollDevice, reachableRepos, refreshTokens, renewForRunningJobs } from '../src/github-app.ts';
 import { credentialsFile, invite, type Verify } from '../src/join.ts';
 import { checkInChild } from '../src/projects.ts';
 import { serve } from '../src/server.ts';
@@ -160,23 +161,70 @@ async function cleosJob(h: Awaited<ReturnType<typeof helixWithApp>>, repo: strin
   return h.store.get(id)!;
 }
 
-// Protects: criterion 4. Fails when: a job runs with the access token from join (ended after eight hours), the new refresh token is not kept with mode 600, or the refresh token reaches the job.
-test('each job gets a fresh access token as GH_TOKEN, the new refresh token is kept in the credentials file, and the job never sees it', async () => {
+/** Moves the end of cleo's stored access token to the given time, as if her token had aged. */
+function storedEnd(at: Date): void {
+  const file = credentialsFile('cleo');
+  writeFileSync(file, readFileSync(file, 'utf8').replace(/^GH_TOKEN_EXPIRES=.*$/m, `GH_TOKEN_EXPIRES=${at.toISOString()}`), { mode: 0o600 });
+}
+
+const refreshes = (github: FakeGitHub) => github.calls.filter((c) => c === 'POST /login/oauth/access_token').length;
+
+// Protects: criterion 4, and the push that failed on Helix. Fails when: a job starting renews a token that has hours left (GitHub then ends the token every running job holds), the job is not given the live token file, or the refresh token or its end reaches the job.
+test('a job runs with the person\'s current token and its live file, renewing nothing while the token has hours left', async () => {
+  const github = await fakeGitHub();
+  const h = await helixWithApp(github);
+  await joinCleo(h);
+  const before = refreshes(github);
+
+  await cleosJob(h, 'app');
+  h.stop();
+  await github.close();
+
+  assert.equal(refreshes(github), before);
+  assert.equal(h.launched.length, 1);
+  assert.equal(h.launched[0]!.GH_TOKEN, 'ghu_1');
+  assert.equal(h.launched[0]!.ANIMUS_GH_TOKEN_FILE, liveTokenFile('cleo'));
+  assert.equal(readFileSync(liveTokenFile('cleo'), 'utf8'), 'ghu_1');
+  assert.equal(h.launched[0]!.GH_REFRESH_TOKEN, undefined);
+  assert.equal(h.launched[0]!.GH_TOKEN_EXPIRES, undefined);
+});
+
+// Protects: the push that failed on Helix. Fails when: a second job starting for the same person ends the token the first job holds.
+test('a second job starting for the same person leaves the first job\'s token working', async () => {
+  const github = await fakeGitHub();
+  const h = await helixWithApp(github);
+  await joinCleo(h);
+
+  await cleosJob(h, 'app');
+  await cleosJob(h, 'app');
+  const first = await githubUser(h.launched[0]!.GH_TOKEN!, github);
+  h.stop();
+  await github.close();
+
+  assert.equal(first.login, 'cleo-gh');
+});
+
+// Protects: renewal near the end of a token's eight hours, during a job. Fails when: a token in its last hour is not renewed, the new pair and its end are not kept with mode 600, or the live file a running job reads keeps the ended token, so git or gh in that job would push with it.
+test('a token in its last hour is renewed, and the live file a running job reads holds the new one for git and gh', async () => {
   const github = await fakeGitHub();
   const h = await helixWithApp(github);
   await joinCleo(h);
   chmodSync(credentialsFile('cleo'), 0o644);
+  storedEnd(new Date(Date.now() + 30 * 60 * 1000));
 
-  await cleosJob(h, 'app');
+  const token = await freshToken(h.store, h.config, 'cleo', github);
   const kept = readFileSync(credentialsFile('cleo'), 'utf8');
+  const jobEnv = { ANIMUS_GH_TOKEN_FILE: liveTokenFile('cleo') };
+  const git = execFileSync('git', ['credential', 'fill'], { input: 'protocol=https\nhost=github.com\n\n', env: { ...process.env, ...jobEnv, ...credentialEnv(jobEnv), GIT_TERMINAL_PROMPT: '0' }, encoding: 'utf8' });
+  await assert.rejects(githubUser('ghu_1', github));
   h.stop();
   await github.close();
 
-  assert.equal(h.launched.length, 1);
-  assert.equal(h.launched[0]!.GH_TOKEN, 'ghu_2');
-  assert.equal(h.launched[0]!.GH_REFRESH_TOKEN, undefined);
-  assert.equal(kept, 'CLAUDE_CODE_OAUTH_TOKEN=sk-ant-oat01-cleo\nGH_TOKEN=ghu_2\nGH_REFRESH_TOKEN=ghr_2\n');
+  assert.equal(token, 'ghu_2');
+  assert.match(kept, /^GH_TOKEN=ghu_2\nGH_REFRESH_TOKEN=ghr_2\nGH_TOKEN_EXPIRES=\S+$/m);
   if (process.platform !== 'win32') assert.equal(statSync(credentialsFile('cleo')).mode & 0o777, 0o600);
+  assert.equal(readFileSync(liveTokenFile('cleo'), 'utf8'), 'ghu_2');
+  assert.match(git, /^password=ghu_2$/m);
 });
 
 // Protects: criterion 4's refusal. Fails when: a job for a repository the app cannot reach for the person starts anyway, or its reason lacks the install link.
@@ -231,22 +279,27 @@ test('animus github login replaces the stored tokens, and refuses a login other 
   await github.close();
 
   assert.match(io.said.join('\n'), /Type WDJB-MJH3 at http:\/\/127\.0\.0\.1:\d+\/login\/device/);
-  assert.equal(kept, 'CLAUDE_CODE_OAUTH_TOKEN=sk-ant-oat01-cleo\nGH_TOKEN=ghu_3\nGH_REFRESH_TOKEN=ghr_3\n');
+  assert.match(kept, /^CLAUDE_CODE_OAUTH_TOKEN=sk-ant-oat01-cleo\nGH_TOKEN=ghu_3\nGH_REFRESH_TOKEN=ghr_3\nGH_TOKEN_EXPIRES=\S+\n$/);
+  assert.equal(readFileSync(liveTokenFile('cleo'), 'utf8'), 'ghu_3');
 });
 
-// Protects: criterion 4 in helix check. Fails when: helix check tries the access token from join instead of refreshing it first, or does not keep the new refresh token.
-test('helix check refreshes the person\'s sign-in first and keeps the new tokens', async () => {
+// Protects: criterion 4 in helix check. Fails when: helix check renews a token with hours left (ending the one running jobs hold), does not try the sign-in with GitHub, or does not renew one that has ended.
+test('helix check tries the person\'s sign-in with GitHub, renewing it only once its end is near', async () => {
   const github = await fakeGitHub();
   const h = await helixWithApp(github);
   await joinCleo(h);
 
-  const found = await checkSignIn(h.store, h.config, 'cleo', github);
-  const kept = readFileSync(credentialsFile('cleo'), 'utf8');
+  const fresh = await checkSignIn(h.store, h.config, 'cleo', github);
+  const keptFresh = readFileSync(credentialsFile('cleo'), 'utf8');
+  storedEnd(new Date(Date.now() - 1000));
+  const aged = await checkSignIn(h.store, h.config, 'cleo', github);
+  const keptAged = readFileSync(credentialsFile('cleo'), 'utf8');
   h.stop();
   await github.close();
 
-  assert.deepEqual(found.map((f) => [f.what, f.ok]), [['GitHub sign-in', true]]);
-  assert.match(kept, /GH_TOKEN=ghu_2\nGH_REFRESH_TOKEN=ghr_2\n/);
+  assert.deepEqual([...fresh, ...aged].map((f) => [f.what, f.ok, f.detail]), [['GitHub sign-in', true, 'signs in as cleo-gh'], ['GitHub sign-in', true, 'signs in as cleo-gh']]);
+  assert.match(keptFresh, /GH_TOKEN=ghu_1\nGH_REFRESH_TOKEN=ghr_1\n/);
+  assert.match(keptAged, /GH_TOKEN=ghu_2\nGH_REFRESH_TOKEN=ghr_2\n/);
 });
 
 // Protects: criterion 4 before a project check. Fails when: a project is checked without refreshing its adder's sign-in, or a refused refresh leaves it checking.
@@ -272,6 +325,7 @@ test('the display asks GitHub for open PRs with a refreshed token once the acces
   const h = await helixWithApp(github);
   await joinCleo(h);
   github.expire('ghu_1');
+  storedEnd(new Date(Date.now() - 1000));
   h.store.add({ state: 'ended', person: 'cleo', repo: 'app', spec: '', title: 'Add login', draft: false, submitted: '2026-11-17T10:00:00Z', outcome: 'pr', pr: 'https://github.com/acme/app/pull/7' });
 
   const d = (await (await fetch(`${h.url}/display`)).json()) as Display;
@@ -287,6 +341,7 @@ test('animus cleanup runs with a refreshed token once the access token has expir
   const h = await helixWithApp(github);
   await joinCleo(h);
   github.expire('ghu_1');
+  storedEnd(new Date(Date.now() - 1000));
   mkdirSync(join(personDirs(h.home, 'cleo').animus, 'jobs'), { recursive: true });
 
   const [run] = await animusCleanups(h.store, { home: h.home, contained: true, fresh: (person) => freshToken(h.store, h.config, person, github) });
@@ -316,7 +371,8 @@ test('join shows GitHub\'s code, opens its page, waits for approval and joins as
   assert.match(io.said.join('\n'), /Type WDJB-MJH1 at http:\/\/127\.0\.0\.1:\d+\/login\/device/);
   assert.deepEqual(io.opened, [`${github.web}/login/device`]);
   assert.deepEqual([joined.name, joined.github, person?.github], ['cleo', 'cleo-gh', 'cleo-gh']);
-  assert.equal(readFileSync(credentialsFile('cleo'), 'utf8'), 'CLAUDE_CODE_OAUTH_TOKEN=sk-ant-oat01-cleo\nGH_TOKEN=ghu_1\nGH_REFRESH_TOKEN=ghr_1\n');
+  assert.match(readFileSync(credentialsFile('cleo'), 'utf8'), /^CLAUDE_CODE_OAUTH_TOKEN=sk-ant-oat01-cleo\nGH_TOKEN=ghu_1\nGH_REFRESH_TOKEN=ghr_1\nGH_TOKEN_EXPIRES=\S+\n$/);
+  assert.equal(readFileSync(liveTokenFile('cleo'), 'utf8'), 'ghu_1');
   const install = `${github.web}/apps/animus-helix/installations/new`;
   assert.deepEqual(joined.unreachable, [{ project: 'site', owner: 'AKstudios', install }]);
   assert.deepEqual(joined.cannot_push, []);
@@ -338,4 +394,28 @@ test('an invite with --github refuses another login that approves, and its code 
   await github.close();
 
   assert.equal(joined.github, 'cleo-gh');
+});
+
+// Protects: a job that runs past its token's eight hours. Fails when: helix serve's timer does not renew the token of someone with a job running once its end is near, renews one with hours left, or renews for someone with no job running.
+test('renewing for running jobs renews only a running job\'s person, and only once the token is in its last hour', async () => {
+  const github = await fakeGitHub();
+  const h = await helixWithApp(github);
+  await joinCleo(h);
+  const said: string[] = [];
+
+  h.store.add({ state: 'running', person: 'cleo', repo: 'app', spec: '', title: 'long', draft: false, submitted: '' });
+  await renewForRunningJobs(h.store, h.config, (l) => said.push(l), github);
+  const withHoursLeft = readFileSync(liveTokenFile('cleo'), 'utf8');
+  storedEnd(new Date(Date.now() + 10 * 60 * 1000));
+  await renewForRunningJobs(h.store, h.config, (l) => said.push(l), github);
+  const nearEnd = readFileSync(liveTokenFile('cleo'), 'utf8');
+  h.store.save({ ...h.store.list()[0]!, state: 'ended' });
+  storedEnd(new Date(Date.now() + 10 * 60 * 1000));
+  await renewForRunningJobs(h.store, h.config, (l) => said.push(l), github);
+  const idle = readFileSync(liveTokenFile('cleo'), 'utf8');
+  h.stop();
+  await github.close();
+
+  assert.deepEqual([withHoursLeft, nearEnd, idle], ['ghu_1', 'ghu_2', 'ghu_2']);
+  assert.deepEqual(said, []);
 });

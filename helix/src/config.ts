@@ -168,21 +168,26 @@ export const readyRepos = (store: Store): Record<string, string> =>
  * there is tried first.
  */
 export function credentialEnv(env: Record<string, string>): Record<string, string> {
-  if (!env.GH_TOKEN && !env.GITHUB_TOKEN) return {};
+  if (!env.GH_TOKEN && !env.GITHUB_TOKEN && !env.ANIMUS_GH_TOKEN_FILE) return {};
   const key = 'credential.https://github.com.helper';
-  return { GIT_CONFIG_COUNT: '2', GIT_CONFIG_KEY_0: key, GIT_CONFIG_VALUE_0: '', GIT_CONFIG_KEY_1: key, GIT_CONFIG_VALUE_1: '!gh auth git-credential' };
+  // With a live token file (github-app.ts), git reads the token from it at each push, so a renewal during a job does not strand it.
+  const helper = env.ANIMUS_GH_TOKEN_FILE ? LIVE_TOKEN_HELPER : '!gh auth git-credential';
+  return { GIT_CONFIG_COUNT: '2', GIT_CONFIG_KEY_0: key, GIT_CONFIG_VALUE_0: '', GIT_CONFIG_KEY_1: key, GIT_CONFIG_VALUE_1: helper };
 }
+
+/** A git credential helper that answers with the token in $ANIMUS_GH_TOKEN_FILE as it is now. */
+export const LIVE_TOKEN_HELPER = '!f() { test "$1" = get || exit 0; echo username=x-access-token; echo "password=$(cat "$ANIMUS_GH_TOKEN_FILE")"; }; f';
 
 /** Makes a job's commits the person's, on a machine whose account has no git identity of its own. */
 export function identityEnv(who: { name: string; email: string }): Record<string, string> {
   return { GIT_AUTHOR_NAME: who.name, GIT_AUTHOR_EMAIL: who.email, GIT_COMMITTER_NAME: who.name, GIT_COMMITTER_EMAIL: who.email };
 }
 
-/** The variables a person's jobs run with, from their env_file: all but the refresh token, which only Helix uses. */
+/** The variables a person's jobs run with, from their env_file: all but the refresh token and when the access token ends, which only Helix uses. */
 export function personEnv(person: Person | undefined): Record<string, string> {
   if (!person?.env_file) return {};
   if (!existsSync(person.env_file)) throw new AnimusError(`the credentials file ${person.env_file} is gone`);
-  const { GH_REFRESH_TOKEN: _refresh, ...env } = envFileVars(person.env_file);
+  const { GH_REFRESH_TOKEN: _refresh, GH_TOKEN_EXPIRES: _expires, ...env } = envFileVars(person.env_file);
   return env;
 }
 
