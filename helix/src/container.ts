@@ -69,11 +69,13 @@ export function dockerArgs(opts: {
 
 /**
  * What runs inside: the person's clone is made on their first job for that
- * repository, from its GitHub address with their own token, then `animus`.
+ * repository, from its GitHub address with their own token, its base branch
+ * is fetched as GitHub has it now (`helix fresh-base`, helix/src/fresh.ts),
+ * then `animus`. A fetch that fails ends the job here, with the reason.
  */
-export function jobCommand(opts: { node: string; cli: string; clone: string; origin: string; animus: string[] }): string[] {
-  const script = 'test -d "$1/.git" || git clone --quiet "$2" "$1" || exit 1; shift 2; exec "$@"';
-  return ['sh', '-c', script, 'sh', opts.clone, opts.origin, opts.node, '--disable-warning=ExperimentalWarning', opts.cli, ...opts.animus];
+export function jobCommand(opts: { node: string; cli: string; fresh: string; clone: string; origin: string; animus: string[] }): string[] {
+  const script = 'test -d "$1/.git" || git clone --quiet "$2" "$1" || exit 1; "$4" --disable-warning=ExperimentalWarning "$3" fresh-base "$1" || exit 1; shift 3; exec "$@"';
+  return ['sh', '-c', script, 'sh', opts.clone, opts.origin, opts.fresh, opts.node, '--disable-warning=ExperimentalWarning', opts.cli, ...opts.animus];
 }
 
 export function makePersonDirs(dirs: ReturnType<typeof personDirs>): void {
@@ -143,7 +145,7 @@ export function containerLaunch(opts: { home: string; animusRoot: string; image:
     const clone = join(person.repos, job.repo);
     const extra = { ANIMUS_HOME: person.animus, CLAUDE_CONFIG_DIR: person.claude };
     const command = jobCommand({
-      node: 'node', cli: join(opts.animusRoot, 'plugin', 'src', 'cli.ts'), clone,
+      node: 'node', cli: join(opts.animusRoot, 'plugin', 'src', 'cli.ts'), fresh: join(opts.animusRoot, 'helix', 'src', 'cli.ts'), clone,
       origin: job.animus_job ? '' : originOf(repoDir), animus: animusArgs(job, clone),
     });
     const envNames = [...new Set([...Object.keys(env), ...Object.keys(extra)])].sort();
