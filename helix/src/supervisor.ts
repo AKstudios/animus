@@ -16,7 +16,7 @@ import { credentialEnv, personEnv, readyRepos, type Config } from './config.ts';
 import { liveTokenFile } from './github-app.ts';
 import type { HelixJob, Store } from './store.ts';
 
-const PLUGIN = join(dirname(fileURLToPath(import.meta.url)), '..', '..', 'plugin');
+export const PLUGIN = join(dirname(fileURLToPath(import.meta.url)), '..', '..', 'plugin');
 
 /**
  * How a job's process is started. env is what the job runs with (the

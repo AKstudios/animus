@@ -38,13 +38,16 @@ export type Transport = {
   ephemeral(channel: string, user: string, text: string): Promise<void>;
   /** A private reply to a command, at the response_url Slack gave it, which works in any channel. */
   respond(responseUrl: string, text: string): Promise<void>;
+  /** Shares a text file into a thread (files:write). */
+  upload(channel: string, thread: string, filename: string, content: string): Promise<void>;
 };
 
-/** Calls a Web API method; Slack's refusal, such as invalid_auth, is the error's message. */
-export async function slackCall(token: string, method: string, body: Record<string, unknown> = {}, api = SLACK_API): Promise<Record<string, unknown>> {
+/** Calls a Web API method, with a JSON body or, for the methods that take only that, a form; Slack's refusal, such as invalid_auth, is the error's message. */
+export async function slackCall(token: string, method: string, body: Record<string, unknown> | URLSearchParams = {}, api = SLACK_API): Promise<Record<string, unknown>> {
   let res: Response;
+  const form = body instanceof URLSearchParams;
   try {
-    res = await fetch(`${api}/${method}`, { method: 'POST', headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json; charset=utf-8' }, body: JSON.stringify(body) });
+    res = await fetch(`${api}/${method}`, { method: 'POST', headers: { authorization: `Bearer ${token}`, ...(form ? {} : { 'content-type': 'application/json; charset=utf-8' }) }, body: form ? body : JSON.stringify(body) });
   } catch (err) { throw new AnimusError(`Slack could not be reached: ${(err as Error).message}`); }
   const answer = (await res.json().catch(() => undefined)) as Record<string, unknown> | undefined;
   if (answer?.ok !== true) throw new AnimusError(typeof answer?.error === 'string' ? answer.error : `HTTP ${res.status}`);
@@ -60,6 +63,15 @@ export const slackWeb = (bot: string, api = SLACK_API): Omit<Transport, 'onEvent
     // The URL is the authority, so no token goes with it; Slack answers plain text, not JSON.
     const res = await fetch(responseUrl, { method: 'POST', headers: { 'content-type': 'application/json; charset=utf-8' }, body: JSON.stringify({ response_type: 'ephemeral', text }) });
     if (!res.ok) throw new AnimusError(`Slack refused the reply: HTTP ${res.status} ${await res.text()}`);
+  },
+  upload: async (channel, thread, filename, content) => {
+    // Slack's upload is three steps: an address for the bytes, the bytes, then sharing the file.
+    const bytes = Buffer.from(content);
+    const at = await slackCall(bot, 'files.getUploadURLExternal', new URLSearchParams({ filename, length: String(bytes.length) }), api);
+    let res: Response;
+    try { res = await fetch(String(at.upload_url), { method: 'POST', body: bytes }); } catch (err) { throw new AnimusError(`Slack could not be reached: ${(err as Error).message}`); }
+    if (!res.ok) throw new AnimusError(`Slack refused the file: HTTP ${res.status}`);
+    await slackCall(bot, 'files.completeUploadExternal', new URLSearchParams({ files: JSON.stringify([{ id: at.file_id, title: filename }]), channel_id: channel, thread_ts: thread }), api);
   },
 });
 

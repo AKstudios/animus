@@ -6,12 +6,13 @@ import { fileURLToPath } from 'node:url';
 import { parseArgs } from 'node:util';
 import { claudeAgent } from '../../plugin/src/agent.ts';
 import { loadFactory } from '../../plugin/src/profiles.ts';
-import { AnimusError } from '../../plugin/src/proc.ts';
+import { AnimusError, tryGit } from '../../plugin/src/proc.ts';
 import { CLEANUP_EVERY_MS, CLEANUP_FIRST_MS, helixCleanup } from './cleanup.ts';
 import { KEEP_DAYS } from '../../plugin/src/cleanup.ts';
 import { checkEnv, checkPerson, describeFindings, failing, githubPush, githubToken } from './check.ts';
 import { animusVersion } from '../../plugin/src/version.ts';
-import { containerLaunch, containerProblem, imageName, personDirs, removeContainer } from './container.ts';
+import { containerLaunch, containerProblem, draftLaunch, imageName, personDirs, removeContainer } from './container.ts';
+import { draftRunner } from './drafts.ts';
 import { addPerson, addRepo, configFile, envFileVars, helixHome, identityEnv, importRegistry, loadConfig, readyRepos, removeRepo } from './config.ts';
 import { ensureSetup } from '../../plugin/src/workspace.ts';
 import { loadProfile } from '../../plugin/src/profile.ts';
@@ -188,7 +189,15 @@ function main(argv: string[]): number | undefined | Promise<number> {
       const slack = startSlack(config, { say });
       // On a Helix with a GitHub App, each job and project check first makes sure the person's access token has an hour or more left.
       const supervisor = supervise({ store, config, home, preflight, prepare: beforeJob(store, config), say, ...isolation, ...(slack ? { notify: slackNotifier(slack, store, say) } : {}) });
-      if (slack) slackBot(slack, { store, config, supervisor });
+      if (slack) {
+        // With containers, a draft runs in one of its own on a clone of the project's, with only the person's Claude sign-in.
+        const contained = config.container && draftLaunch({ home, animusRoot: ROOT, image: imageName(animusVersion()), limits: config.container, uid: uid(), gid: gid() });
+        const drafts = draftRunner(slack, {
+          store, config, home, say, slackToken: envFileVars(slackEnvFile()).SLACK_BOT_TOKEN,
+          ...(contained ? { launch: (draft, repoDir, env) => contained({ id: String(draft.id), person: draft.person, folder: draft.folder, mirror: repoDir, base: tryGit(repoDir, ['rev-parse', 'HEAD']) ?? 'HEAD' }, env) } : {}),
+        });
+        slackBot(slack, { store, config, supervisor, drafts });
+      }
       const server = serve({ config, store, supervisor, home, startCheck: checkInChild(store, home, say, (person) => freshToken(store, config, person)),...(config.container ? { reap: removeContainer } : {}), ...(slack ? { slack } : {}) });
       server.listen(config.port, config.host, () => console.error(`helix ${animusVersion()}: listening on http://${config.host}:${config.port}, ${config.slots} job(s) at once${config.container ? ', each in a container' : ''}, projects: ${Object.keys(readyRepos(store)).join(', ') || 'none yet'}`));
       // A running job reads its person's GitHub token from their live token file; renewing it when due lets a long job still push.

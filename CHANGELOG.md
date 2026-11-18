@@ -13,8 +13,16 @@ clients with how to update.
   stopped at $0.50) that reads files and nothing else, refuses to start with
   a GitHub token, and leaves the earlier draft when it stops. The fetching
   (GitHub issues and pull requests, Slack files, public pages but never a
-  private address) and the draft's container are there for Helix; starting a
-  draft from Slack comes next.
+  private address) and the draft's container are there for Helix.
+- Helix drafts from Slack: `/helix draft <text>` or `@Helix <text>` from a
+  linked person posts a thread, fetches what the message links to with the
+  person's GitHub sign-in, runs `animus draft` (without it), and posts the
+  draft in the thread as text and as `draft.md`, with Submit and Discard.
+  The project is the linked issue's repository, else the channel's default
+  set with `/helix project <name>`, else the one the person picks from those
+  the GitHub App lets them push to. `draft_slots` in config.yaml (1 when
+  unset) is how many drafts run at once, apart from jobs. Submitting,
+  revising in the thread and the limits on drafts come next.
 
 ## 0.4.5 (2026-11-18)
 

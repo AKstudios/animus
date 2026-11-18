@@ -35,7 +35,8 @@ export const GITHUB_VARS = ['ANIMUS_GH_TOKEN_FILE', 'GH_TOKEN', 'GITHUB_TOKEN'] 
 
 /** Slack writes a link as <url> or <url|label>, so a link ends at <, > or |. */
 const LINK = /https?:\/\/[^\s<>|"'`]+/g;
-const GITHUB_ITEM = /^https:\/\/github\.com\/([\w.-]+)\/([\w.-]+)\/(?:issues|pull)\/(\d+)/;
+/** A GitHub issue or pull request: its owner, repository and number. */
+export const GITHUB_ITEM =/^https:\/\/github\.com\/([\w.-]+)\/([\w.-]+)\/(?:issues|pull)\/(\d+)/;
 const SLACK_FILE = /^https:\/\/[\w-]+\.slack\.com\/files\/[\w-]+\/(F[A-Z0-9]+)/;
 const MAX_BYTES = 5_000_000;
 const MAX_REDIRECTS = 5;

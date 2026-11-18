@@ -108,7 +108,8 @@ export type Sent =
   | { method: 'post'; channel: string; text: string; thread?: string; blocks?: unknown[] }
   | { method: 'dm'; user: string }
   | { method: 'ephemeral'; channel: string; user: string; text: string }
-  | { method: 'respond'; url: string; text: string };
+  | { method: 'respond'; url: string; text: string }
+  | { method: 'upload'; channel: string; thread: string; filename: string; content: string };
 
 /** A transport for the bot's core that records what it sends; deliver hands it an event as Slack would. */
 export function fakeTransport() {
@@ -120,6 +121,7 @@ export function fakeTransport() {
     dm: async (user) => { sent.push({ method: 'dm', user }); return `D-${user}`; },
     ephemeral: async (channel, user, text) => { sent.push({ method: 'ephemeral', channel, user, text }); },
     respond: async (url, text) => { sent.push({ method: 'respond', url, text }); },
+    upload: async (channel, thread, filename, content) => { sent.push({ method: 'upload', channel, thread, filename, content }); },
   };
   return { transport, sent, deliver: (event: SlackEvent) => handle!(event) };
 }

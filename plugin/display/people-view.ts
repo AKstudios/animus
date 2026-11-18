@@ -11,6 +11,7 @@ export type PeopleRow = { name: string; page: string; github: string; joined: st
 export const KINDS: Record<string, string> = {
   submitted: 'submitted a job', answered: 'answered a job', cancelled: 'cancelled a job', joined: 'joined',
   left: 'left', 'project-added': 'added a project', 'project-removed': 'removed a project',
+  drafted: 'started a draft', 'channel-project': 'set a channel\'s project',
 };
 
 export function peopleView(p: PeoplePage): { rows: PeopleRow[] } {
