@@ -1,8 +1,9 @@
 import assert from 'node:assert/strict';
-import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { basename, join } from 'node:path';
 import { test } from 'node:test';
+import type { Fetch } from '../../plugin/src/draft.ts';
 import { hashToken, type Config } from '../src/config.ts';
 import { draftRunner, type DraftLaunch } from '../src/drafts.ts';
 import { deviceCode, keepTokens, pollDevice } from '../src/github-app.ts';
@@ -28,9 +29,13 @@ fs.writeFileSync(folder + '/draft.md', '# Draft\\n\\n' + fs.readFileSync(folder 
  * and api of o, and docs of p, the bot's core with drafts behind it and a
  * paused queue, so a submitted job stays queued. With github, Helix has the
  * app and ana signed in with it as ana-gh. ran: the project each draft session
- * read, by its clone's folder.
+ * read, by its clone's folder; refs: the references/ each found when it started.
+ * fetch answers every link; by default with 404.
  */
-async function helix(github?: FakeGitHub, more: Partial<Config> = {}) {
+// No test reaches GitHub or the web.
+const notFound: Fetch = async () => new Response('{}', { status: 404 });
+
+async function helix(github?: FakeGitHub, more: Partial<Config> = {}, fetch = notFound) {
   const home = mkdtempSync(join(tmpdir(), 'helix-slack-draft-'));
   process.env.HELIX_HOME = home;
   const config: Config = { host: '127.0.0.1', port: 0, slots: 1, owner: 'ana', slack: { enabled: true }, ...(github ? { github: { client_id: 'Iv23liGood' } } : {}), ...more };
@@ -53,14 +58,18 @@ async function helix(github?: FakeGitHub, more: Partial<Config> = {}) {
   }
   const slack = fakeTransport();
   const ran: string[] = [];
-  const launch: DraftLaunch = (draft, repoDir) => { ran.push(basename(repoDir)); return { command: process.execPath, args: ['-e', FAKE, draft.folder] }; };
-  // No test reaches GitHub or the web: every reference answers 404.
-  const fetch = async () => new Response('{}', { status: 404 });
-  const drafts = draftRunner(slack.transport, { store, config, home, launch, fetch, ...(github ? { github } : {}) });
+  const refs: string[][] = [];
+  const launch: DraftLaunch = (draft, repoDir) => {
+    ran.push(basename(repoDir));
+    const dir = join(draft.folder, 'references');
+    refs.push(existsSync(dir) ? readdirSync(dir).sort() : []);
+    return { command: process.execPath, args: ['-e', FAKE, draft.folder] };
+  };
+  const drafts = draftRunner(slack.transport, { store, config, home, launch, fetch, slackToken: 'xoxb-bot', ...(github ? { github } : {}) });
   slackBot(slack.transport, { store, config, drafts, supervisor: supervise({ store, config, home }) });
   const uploads = () => slack.sent.filter((s) => s.method === 'upload').length;
   const posted = () => uploads() > 0;
-  return { store, slack, ran, posted, uploads, drafts };
+  return { store, slack, ran, refs, posted, uploads, drafts, envFile };
 }
 
 const command = (text: string): SlackEvent => ({ kind: 'command', user: 'U0ANA', channel: 'C0TEAM', text, responseUrl: URL });
@@ -130,6 +139,34 @@ test('with no linked issue and no channel default, the person picks the project 
   await github.close();
 
   assert.deepEqual(h.ran, ['web']);
+});
+
+// Protects: criterion 2's Helix half. Fails when: Helix does not fetch the message's links before the session starts, or fetches them without the person's GitHub sign-in or the bot's Slack token.
+test('the links in a message are fetched as references before the draft session starts, with the person\'s GitHub token and the bot\'s Slack token', async () => {
+  const github = await fakeGitHub();
+  const asked: [string, string | null][] = [];
+  const fetch: Fetch = async (url, init) => {
+    asked.push([url, new Headers(init?.headers).get('authorization')]);
+    if (url.endsWith('/repos/o/app/issues/5')) return Response.json({ title: 'Login is broken', body: 'It 500s.', state: 'open' });
+    if (url.endsWith('/repos/o/app/issues/5/comments')) return Response.json([]);
+    if (url.includes('/files.info?file=F0SPEC')) return Response.json({ ok: true, file: { name: 'spec.txt', url_private_download: 'https://files.slack.com/files-pri/T0-F0SPEC/spec.txt' } });
+    if (url === 'https://files.slack.com/files-pri/T0-F0SPEC/spec.txt') return new Response('The spec.');
+    return new Response('{}', { status: 404 });
+  };
+  const h = await helix(github, {}, fetch);
+  const issue = 'https://github.com/o/app/issues/5';
+  const file = 'https://team.slack.com/files/U0ANA/F0SPEC/spec.txt';
+
+  await h.slack.deliver(command(`draft Fix <${issue}> as in <${file}>`));
+  await until('the draft is posted', h.posted);
+  await github.close();
+
+  const anaToken = /^GH_TOKEN=(.+)$/m.exec(readFileSync(h.envFile, 'utf8'))![1];
+  assert.deepEqual(h.refs, [['1-github-o-app-5.md', '2-slack-spec.txt']]);
+  assert.deepEqual(asked.filter(([url]) => url.includes('/repos/o/app/')).map(([, auth]) => auth), [`Bearer ${anaToken}`, `Bearer ${anaToken}`]);
+  assert.deepEqual(asked.filter(([url]) => url.includes('slack.com')).map(([, auth]) => auth), ['Bearer xoxb-bot', 'Bearer xoxb-bot']);
+  const sources = JSON.parse(readFileSync(join(h.store.draft(1)!.folder, 'sources.json'), 'utf8'));
+  assert.deepEqual(sources, [{ url: issue, file: join('references', '1-github-o-app-5.md') }, { url: file, file: join('references', '2-slack-spec.txt') }]);
 });
 
 /** Starts a draft in a channel whose default project is app, and waits for it to be posted; the draft's post. */
