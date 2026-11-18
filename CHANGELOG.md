@@ -22,7 +22,12 @@ clients with how to update.
   than a day old when first seen is answered as too old; on a pull request,
   `/animus` replies that `fix` is not available yet. Comments by people not on
   the Helix, by Animus itself, or on repositories that are not projects are
-  ignored. `submit`, `discard` and job updates on the issue come later.
+  ignored. A person with a Slack link is also DMed a link to each draft or
+  revision posted. `/animus discard` on the issue closes the draft with a
+  comment (the draft's person or the owner may), and a draft untouched for 7
+  days is discarded with a comment on its issue. GitHub and Slack drafts share
+  the limit of 3 open per person and the `draft_slots` queue. `submit` and job
+  updates on the issue come later.
 
 ## 0.4.7 (2026-11-18)
 

@@ -70,7 +70,7 @@ export function draftComment(spec: string): string {
 }
 
 const USAGE ='Say what you want after `/animus`, as in `/animus add a login page`.';
-// shortcut: these words are read but not acted on until their commands exist; they are not draft text.
+// shortcut: all but discard are read but not acted on until their commands exist; they are not draft text.
 const WORDS = ['submit', 'discard', 'answer', 'cancel', 'fix'];
 
 /**
@@ -80,7 +80,7 @@ const WORDS = ['submit', 'discard', 'answer', 'cancel', 'fix'];
  * was created at or after the position and is not among those handled.
  */
 export function commentWatcher(opts: {
-  store: Store; config: Pick<Config, 'github'>; drafts: Pick<Drafts, 'github'>;
+  store: Store; config: Pick<Config, 'github'>; drafts: Pick<Drafts, 'github' | 'githubDiscard'>;
   github?: GitHubUrls; say?: (line: string) => void; now?: () => number;
 }): { poll(): Promise<void> } {
   const { store, config, drafts } = opts;
@@ -112,7 +112,9 @@ export function commentWatcher(opts: {
     if (now() - Date.parse(c.created_at) > TOO_OLD_MS) { await reply('This `/animus` comment is too old to act on: Helix saw it more than a day after it was written. Comment again if you still want it.'); return; }
     if (m[1] === 'pull') { await reply('`fix` on pull requests is not available yet: comment `/animus` on the issue to draft a spec.'); return; }
     const text = body.slice('/animus'.length).trim();
-    if (WORDS.includes(text.split(/\s/)[0]!.toLowerCase())) return;
+    const word = text.split(/\s/)[0]!.toLowerCase();
+    if (word === 'discard') { await reply(await drafts.githubDiscard(person, { repo, number })); return; }
+    if (WORDS.includes(word)) return;
     const token = await tokenOf(store, config, person, urls);
     // The reaction says "seen"; a refusal of it does not stop the draft.
     if (token) await gh('POST', `/repos/${repo}/issues/comments/${c.id}/reactions`, token, urls, { content: 'eyes' }).catch((err: unknown) => say(`comment ${c.id} on ${repo}: ${(err as Error).message}`));

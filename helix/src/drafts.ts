@@ -35,6 +35,8 @@ export type Drafts = {
   start(person: string, user: string, channel: string, text: string): Promise<string | undefined>;
   /** A person's `/animus <text>` on an issue of a project: a new draft, or a revision of their open draft on that issue; what to tell them on the issue when it cannot start. */
   github(person: string, on: { project: string; repo: string; number: number; url: string }, text: string): Promise<string | undefined>;
+  /** A person's `/animus discard` on an issue: closes the draft there, theirs or, for the owner, anyone's; what to tell them on the issue. */
+  githubDiscard(person: string, on: { repo: string; number: number }): Promise<string>;
   /** The projects a person may submit to: the ones a draft offers them. */
   projects(person: string): Promise<string[]>;
   /** A press of a project in a draft's list (PICK); what to tell the presser privately, if anything. */
@@ -68,9 +70,9 @@ const withoutGitHub = (env: Record<string, string | undefined>): Record<string, 
 
 /** A Helix without the Slack bot still drafts for GitHub comments; only a Slack draft needs this. */
 const refuse = () => Promise.reject(new AnimusError('the Slack bot is not running on this Helix'));
-const noSlack = { post: refuse, upload: refuse, update: refuse, deleteFile: refuse };
+const noSlack = { post: refuse, upload: refuse, update: refuse, deleteFile: refuse, dm: refuse };
 
-export function draftRunner(slack: Pick<Transport, 'post' | 'upload' | 'update' | 'deleteFile'> | undefined, opts: {
+export function draftRunner(slack: Pick<Transport, 'post' | 'upload' | 'update' | 'deleteFile' | 'dm'> | undefined, opts: {
   store: Store; config: Config; home: string; launch?: DraftLaunch; github?: GitHubUrls;
   /** The bot's token, which fetches Slack files a message links to. */
   slackToken?: string;
@@ -176,6 +178,13 @@ export function draftRunner(slack: Pick<Transport, 'post' | 'upload' | 'update' 
       const comment = await commentAs(store, config, github, draft.person, draft.github.repo, draft.github.issue, draftComment(text));
       const { reason: _, ...rest } = running;
       store.saveDraft({ ...rest, state: 'ready', touched: now(), github: { ...draft.github, comment } });
+      // The person may be away from GitHub: a person with a Slack link is told there too. A DM that fails is logged, not thrown.
+      const user = store.slackOf(draft.person);
+      if (slack && user) {
+        const link = `https://github.com/${draft.github.repo}/issues/${draft.github.issue}#issuecomment-${comment}`;
+        await slack.dm(user).then((channel) => slack.post(channel, `${revising ? 'Revised draft' : 'Draft'} for ${draft.project} is posted on GitHub: ${link}`))
+          .catch((err: unknown) => say(`draft ${draft.id}: could not DM ${draft.person} the link: ${(err as Error).message}`));
+      }
       return;
     }
     const blocks = draftBlocks(draft.id, text);
@@ -245,6 +254,15 @@ export function draftRunner(slack: Pick<Transport, 'post' | 'upload' | 'update' 
       store.record(person, 'drafted', { draft: draft.id, project: on.project });
       await enqueue(draft);
       return undefined;
+    },
+    async githubDiscard(person, on) {
+      const here = OPEN.flatMap((st) => store.draftsIn(st)).filter((d) => d.github?.repo === on.repo && d.github.issue === on.number);
+      const draft = here.find((d) => d.person === person) ?? here[0];
+      if (!draft) return 'There is no open draft on this issue.';
+      if (draft.person !== person && person !== config.owner) return `Only ${draft.person} or the owner may discard this draft.`;
+      close(draft, 'discarded');
+      store.record(draft.person, 'draft-discarded', { draft: draft.id });
+      return 'Draft discarded.';
     },
     async start(person, user, channel, text) {
       const open = openOf(person).length;

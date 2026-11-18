@@ -10,7 +10,7 @@ import { deviceCode, keepTokens, pollDevice } from '../src/github-app.ts';
 import { openStore } from '../src/store.ts';
 import { pauseFile } from '../src/supervisor.ts';
 import { fakeGitHub, type FakeGitHub } from './fake-github.ts';
-import { until } from './fake-slack.ts';
+import { fakeTransport, until } from './fake-slack.ts';
 
 // Stands in for `animus draft <folder>`: draft.md is the message, the issue fetched as a reference, and the reply when revising.
 const FAKE = `
@@ -32,19 +32,22 @@ const HOUR = 3600;
  * clock.at; the first poll starts watching at T0. Issue 7 on o/app is open,
  * 8 is a pull request.
  */
-async function helix() {
+async function helix(opts: { slack?: boolean; owner?: string } = {}) {
   const home = mkdtempSync(join(tmpdir(), 'helix-github-comments-'));
   process.env.HELIX_HOME = home;
   const github: FakeGitHub = await fakeGitHub();
-  const config: Config = { host: '127.0.0.1', port: 0, slots: 1, owner: 'ana', github: { client_id: 'Iv23liGood' } };
+  const config: Config = { host: '127.0.0.1', port: 0, slots: 1, owner: opts.owner ?? 'ana', github: { client_id: 'Iv23liGood' } };
   const store = openStore(join(home, 'helix.db'));
   const envFile = join(home, 'ana.env');
   writeFileSync(envFile, '');
   store.putPerson('ana', { token_sha256: hashToken('ana-token'), env_file: envFile, github: 'ana-gh' });
   writeFileSync(pauseFile(home), '');
-  const code = await deviceCode('Iv23liGood', github);
-  github.approve(code.user_code, 'ana-gh');
-  keepTokens('ana', envFile, await pollDevice('Iv23liGood', code, github, async () => {}));
+  const signIn = async (name: string, login: string, file: string) => {
+    const code = await deviceCode('Iv23liGood', github);
+    github.approve(code.user_code, login);
+    keepTokens(name, file, await pollDevice('Iv23liGood', code, github, async () => {}));
+  };
+  await signIn('ana', 'ana-gh', envFile);
   mkdirSync(join(home, 'app'));
   store.putProject({ name: 'app', url: 'https://github.com/o/app.git', dir: join(home, 'app'), state: 'ready', added: '', added_by: 'ana' });
   github.addIssue('o/app', 7, { title: 'Login', body: 'Users cannot sign in with a passkey' });
@@ -52,11 +55,17 @@ async function helix() {
   github.addIssue('o/other', 1, { title: 'Not a project', body: 'x' });
   let clock = T0;
   const launch: DraftLaunch = (draft) => ({ command: process.execPath, args: ['-e', FAKE, draft.folder] });
-  const drafts = draftRunner(undefined, { store, config, home, launch, github });
+  const bobEnv = join(home, 'bob.env');
+  writeFileSync(bobEnv, '');
+  store.putPerson('bob', { token_sha256: hashToken('bob-token'), env_file: bobEnv, github: 'bob-gh' });
+  await signIn('bob', 'bob-gh', bobEnv);
+  const slack = fakeTransport();
+  if (opts.slack) store.linkSlack('ana', 'U1');
+  const drafts = draftRunner(opts.slack ? slack.transport : undefined, { store, config, home, launch, github });
   const lines: string[] = [];
   const watcher = commentWatcher({ store, config, drafts, github, now: () => clock, say: (l) => lines.push(l) });
   await watcher.poll();
-  return { github, store, lines, poll: () => watcher.poll(), clock: { at: (s: number) => { clock = T0 + s * 1000; } } };
+  return { github, store, lines, drafts, slack: slack.sent, home, poll: () => watcher.poll(), clock: { at: (s: number) => { clock = T0 + s * 1000; } } };
 }
 
 // Protects: criterion 1. Fails when: the person gets no 👀, or the draft is not a marked comment with the spec in a markdown fence and the replies.
@@ -142,7 +151,7 @@ test('posts the revised draft as a new comment when the author has an open draft
   h.github.addComment('o/app', 7, 'ana-gh', '/animus also support recovery codes', at(90));
   h.clock.at(120);
   await h.poll();
-  await until('the revised draft', () => h.github.posted.length === 2);
+  await until('the revised draft', () => h.github.posted.length === 2 && h.store.draftsIn('ready').length === 1);
 
   assert.match(h.github.posted[1]!.body, /Revised: also support recovery codes/);
   assert.equal(h.store.draftsIn('ready').length, 1);
@@ -161,4 +170,98 @@ test('replies that fix on pull requests is not available yet, and starts nothing
   assert.match(h.github.posted[0]!.body, /`fix` on pull requests is not available yet/);
   assert.deepEqual(h.github.reactions, []);
   assert.deepEqual(h.store.draftsIn('queued').concat(h.store.draftsIn('running'), h.store.draftsIn('ready')), []);
+});
+
+// Protects: criterion 5. Fails when: a person with a Slack link is not DMed the draft's link, for a draft or its revision, or one without a link is.
+test('DMs a person with a Slack link the link to a draft and to its revision', async () => {
+  const h = await helix({ slack: true });
+  h.github.addComment('o/app', 7, 'ana-gh', '/animus add passkey sign-in', at(30));
+  await h.poll();
+  await until('the first DM', () => h.slack.filter((s) => s.method === 'post').length === 1);
+  h.github.addComment('o/app', 7, 'ana-gh', '/animus also support recovery codes', at(90));
+  h.clock.at(120);
+  await h.poll();
+  await until('the second DM', () => h.slack.filter((s) => s.method === 'post').length === 2);
+
+  const [first, second] = h.slack.filter((s) => s.method === 'post');
+  assert.equal(first!.channel, 'D-U1');
+  assert.match(first!.text, /^Draft for app is posted on GitHub: https:\/\/github\.com\/o\/app\/issues\/7#issuecomment-\d+$/);
+  assert.match(second!.text, /^Revised draft for app is posted on GitHub: https:\/\/github\.com\/o\/app\/issues\/7#issuecomment-\d+$/);
+  assert.notEqual(first!.text.split('#')[1], second!.text.split('#')[1]);
+});
+
+test('posts the draft without a DM when the person has no Slack link', async () => {
+  const h = await helix();
+  h.github.addComment('o/app', 7, 'ana-gh', '/animus add passkey sign-in', at(30));
+  await h.poll();
+  await until('the draft comment', () => h.github.posted.length === 1 && h.store.draftsIn('ready').length === 1);
+
+  assert.deepEqual(h.slack, []);
+});
+
+// Protects: criterion 7. Fails when: /animus discard leaves the draft open, says nothing, or lets a revision start a new draft afterwards.
+test('closes the draft with a comment on /animus discard', async () => {
+  const h = await helix();
+  h.github.addComment('o/app', 7, 'ana-gh', '/animus add passkey sign-in', at(30));
+  await h.poll();
+  await until('the draft', () => h.store.draftsIn('ready').length === 1);
+
+  h.github.addComment('o/app', 7, 'ana-gh', '/animus discard', at(90));
+  h.clock.at(120);
+  await h.poll();
+
+  assert.equal(h.store.draftsIn('ready').length, 0);
+  assert.equal(h.store.draftsIn('discarded').length, 1);
+  assert.equal(h.github.posted.at(-1)!.body, `Draft discarded.\n\n${MARKER}`);
+});
+
+test('replies that there is no open draft when /animus discard finds none', async () => {
+  const h = await helix();
+  h.github.addComment('o/app', 7, 'ana-gh', '/animus discard', at(30));
+  await h.poll();
+
+  assert.match(h.github.posted[0]!.body, /^There is no open draft on this issue\./);
+});
+
+// Protects: criterion 9, for discard. Fails when: a person other than the draft's and not the owner discards it.
+test('refuses /animus discard from a person who is not the draft\'s person or the owner, and changes nothing', async () => {
+  const h = await helix({ owner: 'nobody' });
+  h.github.addComment('o/app', 7, 'ana-gh', '/animus add passkey sign-in', at(30));
+  await h.poll();
+  await until('the draft', () => h.store.draftsIn('ready').length === 1);
+  const before = h.github.posted.length;
+
+  h.github.addComment('o/app', 7, 'bob-gh', '/animus discard', at(90));
+  h.clock.at(120);
+  await h.poll();
+
+  assert.equal(h.store.draftsIn('ready').length, 1);
+  assert.match(h.github.posted[before]!.body, /^Only ana or the owner may discard this draft\./);
+});
+
+// Protects: criterion 7. Fails when: GitHub drafts do not count toward the 3 open per person that Slack drafts count toward.
+test('counts open Slack drafts toward the 3 open a person may have on GitHub', async () => {
+  const h = await helix();
+  for (let i = 0; i < 3; i++) h.store.addDraft({ state: 'ready', person: 'ana', channel: 'C1', ts: `${i}`, project: 'app', folder: '', created: at(0), touched: at(0) });
+  h.github.addComment('o/app', 7, 'ana-gh', '/animus add passkey sign-in', at(30));
+
+  await h.poll();
+
+  assert.match(h.github.posted[0]!.body, /^You have 3 open drafts/);
+  assert.equal(h.store.draftsIn('queued').length, 0);
+});
+
+// Protects: criterion 7. Fails when: a GitHub draft untouched for 7 days is not discarded, or its issue is not told.
+test('discards a draft untouched for 7 days with a comment on its issue', async () => {
+  const h = await helix();
+  h.github.addComment('o/app', 7, 'ana-gh', '/animus add passkey sign-in', at(30));
+  await h.poll();
+  await until('the draft', () => h.store.draftsIn('ready').length === 1);
+
+  await h.drafts.expire(new Date(Date.now() + 8 * 24 * 3600 * 1000));
+
+  assert.equal(h.store.draftsIn('ready').length, 0);
+  assert.equal(h.store.draftsIn('discarded').length, 1);
+  assert.match(h.github.posted.at(-1)!.body, /^This draft was discarded after 7 days untouched\./);
+  assert.equal(h.github.posted.at(-1)!.number, 7);
 });
