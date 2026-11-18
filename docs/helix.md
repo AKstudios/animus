@@ -114,7 +114,7 @@ in [helix-deploy.md](helix-deploy.md#the-slack-bot).
   is on; turning it on or off takes a restart. A `slack.owner` left in
   `config.yaml` by an earlier setup becomes the owner's Slack link when
   `helix serve` starts, unless the owner has one already, and is dropped.
-- `/helix invite @alex alex-gh`, sent by the owner, or `helix invite alex
+- `/animus invite @alex alex-gh`, sent by the owner, or `helix invite alex
   --github alex-gh --slack U123` on the machine, makes an invite and has the
   bot DM Alex: connect Tailscale first, then one line, `curl -fsSL
   …/install.sh | bash -s -- join <url> <code>`, that installs Animus where
@@ -122,25 +122,25 @@ in [helix-deploy.md](helix-deploy.md#the-slack-bot).
   Slack must name a GitHub login, so a stolen code cannot join with another
   login's token. Joining with it links Alex's Slack user to the person
   `alex` (their Slack link).
-- `/helix link @alex alex`, sent by the owner, links someone who joined
+- `/animus link @alex alex`, sent by the owner, links someone who joined
   before. `animus leave` and `helix remove-person` remove the link.
 - Every job a linked person starts, from `animus submit` or anywhere else,
   posts to one DM thread of its own: started (or resumed), needs input with
   the question, the pull request's link, or failed with the reason.
-  `/helix notify off` stops these for the person who sends it and `/helix
-  notify on` starts them again; they are on by default.
-- `/helix jobs` answers privately with the sender's queued, running and
-  needs-input jobs, each with its thread or pull request link. `/helix
-  status` answers with Helix's slots in use, the queue's length and its
+  `/animus notify off` stops these for the person who sends it and
+  `/animus notify on` starts them again; they are on by default.
+- `/animus jobs` answers privately with the sender's queued, running and
+  needs-input jobs, each with its thread or pull request link.
+  `/animus status` answers with Helix's slots in use, the queue's length and its
   version.
 - A job that needs input is answered by replying in its thread: any reply in
-  the DM, or a reply that mentions @Helix in a channel. It resumes as after
+  the DM, or a reply that mentions @Animus in a channel. It resumes as after
   `animus answer`, and the thread says so. Replies from anyone but the job's
   person, and channel replies without the mention, are ignored. The thread's
   first post has a **Cancel job** button, which cancels the job for its person
   or the owner; anyone else gets a private refusal.
 
-Anyone without a Slack link who writes to the bot or sends any `/helix`
+Anyone without a Slack link who writes to the bot or sends any `/animus`
 command gets a private "You're not on this Helix. Ask <owner> for an
 invite.", and nothing they sent is kept. Only the owner may invite and link. Every command is acknowledged at once and answered privately; one
 sent while Helix is down gets Slack's own error and is not queued.

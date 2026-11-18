@@ -244,7 +244,7 @@ The implementer runs these during a job. They fail anywhere else.
 
 ## helix
 
-Run on the Helix machine as `helix/bin/helix`, with its files under
+Run on the Helix machine through the `helix` command in the repository's helix/bin folder, with its files under
 `~/.helix` (`HELIX_HOME`). See [helix.md](helix.md) for what Helix is and
 [helix-deploy.md](helix-deploy.md) for setting a machine up.
 
