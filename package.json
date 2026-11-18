@@ -8,7 +8,8 @@
     "node": ">=24"
   },
   "scripts": {
-    "test": "sh scripts/with-tmp.sh node --disable-warning=ExperimentalWarning --test 'plugin/test/**/*.test.ts' 'helix/test/**/*.test.ts'",
+    "test": "sh scripts/with-tmp.sh node --disable-warning=ExperimentalWarning --test 'plugin/test/**/*.test.ts' 'helix/test/**/*.test.ts' 'scripts/test/**/*.test.ts'",
+    "changelog": "node scripts/changelog-check.ts",
     "typecheck": "tsc --noEmit",
     "release": "node scripts/release.ts",
     "deploy": "node scripts/deploy.ts"
