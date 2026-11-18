@@ -111,7 +111,7 @@ test('a local job page answers with no token, with its checks, spec and run; unk
   s.stop();
   assert.equal(page.job.id, 'with-gates');
   assert.match(page.spec ?? '', /Title of with-gates/);
-  assert.deepEqual(page.checks?.map((c) => [c.name, c.status, c.output]), [['test', 'ok', undefined], ['lint', 'fail', 'bad style\n']]);
+  assert.deepEqual(page.checks?.map((c) => [c.name, c.status, c.output]), [['test', 'ok', 'fine'], ['lint', 'fail', 'bad style\n']]);
   assert.deepEqual(statuses, [404, 404]);
 });
 
