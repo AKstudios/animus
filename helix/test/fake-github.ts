@@ -29,6 +29,8 @@ export type FakeGitHub = GitHubUrls & {
   addComment(repo: string, number: number, login: string, body: string, created?: string): number;
   /** The login edits a comment: its update time, which `since` goes by, moves to at (default now). */
   edit(id: number, at?: string): void;
+  /** How many comment posts to refuse with a 502 before posting again. */
+  refusePosts: number;
   /** Every comment, including those the API was asked to post. */
   comments: { id: number; repo: string; number: number; login: string; body: string; created_at: string; updated_at: string }[];
   /** The comments and reactions posted through the API, as the token's login. */
@@ -58,7 +60,7 @@ export async function fakeGitHub(opts: { clientId?: string; deviceFlow?: boolean
   const second = () => `${new Date().toISOString().slice(0, 19)}Z`;
   const fake: FakeGitHub = {
     web: '', api: '', calls: [], slowDowns: 0, installed: {}, access: {}, permissions: {},
-    comments: [], posted: [], reactions: [],
+    comments: [], posted: [], reactions: [], refusePosts: 0,
     addIssue: (repo, number, issue) => { issues.set(`${repo}#${number}`, issue); },
     addComment(repo, number, login, body, created = second()) {
       const id = fake.comments.length + 1;
@@ -139,6 +141,7 @@ export async function fakeGitHub(opts: { clientId?: string; deviceFlow?: boolean
     if (!found) return [404, { message: 'Not Found' }];
     const number = Number(issue[1]);
     if (method === 'POST' && issue[2]) {
+      if (fake.refusePosts > 0) { fake.refusePosts -= 1; return [502, { message: 'Bad Gateway' }]; }
       fake.posted.push({ repo, number, login, body: body.body! });
       return [201, shown(fake.comments[fake.addComment(repo, number, login, body.body!) - 1]!)];
     }

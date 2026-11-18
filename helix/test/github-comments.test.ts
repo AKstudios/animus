@@ -27,6 +27,7 @@ const JOB = `
 const [title, answer] = process.argv.slice(1);
 if (title.startsWith('ask') && !answer) console.log(JSON.stringify({ outcome: 'needs-input', question: 'which provider?' }));
 else if (title.startsWith('fail')) console.log(JSON.stringify({ outcome: 'failed', reason: 'the checks never passed' }));
+else if (title.startsWith('draftpr')) console.log(JSON.stringify({ outcome: 'draft-pr', pr: 'https://github.com/o/app/pull/10', reason: 'the checks never passed' }));
 else console.log(JSON.stringify({ outcome: 'pr', pr: 'https://github.com/o/app/pull/9' }));
 `;
 
@@ -354,6 +355,49 @@ test('comments on the issue with the reason when the job fails', async () => {
   await until('the failure comment', () => h.github.posted.length === 3);
 
   assert.deepEqual(bodies(h).slice(2), [`Job ${job.id} failed: the checks never passed`]);
+});
+
+// Protects: criterion 8. Fails when: a job that failed but published its report as a draft PR is announced as an opened pull request.
+test('comments that the job failed, with the reason and the report\'s link, when it ends as a draft pull request', async () => {
+  const { h, job } = await submitted('draftpr', { run: true });
+  await until('the failure comment', () => h.github.posted.length === 3);
+
+  assert.deepEqual(bodies(h).slice(2), [`Job ${job.id} failed: the checks never passed. The failure report: https://github.com/o/app/pull/10`]);
+});
+
+// Protects: criterion 1/7. Fails when: a draft comment GitHub refuses leaves the draft running, counted toward the limit and refusing every reply.
+test('fails the draft, which can then be discarded, when its comment cannot be posted', async () => {
+  const h = await helix();
+  h.github.refusePosts = 1;
+  h.github.addComment('o/app', 7, 'ana-gh', '/animus add passkey sign-in', at(30));
+  await h.poll();
+  await until('the draft failed', () => h.store.draftsIn('failed').length === 1);
+
+  assert.equal(h.store.draftsIn('running').length, 0);
+  assert.match(h.store.draftsIn('failed')[0]!.reason!, /^the draft comment could not be posted: .*HTTP 502/);
+
+  h.github.addComment('o/app', 7, 'ana-gh', '/animus discard', at(90));
+  h.clock.at(120);
+  await h.poll();
+  await until('the discard comment', () => h.github.posted.length === 1);
+  assert.equal(h.store.draftsIn('failed').length, 0);
+});
+
+// Protects: criterion 4. Fails when: a revision whose comment cannot be posted leaves the first draft stuck as running.
+test('keeps the draft ready as it was when a revision\'s comment cannot be posted', async () => {
+  const h = await helix();
+  h.github.addComment('o/app', 7, 'ana-gh', '/animus add passkey sign-in', at(30));
+  await h.poll();
+  await until('the first draft', () => h.store.draftsIn('ready').length === 1 && h.github.posted.length === 1);
+
+  h.github.refusePosts = 1;
+  h.github.addComment('o/app', 7, 'ana-gh', '/animus also support recovery codes', at(90));
+  h.clock.at(120);
+  await h.poll();
+  await until('the refused revision', () => h.github.refusePosts === 0 && h.store.draftsIn('running').length === 0);
+
+  assert.equal(h.store.draftsIn('ready').length, 1);
+  assert.equal(h.github.posted.length, 1);
 });
 
 // Protects: criterion 8. Fails when: the question is not posted, or /animus answer does not resume the job with the text.

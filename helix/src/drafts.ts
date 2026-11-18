@@ -177,7 +177,16 @@ export function draftRunner(slack: Pick<Transport, 'post' | 'upload' | 'update' 
     if (!stillRunning(draft)) return;
     if (draft.github) {
       // A revision is a new comment, so the issue shows how the draft changed; the latest one is what submit reads.
-      const comment = await commentAs(store, config, github, draft.person, draft.github.repo, draft.github.issue, draftComment(text));
+      let comment: number;
+      try {
+        comment = await commentAs(store, config, github, draft.person, draft.github.repo, draft.github.issue, draftComment(text));
+      } catch (err) {
+        // Left running, the draft would count toward the limit and refuse every reply as not posted yet.
+        const reason = `the draft comment could not be posted: ${(err as Error).message}`;
+        say(`draft ${draft.id}: ${reason}`);
+        store.saveDraft({ ...running, state: revising ? 'ready' : 'failed', reason });
+        return;
+      }
       const { reason: _, ...rest } = running;
       store.saveDraft({ ...rest, state: 'ready', touched: now(), github: { ...draft.github, comment } });
       // The person may be away from GitHub: a person with a Slack link is told there too. A DM that fails is logged, not thrown.
