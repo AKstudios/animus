@@ -8,6 +8,8 @@ clients with how to update.
 
 ## Unreleased
 
+## 0.4.3 (2026-11-18)
+
 - Helix no longer ends a running job's GitHub token. GitHub ends an access
   token the moment its refresh token is used, and Helix renewed before every
   job, project check, `helix check`, daily cleanup and display refresh, so a
