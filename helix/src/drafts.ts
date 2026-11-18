@@ -32,6 +32,8 @@ const animusDraft: DraftLaunch = (draft, repoDir) => ({
 export type Drafts = {
   /** Starts a draft from what a person wrote; what to tell them privately when it cannot start. */
   start(person: string, user: string, channel: string, text: string): Promise<string | undefined>;
+  /** The projects a person may submit to: the ones a draft offers them. */
+  projects(person: string): Promise<string[]>;
   /** A press of a project in a draft's list (PICK); what to tell the presser privately, if anything. */
   pick(person: string, value: string): Promise<string | undefined>;
   /** A reply in an open draft's thread, to revise it with; what to tell the replier privately, if anything. */
@@ -201,6 +203,7 @@ export function draftRunner(transport: Pick<Transport, 'post' | 'upload' | 'upda
   tick();
 
   return {
+    projects: choices,
     async start(person, user, channel, text) {
       const open = OPEN.flatMap((s) => store.draftsIn(s)).filter((d) => d.person === person).length;
       if (open >= MAX_OPEN) return `You have ${open} open drafts: submit or discard one before you start another.`;

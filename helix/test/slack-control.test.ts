@@ -39,7 +39,7 @@ function helix(opts: { slots?: number; paused?: boolean } = {}) {
   slackBot(slack.transport, { store, config, supervisor });
   const submit = (person: string, title: string) => supervisor.submit(person, { repo: 'app', spec: SPEC(title), name: 'spec.md' });
   const respondedTo = () => slack.sent.filter((s) => s.method === 'respond').map((s) => s.text);
-  return { store, slack, supervisor, submit, respondedTo, stop: () => { supervisor.stop(); } };
+  return { store, config, slack, supervisor, submit, respondedTo, stop: () => { supervisor.stop(); } };
 }
 
 const command = (user: string, text: string) => ({ kind: 'command' as const, user, channel: 'C0TEAM', text, responseUrl: URL });
@@ -227,7 +227,7 @@ test('/helix cancel cancels like the button, and refuses others, ended, missing 
     `Job ${mine.id} was cancelled by <@U0ANA>.`,
     `Job ${mine.id} was cancelled.`,
     `Only ben or <@U0OWNER> may cancel job ${bens.id}.`,
-    `job ${ended.id} has already ended`,
+    `Job ${ended.id} has already ended.`,
     'There is no job 999.',
     'There is no job soon.',
     `Job ${bens.id} was cancelled.`,
@@ -246,8 +246,55 @@ test('/helix help, an empty command and an unknown one list the commands, the ow
   const [help, empty, unknown, owners] = h.respondedTo();
   assert.equal(help, helpText(false));
   assert.deepEqual([empty, unknown], [help, help]);
-  for (const c of ['draft', 'jobs', 'job <id>', 'cancel <id>', 'status', 'project', 'notify', 'help']) assert.match(help!, new RegExp('/helix ' + c));
+  for (const c of ['draft', 'jobs', 'job <id>', 'cancel <id>', 'me', 'status', 'project', 'notify', 'help']) assert.match(help!, new RegExp('/helix ' + c));
   assert.doesNotMatch(help!, /invite|\/helix link/);
   assert.match(owners!, /\/helix invite @user <github-login>.*owner only/);
   assert.match(owners!, /\/helix link @user <person>.*owner only/);
+});
+
+// Protects: criterion 3. Fails when: an old Cancel button on a finished job errors in public, or leaves its button on the message.
+test('pressing Cancel job on a job that is already over replies privately and removes the button', async () => {
+  const h = helix({ paused: true });
+  const job = h.submit('ana', 'too late');
+  h.store.putSlackThread(job.id, { channel: 'D0ANA', ts: '9.1' });
+  h.supervisor.cancel('ana', job.id);
+
+  await h.slack.deliver(press('U0ANA', job.id));
+  h.stop();
+
+  const text = `Job ${job.id} was cancelled`;
+  assert.deepEqual(h.slack.sent, [
+    { method: 'update', channel: 'D0ANA', ts: '9.1', text, blocks: [{ type: 'section', text: { type: 'mrkdwn', text } }] },
+    { method: 'respond', url: URL, text: `Job ${job.id} has already ended.` },
+  ]);
+});
+
+// Protects: criterion 4. Fails when: /helix me omits a part of the profile, lists another person's or more than five ended jobs, links the wrong page, or shows a token hash.
+test('/helix me privately shows the sender\'s profile, jobs, last five ended jobs and people pages, and no secret', async () => {
+  const h = helix();
+  h.config.url = 'http://helix.ts:8080/';
+  h.config.lan_url = 'http://helix.lan:8080';
+  h.store.putPerson('ana', { token_sha256: hashToken('ana-token'), github: 'anagh', joined: '2026-01-02T03:04:05Z' });
+  h.store.setNotify('ana', false);
+  const base = { person: 'ana', repo: 'app', spec: '', draft: false, submitted: '' };
+  h.store.add({ ...base, state: 'running', title: 'runs' });
+  for (let i = 1; i <= 6; i++) h.store.add({ ...base, state: 'ended', outcome: 'pr', title: `done${i}`, pr: `https://example.test/pr/${i}` });
+  h.store.add({ ...base, person: 'ben', state: 'ended', outcome: 'pr', title: 'bens', pr: 'https://example.test/pr/ben' });
+
+  await h.slack.deliver(command('U0ANA', 'me'));
+  h.stop();
+
+  const [me] = h.respondedTo();
+  assert.match(me!, /\*ana\*, GitHub anagh\n/);
+  assert.doesNotMatch(me!, /owner/);
+  assert.match(me!, /Joined: 2026-01-02T03:04:05Z/);
+  assert.match(me!, /Job notifications: off/);
+  assert.match(me!, /Projects you may submit to: app/);
+  assert.match(me!, /Job \d+ running: runs \(app\)/);
+  for (const i of [2, 3, 4, 5, 6]) assert.match(me!, new RegExp(`opened https://example.test/pr/${i}\\b`));
+  assert.doesNotMatch(me!, /pr\/1\b|pr\/ben/);
+  assert.match(me!, /Tailscale: http:\/\/helix\.ts:8080\/people\/ana/);
+  assert.match(me!, /office network: http:\/\/helix\.lan:8080\/people\/ana/);
+  assert.doesNotMatch(me!, new RegExp(hashToken('ana-token')));
+  assert.match(await (async () => { const o = helix(); await o.slack.deliver(command('U0OWNER', 'me')); o.stop(); return o.respondedTo()[0]!; })(), /\*ajmal\*, the owner/);
 });

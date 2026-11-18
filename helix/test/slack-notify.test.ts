@@ -25,11 +25,11 @@ console.log(JSON.stringify(r));
 `;
 
 /** A Helix with ana linked to U0ANA and ben unlinked, its jobs' progress going to a fake Slack. */
-async function helix() {
+async function helix(links: Pick<Config, 'url' | 'lan_url'> = {}) {
   const home = mkdtempSync(join(tmpdir(), 'helix-slack-notify-'));
   process.env.HELIX_HOME = home;
   mkdirSync(join(home, 'repo'));
-  const config: Config = { host: '127.0.0.1', port: 0, slots: 1, slack: { enabled: true } };
+  const config: Config = { host: '127.0.0.1', port: 0, slots: 1, slack: { enabled: true }, ...links };
   const store = openStore(join(home, 'helix.db'));
   store.putPerson('ana', { token_sha256: hashToken('ana-token') });
   store.putPerson('ben', { token_sha256: hashToken('ben-token') });
@@ -38,7 +38,7 @@ async function helix() {
   const slack = fakeTransport();
   slackBot(slack.transport, { store, config });
   const launch: Launch = (job) => ({ command: process.execPath, args: ['-e', FAKE, job.title, job.answer ?? ''] });
-  const supervisor = supervise({ store, config, home, launch, notify: slackNotifier(slack.transport, store) });
+  const supervisor = supervise({ store, config, home, launch, notify: slackNotifier(slack.transport, store, undefined, config) });
   const server = serve({ config, store, supervisor });
   await new Promise<void>((r) => { server.listen(0, '127.0.0.1', r); });
   process.env.HELIX_URL = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
@@ -58,6 +58,7 @@ test('a linked person\'s job from animus submit posts started, then its pull req
 
   const job = await client.submit({ repo: 'app', spec: SPEC('add login'), name: 'spec.md' });
   await h.settled(job.id, 2);
+  await until('the opening post to be updated', () => h.slack.sent.length >= 4);
 
   h.stop();
   assert.deepEqual(h.slack.sent, [
@@ -70,6 +71,7 @@ test('a linked person\'s job from animus submit posts started, then its pull req
       ],
     },
     { method: 'post', channel: 'D-U0ANA', thread: 'ts-2', text: `Job ${job.id} opened a pull request: https://example.test/pr/add-login` },
+    { method: 'update', channel: 'D-U0ANA', ts: 'ts-2', text: `Job ${job.id} opened a pull request: https://example.test/pr/add-login`, blocks: [{ type: 'section', text: { type: 'mrkdwn', text: `Job ${job.id} opened a pull request: https://example.test/pr/add-login` } }] },
   ]);
 });
 
@@ -91,7 +93,7 @@ test('a job that asks posts its question and, once answered, carries on in its t
     ['ts-2', `Job ${asked.id} resumed`],
     ['ts-2', `Job ${asked.id} opened a pull request: https://example.test/pr/ask-me`],
     [undefined, `Job ${failed.id} started: fail hard (app)`],
-    ['ts-7', `Job ${failed.id} failed: the gates failed`],
+    ['ts-10', `Job ${failed.id} failed: the gates failed`],
   ]);
 });
 
@@ -113,4 +115,42 @@ test('/helix notify off stops a person\'s job posts and /helix notify on starts 
     { method: 'respond', url: 'https://hooks.slack.com/commands/T0/1/y', text: 'Job notifications are on: each of your jobs posts its progress to a thread in our DM.' },
   ]);
   assert.deepEqual(h.posts().map((p) => p.text), [`Job ${loud.id} started: loud (app)`, `Job ${loud.id} opened a pull request: https://example.test/pr/loud`]);
+});
+
+const updates = (h: Awaited<ReturnType<typeof helix>>) => h.slack.sent.filter((s): s is Extract<Sent, { method: 'update' }> => s.method === 'update');
+const hasButton = (u: { blocks?: unknown[] }) => (u.blocks as { type: string }[]).some((b) => b.type === 'actions');
+
+// Protects: criteria 1 and 2. Fails when: a link is missing, mislabelled or carries a token, or the opening post keeps its button once the job asks, or lacks it after resuming.
+test('start and resume posts link the job page at each address set; the opening post loses Cancel when the job needs input and has it back on resume', async () => {
+  const h = await helix({ url: 'https://helix.tail.ts.net/', lan_url: 'http://10.0.0.5:7777' });
+
+  const asked = h.supervisor.submit('ana', { repo: 'app', spec: SPEC('ask me'), name: 'spec.md' });
+  await h.settled(asked.id, 2);
+  await until('the needs-input update', () => updates(h).length >= 1);
+  h.supervisor.answer('ana', asked.id, 'the second');
+  await h.settled(asked.id, 4);
+  await until('three updates', () => updates(h).length >= 3);
+
+  h.stop();
+  const links = `\nTailscale: https://helix.tail.ts.net/jobs/${asked.id}\noffice network: http://10.0.0.5:7777/jobs/${asked.id}`;
+  assert.deepEqual(h.posts().map((p) => p.text).slice(0, 3), [`Job ${asked.id} started: ask me (app)${links}`, h.posts()[1]!.text, `Job ${asked.id} resumed${links}`]);
+  assert.deepEqual(updates(h).map((u) => [u.ts, hasButton(u)]), [['ts-2', false], ['ts-2', true], ['ts-2', false]]);
+  assert.match(updates(h)[0]!.text, /needs input: which one\?/);
+});
+
+// Protects: criteria 1 and 2, cancelling. Fails when: a job with no addresses set mentions links, or a cancelled job's opening post keeps its button.
+test('with no address set a post has no links; cancelling a running job updates its opening post without the button', async () => {
+  const h = await helix();
+
+  const job = h.supervisor.submit('ana', { repo: 'app', spec: SPEC('ask me'), name: 'spec.md' });
+  await until('the start post', () => h.posts().length >= 1);
+  await until('the thread', () => h.store.slackThread(job.id) !== undefined);
+  h.store.save({ ...h.store.get(job.id)!, state: 'running', ended: undefined, outcome: undefined });
+  h.supervisor.cancel('ana', job.id);
+  await until('the cancel update', () => updates(h).some((u) => /cancelled/.test(u.text)));
+
+  h.stop();
+  assert.equal(h.posts()[0]!.text, `Job ${job.id} started: ask me (app)`);
+  assert.equal(updates(h).at(-1)!.text, `Job ${job.id} was cancelled`);
+  assert.equal(hasButton(updates(h).at(-1)!), false);
 });
