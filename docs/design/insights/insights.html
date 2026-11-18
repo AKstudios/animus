@@ -1,0 +1,120 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Display Insights page: design reference</title>
+<link rel="stylesheet" href="../display/display.css">
+<style>
+.hd { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 16px; }
+.hd .seg { margin-left: auto; }
+.tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 12px; }
+.tile { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 16px; display: flex; flex-direction: column; gap: 6px; }
+.tile b { font-size: 26px; font-weight: 600; letter-spacing: -.02em; }
+.d { font-size: 12px; } .good { color: var(--open); } .bad { color: var(--fail); }
+.two { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(460px, 100%), 1fr)); gap: 32px; }
+.t { width: 100%; border-collapse: collapse; }
+.t th { font-size: 12px; font-weight: 500; color: var(--faint); text-align: right; padding: 8px 10px; border-bottom: 1px solid var(--line); }
+.t td { padding: 11px 10px; border-bottom: 1px solid var(--hair); text-align: right; font: 13px var(--mono); }
+.t th:first-child, .t td:first-child { text-align: left; font: 14px var(--sans); }
+.scroll { overflow-x: auto; }
+.cause { display: grid; grid-template-columns: 150px minmax(0, 1fr) 36px; gap: 12px; align-items: center; padding: 7px 0; font-size: 13px; }
+.cause .b { height: 8px; border-radius: 4px; background: var(--raise); overflow: hidden; }
+.cause .b i { display: block; height: 100%; border-radius: 4px; background: var(--mute); }
+.lesson { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 6px 16px; padding: 14px 0; border-bottom: 1px solid var(--hair); align-items: center; }
+.lesson .src { font-size: 12px; color: var(--faint); grid-column: 1; }
+.lesson .cmd { grid-row: 1 / 3; grid-column: 2; font: 12px var(--mono); color: var(--mute); padding: 6px 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--panel); }
+.scope { font-size: 11px; font-weight: 600; padding: 2px 7px; border-radius: 999px; background: var(--plain-bg); color: var(--mute); margin-right: 6px; }
+.note { font-size: 12px; color: var(--faint); }
+@media (max-width: 640px) { .lesson { grid-template-columns: minmax(0, 1fr); } .lesson .cmd { grid-row: auto; grid-column: 1; justify-self: start; } .hd .seg { margin-left: 0; } }
+</style>
+</head>
+<body>
+<header class="top">
+  <div class="brand"><svg width="18" height="18" viewBox="0 0 18 18" fill="none" stroke-width="1.6" aria-hidden="true"><path d="M3 2c6 4 6 10 12 14M15 2C9 6 9 12 3 16M5 5h8M5 13h8"></path></svg>abstergo</div>
+  <nav class="nav"><a href="../display/overview.html">Overview</a><a href="../display/jobs.html">Jobs</a><a class="on" href="insights.html">Insights</a><a href="#">People</a></nav>
+  <div class="meta"><span><span class="dot"></span>2 of 4 slots</span><span>14:21</span></div>
+</header>
+
+<div class="wrap" style="flex-direction:column;flex-wrap:nowrap;gap:40px">
+  <div class="hd">
+    <div><h1 style="margin:0;font-size:28px">Insights</h1><p class="sub" style="margin-top:6px">Is the factory getting better? Last 30 days against the 30 before.</p></div>
+    <nav class="seg" aria-label="Scope"><a class="on" href="#">Factory</a><a href="#">animus</a><a href="#">meal-planner</a></nav>
+  </div>
+
+  <div class="tiles">
+    <div class="tile"><span class="sub">Merge rate</span><b>76%</b><span class="d good">+9 pts · 31 of 41</span></div>
+    <div class="tile"><span class="sub">Merged untouched</span><b>58%</b><span class="d good">+6 pts · no commit after the job</span></div>
+    <div class="tile"><span class="sub">Gates pass first time</span><b>71%</b><span class="d bad">−4 pts · 2 flaky checks</span></div>
+    <div class="tile"><span class="sub">Cost per merged PR</span><b class="mono" style="font-size:24px">$3.82</b><span class="d good">−$1.10 · median 22m</span></div>
+    <div class="tile"><span class="sub">Reverted or reworked</span><b>3%</b><span class="d sub">1 of 31 · 30-day watch</span></div>
+  </div>
+
+  <div class="two">
+    <section>
+      <div class="sh"><h2>By task class</h2></div>
+      <div class="scroll"><table class="t">
+        <thead><tr><th>Class</th><th>Jobs</th><th>Merged</th><th>First pass</th><th>$ / merged</th></tr></thead>
+        <tbody>
+          <tr><td>medium · routine · feature</td><td>22</td><td>77%</td><td>64%</td><td>$5.10</td></tr>
+          <tr><td>small · routine · bug</td><td>9</td><td>89%</td><td>89%</td><td>$1.20</td></tr>
+          <tr><td>medium · routine · ui</td><td>7</td><td>57%</td><td>71%</td><td>$2.30</td></tr>
+          <tr><td>large · hard · backend</td><td>3</td><td>67%</td><td>33%</td><td>$9.40</td></tr>
+        </tbody>
+      </table></div>
+    </section>
+    <section>
+      <div class="sh"><h2>Why jobs did not deliver</h2><span class="n">10 jobs</span></div>
+      <div class="cause"><span>Gates still failing</span><div class="b"><i style="width:40%;background:var(--fail)"></i></div><span class="mono sub">4</span></div>
+      <div class="cause"><span>Asked a question</span><div class="b"><i style="width:30%;background:var(--ask-fill)"></i></div><span class="mono sub">3</span></div>
+      <div class="cause"><span>Setup</span><div class="b"><i style="width:20%"></i></div><span class="mono sub">2</span></div>
+      <div class="cause"><span>Review blocked</span><div class="b"><i style="width:10%"></i></div><span class="mono sub">1</span></div>
+      <p class="note">Each job's cause is set by script from where it stopped.</p>
+    </section>
+  </div>
+
+  <div class="two">
+    <section>
+      <div class="sh"><h2>Agents</h2></div>
+      <div class="scroll"><table class="t">
+        <thead><tr><th>Role</th><th>Tier</th><th>Share of cost</th><th>Tool calls</th><th>Tool errors</th></tr></thead>
+        <tbody>
+          <tr><td>implementer</td><td>standard</td><td>61%</td><td>2,410</td><td>4%</td></tr>
+          <tr><td>reviewer</td><td>deep</td><td>22%</td><td>380</td><td>1%</td></tr>
+          <tr><td>planner</td><td>standard</td><td>11%</td><td>140</td><td>0%</td></tr>
+          <tr><td>catch-up</td><td>standard</td><td>6%</td><td>96</td><td>2%</td></tr>
+        </tbody>
+      </table></div>
+      <p class="note" style="margin-top:10px">Review findings acted on: 72% · 31 of 43.</p>
+    </section>
+    <section>
+      <div class="sh"><h2>Flaky checks</h2><span class="n">failed, then passed on the same code</span></div>
+      <div class="li"><span class="pill p-plain">3 times</span><span class="tt mono">test</span><span class="r">animus · last 2d ago</span></div>
+      <div class="li"><span class="pill p-plain">1 time</span><span class="tt mono">acceptance-2</span><span class="r">meal-planner · last 6d ago</span></div>
+    </section>
+  </div>
+
+  <section>
+    <div class="sh"><h2>Proposed lessons</h2><span class="n">from the weekly retro · each needs your yes</span></div>
+    <div class="lesson">
+      <span><span class="scope">animus</span>Tests that start a server must close it before they end.</span>
+      <span class="src">Seen in 3 jobs: drafts-from-slack, after-unreadable, join-helix</span>
+      <span class="cmd">animus lessons accept 4</span>
+    </div>
+    <div class="lesson">
+      <span><span class="scope">factory</span>Read the profile's gate commands before writing a test command into a criterion.</span>
+      <span class="src">Seen in 2 jobs: website-69, admit-1</span>
+      <span class="cmd">animus lessons accept 5</span>
+    </div>
+  </section>
+
+  <section>
+    <div class="sh"><h2>Kept lessons</h2><span class="n">2</span></div>
+    <div class="li"><span class="pill p-open">Used 9×</span><span class="tt">Run the whole test file, not one test, before calling a slice done.</span><span class="r">animus · expires in 41d</span></div>
+    <div class="li"><span class="pill p-plain">Used 0×</span><span class="tt">A link's name comes from its site; ask before guessing one.</span><span class="r">meal-planner · expires in 6d</span></div>
+  </section>
+</div>
+
+<nav class="tabbar"><a href="../display/overview.html">Overview</a><a href="../display/jobs.html">Jobs</a><a class="on" href="insights.html">Insights</a></nav>
+</body>
+</html>
