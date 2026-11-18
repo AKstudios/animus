@@ -217,6 +217,18 @@ test('a session that dies leaves a failed run, and a draft PR only if it committ
   assert.equal(d.published.length, 0);
 });
 
+test('a breaking report puts a Breaking section in the pull request, and no report leaves none', async () => {
+  const breaks = fakeAgent([(req) => ({ ...say('done')(req), output: { status: 'done', summary: 'Done.', breaking: 'Specs lose `type`. Delete it from yours.' } }), () => clean()]);
+  const d = deps(breaks.agent);
+  await runJob({ repo: makeRepo(), specFile: writeSpec(SMALL) }, d);
+  assert.match(d.published[0]!.body, /^## Breaking\n\nSpecs lose `type`\. Delete it from yours\.$/m);
+
+  const plain = fakeAgent([say('done'), () => clean()]);
+  const d2 = deps(plain.agent);
+  await runJob({ repo: makeRepo(), specFile: writeSpec(SMALL) }, d2);
+  assert.doesNotMatch(d2.published[0]!.body, /## Breaking/);
+});
+
 test('a dry run writes the PR body and pushes nothing', async () => {
   const repo = makeRepo();
   const { agent } = fakeAgent([say('done'), () => clean()]);

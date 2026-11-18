@@ -1,13 +1,15 @@
 # Changelog
 
-What each release changes, newest first. `node scripts/release.ts` turns
-Unreleased into the release it cuts. Mark anything that breaks the HTTP API, a
-spec, a profile or a job's files with **Breaking**: such a release bumps the
+What each release changes, newest first. `node scripts/release.ts` writes
+each release from the merged pull requests, so a pull request does not edit
+this file. What breaks the HTTP API, a spec, a profile or a job's files is
+marked **Breaking**: such a release bumps the
 minor version before 1.0 and the major after, and Helix then refuses older
 clients with how to update.
 
 ## Unreleased
 
+- Pull requests no longer touch CHANGELOG.md: `npm run release` writes the release's notes from the merged pull requests, and a job's pull request has a `## Breaking` section when its implementer reports a breaking change (the report gains an optional `breaking`). The `changelog` gate and `npm run changelog` are gone.
 - The display's overview is the same on `animus ui` and on Helix: Needs you, Working now, Queued, Open pull requests, Finished. Result tags are in sentence case, a Finished row says how long its PR took to merge, and the Projects panel has ticks and a key in place of the "All projects" button.
 - A spec refused at admission, and a job ended by SIGINT, SIGTERM or a Helix
   cancel, now leave a run line with cause `admit`, `interrupted` or

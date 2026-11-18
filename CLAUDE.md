@@ -31,8 +31,10 @@ missing, there is nothing to read or update.
   outlive a session. Helix holds no state beyond `helix.db` and the job
   files, and starts jobs only as `animus` processes.
 - Errors meant for the user throw `AnimusError`.
-- Breaking changes to the HTTP API, a spec, a profile or a job's files go
-  under **Breaking** in CHANGELOG.md's Unreleased section.
+- A breaking change to the HTTP API, a spec, a profile or a job's files is
+  said in the pull request's Breaking section; `npm run release` writes the
+  changelog from the merged pull requests and refuses a breaking one without
+  `--breaking`.
 - `npm test` and `npm run typecheck` must pass. Tests use the fake agent in
   plugin/test/helpers.ts; none starts a model.
 - Docs live in docs/; keep README.md to installing and using.

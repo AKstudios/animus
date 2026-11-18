@@ -246,6 +246,7 @@ async function runJobWith(opts: RunOptions, deps: Deps, live: { run?: Run; start
 
   let summary = '';
   let notes: string | undefined;
+  let breaking: string | undefined;
   /** What a session new to the job is told first: where it is, the gates, the spec. */
   let brief = '';
   let lastGates: CheckResult[] = [];
@@ -351,6 +352,8 @@ async function runJobWith(opts: RunOptions, deps: Deps, live: { run?: Run; start
     }
     if (report.summary) summary = report.summary;
     if (report.notes) notes = report.notes;
+    // Kept across slices and sessions: a later session's silence does not take back what an earlier one broke.
+    if (report.breaking && !breaking?.includes(report.breaking)) breaking = [breaking, report.breaking].filter(Boolean).join('\n\n');
     return report;
   };
 
@@ -683,7 +686,7 @@ async function runJobWith(opts: RunOptions, deps: Deps, live: { run?: Run; start
     const body = prBody({
       job, spec, plan, summary, ...(sliced ? { slices: sliced } : {}), gates: lastGates, gateAttempts: run.gates.length, fixRounds: run.fix_rounds, reviewRounds, open: failed ? open : [],
       protectedTouched: run.protected_touched, escalations: run.escalations, models, cost_usd: run.cost_usd,
-      ...(notes ? { notes } : {}), ...(review ? { review } : {}), ...(shots ? { shots } : {}), ...(caughtUp ? { caughtUp: { branch: ws.baseBranch, commit: caughtUp, resolved } } : {}), ...(failed && reason ? { failure: reason } : {}),
+      ...(notes ? { notes } : {}), ...(breaking ? { breaking } : {}), ...(review ? { review } : {}), ...(shots ? { shots } : {}), ...(caughtUp ? { caughtUp: { branch: ws.baseBranch, commit: caughtUp, resolved } } : {}), ...(failed && reason ? { failure: reason } : {}),
       // Helix sets it for a job submitted from an issue; a failure report is a draft, which should not close the issue when merged.
       ...(!failed && /^\d+$/.test(process.env.ANIMUS_CLOSES ?? '') ? { closes: Number(process.env.ANIMUS_CLOSES), issueLink: repoProfile.issue_link } : {}),
     });
