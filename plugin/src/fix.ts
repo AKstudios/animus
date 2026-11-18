@@ -1,10 +1,11 @@
 // `animus fix <pr> "<text>"` (GLOSSARY.md, "Fix"): a new job on the branch of an open pull request a job
 // opened. This holds what is particular to it: finding the job it continues, bringing the worktree to the
 // branch as GitHub has it, and what the implementer and the reviewer are told.
-import { readdirSync } from 'node:fs';
+import { existsSync, readdirSync } from 'node:fs';
 import { hostname } from 'node:os';
+import { join } from 'node:path';
 import { alive, jobDir, loadProgress, loadState, readRuns, type JobState, type Run } from './log.ts';
-import { prState, type PrLookup } from './pr.ts';
+import { prSource, prState, SPEC_SUMMARY, type PrLookup, type PrSourceLookup } from './pr.ts';
 import { git, AnimusError, GitError, tryGit } from './proc.ts';
 import { revParse } from './git.ts';
 
@@ -30,7 +31,7 @@ function activeFix(pr: string): { job: string; what: string } | undefined {
  * and its state. Refuses, with one line, a pull request no job opened, one that is merged or closed, and one that
  * has a fix running or waiting for an answer. `lookup` says whether GitHub has the pull request open.
  */
-export function fixTarget(repo: string, pr: string, lookup: PrLookup = prState): { run: Run; state: JobState } {
+export function fixTarget(repo: string, pr: string, lookup: PrLookup = prState): { run: Run; state?: JobState } {
   const n = /^#?(\d+)$/.exec(pr.trim())?.[1];
   const opened = readRuns().filter((r) => r.repo === repo && r.pr && (r.pr === pr.trim() || (n && r.pr.endsWith(`/${n}`))));
   const run = opened.at(-1);
@@ -40,8 +41,28 @@ export function fixTarget(repo: string, pr: string, lookup: PrLookup = prState):
   const active = activeFix(run.pr!);
   if (active) throw new AnimusError(`pull request ${pr} has a fix ${active.what}: job ${active.job}`);
   const state = loadState(run.job);
-  if (!state) throw new AnimusError(`the folder of job ${run.job}, which opened ${run.pr}, is gone`);
-  return { run, state };
+  return { run, ...(state ? { state } : {}) };
+}
+
+/** What a fix that runs from the pull request alone takes from it. */
+export type FromPr = { spec: string; branch: string; baseBranch: string; closes?: number; fixes?: FixEntry[] };
+
+/**
+ * Whether the fix has only the pull request to go on: the earlier job's folder is gone, or its worktree is and cannot
+ * be made again for want of its branch. (A job removes its worktree when it ends; one whose branch is still here is
+ * reopened at the same path, which is where its session is filed.) Then the spec comes from the block in the pull
+ * request's description, the branch from GitHub, and nothing of the earlier session is left to resume. Undefined
+ * when the job's folder and worktree, or its branch, are there.
+ */
+export function fixAlone(repo: string, run: Run, state: JobState | undefined, lookup: PrSourceLookup = prSource): FromPr | undefined {
+  if (state && (existsSync(join(state.workspace.worktree, '.git')) || revParse(repo, state.workspace.branch))) return undefined;
+  const found = lookup(run.pr!, repo);
+  if (!found) throw new AnimusError(`the earlier job's ${state ? 'worktree' : 'folder'} is gone and GitHub would not give the description of ${run.pr}, so the fix has nothing to go on`);
+  const spec = new RegExp(`<details><summary>${SPEC_SUMMARY}</summary>\\n\\n(\`{3,})md\\n([\\s\\S]*?)\\n\\1\\n\\n</details>`).exec(found.body)?.[2];
+  if (!spec) throw new AnimusError(`the earlier job's ${state ? 'worktree' : 'folder'} is gone and the description of ${run.pr} holds no spec (one too long for GitHub's limit is left out), so the fix cannot run`);
+  const closes = /^(?:Closes|Refs) #(\d+)$/m.exec(found.body)?.[1];
+  const fixes = [...found.body.matchAll(/^\| \d+ \| (.*) \| `([^`]+)` \| \$([\d.]+) \|$/gm)].map((m) => ({ ask: m[1]!.replaceAll('\\|', '|'), job: m[2]!, cost_usd: Number(m[3]) }));
+  return { spec, branch: found.head, baseBranch: found.base, ...(closes ? { closes: Number(closes) } : {}), ...(fixes.length ? { fixes } : {}) };
 }
 
 /**

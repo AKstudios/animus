@@ -1,10 +1,10 @@
 import assert from 'node:assert/strict';
-import { existsSync, mkdtempSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
-import { fixTarget } from '../src/fix.ts';
-import { loadState, saveProgress, saveState } from '../src/log.ts';
+import { fixAlone, fixTarget } from '../src/fix.ts';
+import { jobDir, loadState, saveProgress, saveState } from '../src/log.ts';
 import { runJob, type Deps } from '../src/pipeline.ts';
 import { BODY_LIMIT, prBody, SPEC_SUMMARY } from '../src/pr.ts';
 import { loadFactory, resolvePlan } from '../src/profiles.ts';
@@ -31,7 +31,7 @@ async function opened(repo: string, session: string, context?: number) {
 const fixOf = (repo: string, ask: string, agent: ReturnType<typeof fakeAgent>['agent'], over: Partial<Deps> = {}) => {
   const d = deps(agent, over);
   const { run, state } = fixTarget(repo, '1', () => 'OPEN');
-  return runJob({ repo, fix: { from: state, ask, pr: run.pr! } }, d).then((fixed) => ({ run: fixed, d }));
+  return runJob({ repo, fix: { of: run.job, from: state!, ask, pr: run.pr! } }, d).then((fixed) => ({ run: fixed, d }));
 };
 
 // Protects: criteria 1 and 2 of the fix spec. Fails when: a fix is a new job on a new branch, or does not carry on from the implementer's session, or a second fix starts from the first job's session, or the body loses Closes #N, the criteria or the Fixes list.
@@ -108,6 +108,52 @@ test('a fix starts from the branch as GitHub has it and tells the implementer th
   assert.ok(hadHandFile);
   assert.match(a.calls[0]!.prompt, /Hand fix on GitHub/);
   assert.match(git(repo, ['log', '--format=%s', first.branch]), /Hand fix on GitHub/);
+});
+
+// Protects: criterion 6. Fails when: a fix whose earlier job folder and worktree are gone does not take the spec from the pull request's description or the branch from GitHub, resumes a session, loses Closes #N or the Fixes list, or does not record that it began without the earlier session.
+test('a fix runs from the pull request alone when the earlier job folder and worktree are gone', async () => {
+  process.env.ANIMUS_CLOSES = '7';
+  const repo = makeRepo();
+  const origin = mkdtempSync(join(tmpdir(), 'animus-origin-'));
+  git(origin, ['init', '-q', '--bare']);
+  git(repo, ['remote', 'add', 'origin', origin]);
+  const first = await opened(repo, 'session-job');
+  delete process.env.ANIMUS_CLOSES;
+  git(repo, ['push', '-q', 'origin', first.branch]);
+  const one = await fixOf(repo, 'Say it twice', fakeAgent([say('done, again', 'session-fix-1'), () => clean()]).agent);
+  const body = one.d.published[0]!.body;
+  const { run: latest, state } = fixTarget(repo, '1', () => 'OPEN');
+  assert.equal(latest.job, one.run.job);
+  assert.equal(fixAlone(repo, latest, state, () => undefined), undefined, 'its branch is here: it is reopened, not left alone');
+  git(repo, ['push', '-q', 'origin', first.branch]);
+  // A job removes its worktree when it ends: with its branch here it is reopened, so only the branch gone too leaves the pull request alone.
+  git(repo, ['branch', '-D', first.branch]);
+  const fromGithub = { body, head: first.branch, base: 'main' };
+  assert.equal(fixAlone(repo, latest, state, () => fromGithub)?.branch, first.branch);
+  rmSync(jobDir(one.run.job), { recursive: true });
+
+  const alone = fixAlone(repo, latest, loadState(latest.job), () => fromGithub)!;
+  const a = fakeAgent([say('done, thrice', 'session-fix-2'), () => clean()]);
+  const d = deps(a.agent);
+  const two = await runJob({ repo, fix: { of: latest.job, alone, ask: 'Once more', pr: latest.pr! } }, d);
+
+  assert.equal(two.outcome, 'pr');
+  assert.equal(two.fix_of, one.run.job);
+  assert.equal(two.without_session, true);
+  assert.equal(d.published[0]!.branch, first.branch);
+  assert.equal(a.calls[0]!.resume, undefined);
+  assert.match(a.calls[0]!.prompt, /The feature file should say done\.[\s\S]*\+done[\s\S]*Once more/);
+  assert.match(readFileSync(loadState(two.job)!.spec, 'utf8'), /The feature file should say done\./);
+  assert.match(d.published[0]!.body, /^Closes #7$/m);
+  assert.match(d.published[0]!.body, /\| 1 \| Say it twice \|[\s\S]*\| 2 \| Once more \|/);
+});
+
+// Protects: criterion 6. Fails when: a fix with nothing but a description that holds no spec block runs anyway.
+test('a fix from the pull request alone is refused when its description holds no spec', async () => {
+  const repo = makeRepo();
+  await opened(repo, 'session-job');
+  const { run } = fixTarget(repo, '1', () => 'OPEN');
+  assert.throws(() => fixAlone(repo, run, undefined, () => ({ body: 'A description without the spec.', head: 'b', base: 'main' })), /holds no spec/);
 });
 
 // Protects: the spec's criterion for the body. Fails when: the spec is not in the description, its own code fence ends the block early, or a spec too long for GitHub's limit is put in anyway.

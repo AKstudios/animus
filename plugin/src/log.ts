@@ -71,6 +71,8 @@ export type Run = {
   trigger: string;
   /** The job this one is a fix of: the one before it on the same pull request. */
   fix_of?: string;
+  /** A fix that began from the pull request alone, because the earlier job's folder or worktree was gone: no earlier session carried on. */
+  without_session?: true;
   title: string;
   /** The spec file the job was started from, as a path on the machine that ran it. */
   spec_file?: string;

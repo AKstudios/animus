@@ -46,6 +46,22 @@ export function createWorkspace(repo: string, profile: Profile, job: string, bas
   return { worktree, branch, base, baseBranch };
 }
 
+/** A workspace for a fix with only the pull request to go on: a new worktree on the branch, as GitHub has it when there is a remote. */
+export function fixWorkspace(repo: string, profile: Profile, job: string, branch: string, baseBranch: string, log: (line: string) => void = () => {}): Workspace {
+  const worktree = join(worktreesRoot(repo, profile), job);
+  if (existsSync(worktree)) throw new AnimusError(`${worktree} already exists`);
+  const base = baseCommit(repo, baseBranch, log);
+  if (tryGit(repo, ['remote', 'get-url', 'origin'])) {
+    if (tryGit(repo, ['fetch', '--quiet', 'origin', `+refs/heads/${branch}:refs/remotes/origin/${branch}`]) === undefined) throw new AnimusError(`could not fetch ${branch} from GitHub`);
+  }
+  const start = revParse(repo, `origin/${branch}`) ?? revParse(repo, branch);
+  if (!start) throw new AnimusError(`${branch} is neither on GitHub nor here, so the fix has no branch to start from`);
+  tryGit(repo, ['worktree', 'prune']);
+  // -B and --force: the branch may still be checked out in the earlier job's worktree, when only its folder is gone.
+  git(repo, ['worktree', 'add', '--quiet', '--force', '-B', branch, worktree, start]);
+  return { worktree, branch, base, baseBranch };
+}
+
 /** A workspace for a job that ran before: its worktree if it is still there, else a new one on its branch. */
 export function reopenWorkspace(repo: string, ws: Workspace): Workspace {
   if (existsSync(join(ws.worktree, '.git'))) return ws;

@@ -17,17 +17,17 @@ import { appendRun, CANCELLED_MARKER, jobDir, toolsLog, saveProgress, saveState,
 import { evidenceBranch, findPrByTitle, prBody, prDraft, prState, type DraftLookup, type PrFind, type Evidence, type PrLookup, type Publish } from './pr.ts';
 import { admitFile, profileOnBase, refusal, type Admitted } from './admit.ts';
 import { loadProfile } from './profile.ts';
-import { describePlan, escalate, modelFor, PLUGIN_ROOT, raise, readPrompt, type Factory, type Plan, type Tier } from './profiles.ts';
+import { describePlan, escalate, modelFor, PLUGIN_ROOT, raise, readPrompt, resolvePlan, type Factory, type Plan, type Tier } from './profiles.ts';
 import { animusCommand, git, AnimusError, tryGit } from './proc.ts';
 import { factoryVersion } from './version.ts';
-import { handoffFixPrompt, resumeFixPrompt, reviewAsk, syncBranch } from './fix.ts';
+import { handoffFixPrompt, resumeFixPrompt, reviewAsk, syncBranch, type FromPr } from './fix.ts';
 import { asReport, asReview, blockers, criteriaList, listFindings, REPORT_SCHEMA, REVIEW_SCHEMA, type Finding, type Report, type Review } from './review.ts';
 import { loadJobSkills, saveJobSkills, type PersonalSkill } from './personal.ts';
 import { roleSkills } from './skills.ts';
 import { criteriaSoFar, isPlanned, oneSlice, planSlices, type Slicing } from './slices.ts';
-import { loadSpec, type Spec } from './spec.ts';
+import { loadSpec, parseSpec, type Spec } from './spec.ts';
 import { describeShots, designOf, JOB_PID, pagesOf, takeShots, uiProblem, uiTarget, type UiJob } from './ui.ts';
-import { baseCommit, createWorkspace, ensureSetup, removeWorkspace, reopenWorkspace, type Workspace } from './workspace.ts';
+import { baseCommit, createWorkspace, ensureSetup, fixWorkspace, removeWorkspace, reopenWorkspace, type Workspace } from './workspace.ts';
 
 export type Deps = {
   factory: Factory;
@@ -66,7 +66,7 @@ export type RunOptions = {
   /** Pick a job up again, with the person's answer if it asked a question. */
   resume?: { state: JobState; answer?: string };
   /** Start a fix (fix.ts): a new job on the pull request's branch, in the worktree of `from`, the job it continues. */
-  fix?: { from: JobState; ask: string; pr: string };
+  fix?: { of: string; from?: JobState; alone?: FromPr; ask: string; pr: string };
 };
 
 /** Ends the job where it is thrown, with an outcome that is not a pull request. */
@@ -110,7 +110,7 @@ function blankRun(p: { job: string; repo: string; opts: RunOptions; spec: Spec; 
   const { job, repo, opts, spec } = p;
   return {
     job, repo, submitter: process.env.ANIMUS_USER ?? tryGit(repo, ['config', 'user.email']) ?? userInfo().username,
-    trigger: opts.trigger ?? (opts.fix ? 'fix' : opts.resume ? 'resume' : 'cli'), ...(opts.fix ? { fix_of: opts.fix.from.job } : opts.resume?.state.fix_of ? { fix_of: opts.resume.state.fix_of } : {}), title: spec.title,
+    trigger: opts.trigger ?? (opts.fix ? 'fix' : opts.resume ? 'resume' : 'cli'), ...(opts.fix ? { fix_of: opts.fix.of } : opts.resume?.state.fix_of ? { fix_of: opts.resume.state.fix_of } : {}), title: spec.title,
     size: p.size, difficulty: p.difficulty, type: p.type, labels_defaulted: spec.defaulted, escalations: [],
     provider: p.factory?.provider ?? 'unknown', factory_version: factoryVersion(), skills: [],
     started: new Date(p.startedAt).toISOString(), ended: '',
@@ -157,7 +157,7 @@ async function runJobWith(opts: RunOptions, deps: Deps, live: { run?: Run; start
   const repo = mainCheckout(opts.repo);
   const prior = opts.resume?.state;
   // A fix starts from the job it continues; a fix picked up again has that in its own state.
-  const fix: { of: string; ask: string; pr?: string | undefined; from?: JobState } | undefined = opts.fix ? { of: opts.fix.from.job, ask: opts.fix.ask, pr: opts.fix.pr, from: opts.fix.from } : prior?.fix_of && prior.ask ? { of: prior.fix_of, ask: prior.ask, pr: prior.pr } : undefined;
+  const fix: { of: string; ask: string; pr?: string | undefined; from?: JobState } | undefined = opts.fix ? { of: opts.fix.of, ask: opts.fix.ask, pr: opts.fix.pr } : prior?.fix_of && prior.ask ? { of: prior.fix_of, ask: prior.ask, pr: prior.pr } : undefined;
   if (!prior && !opts.specFile && !opts.fix) throw new AnimusError('animus run needs a spec file');
   // On Helix the profile is the base branch's as Helix fetched it, not whatever the clone has checked out (docs/adr/0008).
   const onBase = opts.trigger === 'helix' || process.env.ANIMUS_TRIGGER === 'helix' ? profileOnBase(repo) : undefined;
@@ -168,10 +168,16 @@ async function runJobWith(opts: RunOptions, deps: Deps, live: { run?: Run; start
   let admitted: Admitted | undefined;
   const earlier = opts.fix?.from;
   const before = prior ?? earlier;
+  // A fix with only the pull request to go on (fix.ts, fixAlone): the spec is the one in its description.
+  const alone = opts.fix?.alone;
+  const carried = Boolean(before || alone);
   if (before) {
     // A job picked up again, or a fix, keeps the spec it was admitted with.
     spec = loadSpec(before.spec);
     plan = before.plan;
+  } else if (alone) {
+    spec = parseSpec(alone.spec);
+    plan = resolvePlan(factory, spec);
   } else {
     admitted = admitFile(factory, opts.specFile!, repo, repoProfile, onBase?.facts);
     if (admitted.problems.length || !admitted.plan) {
@@ -184,7 +190,7 @@ async function runJobWith(opts: RunOptions, deps: Deps, live: { run?: Run; start
   }
   const job = prior?.job ?? newJobId(spec.title);
   const ui = plan.type === 'ui' ? uiJobOf(job, spec) : undefined;
-  if (ui && before) {
+  if (ui && carried) {
     const problem = uiProblem(repoProfile, ui);
     if (problem) throw new AnimusError(problem);
   }
@@ -192,7 +198,8 @@ async function runJobWith(opts: RunOptions, deps: Deps, live: { run?: Run; start
   const dir = jobDir(job);
   mkdirSync(dir, { recursive: true });
   const specCopy = join(dir, 'spec.md');
-  if (!prior) copyFileSync(earlier?.spec ?? opts.specFile!, specCopy);
+  if (alone) writeFileSync(specCopy, `${alone.spec}\n`);
+  else if (!prior) copyFileSync(earlier?.spec ?? opts.specFile!, specCopy);
   if (!prior) saveJobSkills(dir, opts.personal ?? []);
   const personal = loadJobSkills(dir);
 
@@ -211,8 +218,9 @@ async function runJobWith(opts: RunOptions, deps: Deps, live: { run?: Run; start
   /** Says where the job is, in its folder: what Helix's display shows while it runs. */
   const at = (stage: Stage, who: string) => saveProgress(job, stage, who);
 
-  const source = before ? before.source : resolve(opts.specFile!);
+  const source = before ? before.source : alone ? undefined : resolve(opts.specFile!);
   if (source) run.spec_file = source;
+  if (alone) run.without_session = true;
 
   const jobLine = `job ${job}: ${spec.title}`;
   // On Helix the person watches at Helix's own links.
@@ -222,7 +230,7 @@ async function runJobWith(opts: RunOptions, deps: Deps, live: { run?: Run; start
   log(describePlan(factory, plan));
   if (personal.length) log(`the submitter's skills: ${personal.map((p) => `${p.name} (${p.roles.join(', ')}${p.types ? `; ${p.types.join(', ')} jobs` : ''})`).join(', ')}`);
   // A spec that builds on another waits for it, then starts from a base that holds it.
-  if (!before && spec.after.length) {
+  if (!carried && spec.after.length) {
     at('setup', 'setup · waits for an earlier pull request to merge');
     const files = resolveAfter(repo, source!, spec.after);
     await timed('queue', () => waitForMerged({ repo, files, lookup: deps.prState ?? prState, find: deps.findPr ?? findPrByTitle, log, ...(deps.sleep ? { sleep: deps.sleep } : {}) }));
@@ -238,9 +246,10 @@ async function runJobWith(opts: RunOptions, deps: Deps, live: { run?: Run; start
   at('setup', 'setup · worktree and dependencies');
   try {
     ws = await timed('setup', () => {
-      const w = before ? reopenWorkspace(repo, before.workspace) : createWorkspace(repo, repoProfile, job, spec.base ?? repoProfile.base, log);
+      if (alone) log('the earlier job\'s folder or worktree is gone: the fix runs from the pull request alone, with the spec from its description and a fresh session');
+      const w = before ? reopenWorkspace(repo, before.workspace) : alone ? fixWorkspace(repo, repoProfile, job, alone.branch, alone.baseBranch, log) : createWorkspace(repo, repoProfile, job, spec.base ?? repoProfile.base, log);
       writeFileSync(join(git(w.worktree, ['rev-parse', '--absolute-git-dir']), MARKER), JSON.stringify({ job }));
-      if (earlier) {
+      if (opts.fix) {
         foreign = syncBranch(w.worktree, w.branch);
         fixStart = git(w.worktree, ['rev-parse', 'HEAD']);
         if (foreign) log(`the branch on GitHub has commits this worktree lacked; the fix starts from it:\n${foreign}`);
@@ -258,12 +267,13 @@ async function runJobWith(opts: RunOptions, deps: Deps, live: { run?: Run; start
   const wt = ws.worktree;
   run.branch = ws.branch;
   run.base = ws.base;
+  const inherited: { fixes?: FromPr['fixes']; closes?: number } | undefined = before ?? alone;
   const answers = [...(before?.answers ?? []), ...(prior?.question && opts.resume?.answer ? [{ question: prior.question, answer: opts.resume.answer }] : [])];
   // A fix carries on from the session of the job it continues, and from that job's list of fixes.
   const state: JobState = {
     job, repo, spec: specCopy, ...(source ? { source } : {}), workspace: ws, plan, ...(before?.session ? { session: before.session } : {}), ...(before?.context !== undefined ? { context: before.context } : {}), ...(answers.length ? { answers } : {}),
     ...(prior?.slicing ? { slicing: prior.slicing, sliced_by: prior.sliced_by ?? 'script', slices_done: prior.slices_done ?? [] } : {}),
-    ...(fix ? { fix_of: fix.of, ask: fix.ask, ...(fix.pr ? { pr: fix.pr } : {}) } : {}), ...(before?.fixes ? { fixes: before.fixes } : {}), ...(before?.closes ? { closes: before.closes } : {}),
+    ...(fix ? { fix_of: fix.of, ask: fix.ask, ...(fix.pr ? { pr: fix.pr } : {}) } : {}), ...(inherited?.fixes ? { fixes: inherited.fixes } : {}), ...(inherited?.closes ? { closes: inherited.closes } : {}),
   };
   saveState(state);
 
@@ -525,7 +535,7 @@ async function runJobWith(opts: RunOptions, deps: Deps, live: { run?: Run; start
     // ----------------------------------------------------------------- plan
     // How the spec is cut is decided once. A job picked up again keeps its cut.
     if (!state.slicing) {
-      state.slicing = before ? oneSlice(spec) : await timed('plan', () => {
+      state.slicing = carried ? oneSlice(spec) : await timed('plan', () => {
         try {
           if (isPlanned(factory, spec.size)) at('plan', `planner · ${factory.planner!.tier} tier`);
           const planned = planSlices({ factory, agent: deps.agent, spec, cwd: wt, personal, log, record: (stage, r) => record(stage, 'planner', factory.planner!.tier, factory.planner!.effort, r) });
@@ -563,7 +573,7 @@ async function runJobWith(opts: RunOptions, deps: Deps, live: { run?: Run; start
       for (const f of review?.findings ?? []) found.set(`${f.file ?? ''}:${f.problem}`, f);
     } else if (slices.length === 1) {
       brief = whole;
-      if (earlier) await implementer('fix', resumeFixPrompt({ ask: opts.fix!.ask, foreign }), plan.implement.tier, false, () => handoffFixPrompt({ brief, base: ws.base, cwd: wt, answers, ask: opts.fix!.ask, foreign }));
+      if (opts.fix) await implementer('fix', resumeFixPrompt({ ask: opts.fix!.ask, foreign }), plan.implement.tier, false, () => handoffFixPrompt({ brief, base: ws.base, cwd: wt, answers, ask: opts.fix!.ask, foreign }));
       else await implementer(prior ? 'resume' : 'implement', prior ? resumePrompt(prior, opts.resume?.answer) : brief, plan.implement.tier, !prior);
     } else {
       if (!prior) log(`${slices.length} slices: ${slices.map((s) => s.title).join('; ')}`);

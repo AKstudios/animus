@@ -179,6 +179,18 @@ export const prDraft: DraftLookup = (url, cwd) => {
   return draft === 'true' ? true : draft === 'false' ? false : undefined;
 };
 
+/** A pull request's description and its two branches, as GitHub has them: all a fix needs when the job that opened it is gone. */
+export type PrSource = { body: string; head: string; base: string };
+export type PrSourceLookup = (url: string, cwd: string) => PrSource | undefined;
+
+export const prSource: PrSourceLookup = (url, cwd) => {
+  const out = gh(cwd, ['pr', 'view', url, '--json', 'body,headRefName,baseRefName', '--jq', '[.body,.headRefName,.baseRefName]|@json'], undefined, true);
+  if (!out) return undefined;
+  // The body has newlines, which gh's output is cut at: ask for JSON on one line.
+  const [body, head, base] = JSON.parse(out) as [string, string, string];
+  return { body, head, base };
+};
+
 /** What GitHub records about a pull request. commits holds each commit's committer date. */
 export type PrFacts = { state: PrState; createdAt: string; closedAt?: string; mergedAt?: string; mergeCommit?: string; baseRefName: string; commits: string[]; /** The pull request's last commit. */ head?: string };
 
