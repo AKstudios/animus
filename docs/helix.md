@@ -142,8 +142,8 @@ in [helix-deploy.md](helix-deploy.md#the-slack-bot).
   `/animus notify on` starts them again; they are on by default.
 - `/animus jobs` answers privately with the sender's queued, running and
   needs-input jobs, each with its thread or pull request link.
-  `/animus status` answers with Helix's slots in use, the queue's length and its
-  version.
+  `/animus status` answers with Helix's slots in use, the queue's length, how
+  many jobs wait for an earlier pull request, and its version.
 - A job that needs input is answered by replying in its thread: any reply in
   the DM, or a reply that mentions @Animus in a channel. It resumes as after
   `animus answer`, and the thread says so. Replies from anyone but the job's
