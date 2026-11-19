@@ -14,7 +14,10 @@ clients with how to update.
   references (`animus fix --references <dir>`). A plain `/animus` there, a
   fix from anyone else, on a pull request no job opened, a merged or closed
   one or one with a fix already queued, running or waiting gets a one-line
-  reply and queues nothing.
+  reply and queues nothing. The fix comments on the pull request when it
+  pushed (what changed, its cost, its job page), failed or was refused (the
+  reason) or asks a question, and nothing in between; `/animus answer <text>`
+  and `/animus cancel` on the pull request act on it.
 - `animus fix <pr> "<text>"` changes an open pull request a job opened: a new
   job in that job's worktree, reset to the branch as GitHub has it, that
   carries on from its implementer session (or a handoff when the session is

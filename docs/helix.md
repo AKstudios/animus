@@ -190,9 +190,21 @@ with the person's own token, so they show as that person with the app's badge.
   job, and `/animus cancel` cancels it. You still get your Slack DM thread.
 - `submit`, `discard`, `answer` and `cancel` from anyone but the draft's or
   job's person, or the owner, get a one-line reply that only they may.
+- `/animus fix <what to change>` on an open pull request a job opened gets a 👀
+  and queues a [fix](#fixes) with that text as its ask, as `animus fix` does.
+  Helix fetches the pull request's review bodies and inline comments made
+  since the last push of its latest job and gives them to the fix as
+  references. The fix comments on the pull request when it pushed (what it
+  changed, its cost and its job page), when it failed or was refused (the
+  reason) and when it needs input (the question), and on nothing in between;
+  `/animus answer <text>` and `/animus cancel` there act on it, and you still
+  get your Slack DM thread. A plain `/animus <text>` on a pull request, a fix
+  from anyone but the job's person or the owner, one on a pull request no job
+  opened or that is merged or closed, or one while a fix is queued, running or
+  waiting for an answer there (linked) gets a one-line reply and queues
+  nothing.
 - A `/animus` comment more than 24 hours old when Helix first sees it (left
-  while Helix was down) is answered as too old and starts nothing. On a pull
-  request, `/animus` replies that `fix` is not available yet.
+  while Helix was down) is answered as too old and starts nothing.
 
 `helix check` flags a project that no person's GitHub token can read comments
 on: it is never watched, so a `/animus` there goes unanswered.
@@ -288,8 +300,9 @@ moves it to the release `stable` points at ([releases.md](releases.md)).
 
 ## Fixes
 
-`animus fix <pr> "<what to change>"` from a laptop with a Helix set up
-submits a **fix** (described in [cli.md](cli.md)) to `POST /jobs/fix` when a job on this Helix opened the pull request, and
+`animus fix <pr> "<what to change>"` from a laptop with a Helix set up, or a
+`/animus fix <what to change>` comment on the pull request
+([GitHub comments](#github-comments)), submits a **fix** (described in [cli.md](cli.md)) to `POST /jobs/fix` when a job on this Helix opened the pull request, and
 prints where to watch it, as `animus submit` does. Helix checks the pull
 request: a job here must have opened it and a fix must not be queued, running
 or waiting for an answer on it (409, naming that fix). Only the person of the
