@@ -79,6 +79,8 @@ export type JobPage = {
   pr_merged?: string;
   /** What the job's run log says of its runs, left out until one has ended. */
   run?: JobRun;
+  /** A first attempt's agent sessions so far, before any run record exists: from its tool-call log and progress. Tokens and cost are unknown until a session ends. */
+  sessions?: LiveSession[];
   /** What happened to its PR after the job, as outcomes.json says; left out where it has not said. */
   after?: Pick<InsightsOutcome, 'human_commits' | 'reverted' | 'reworked'> & { lines?: { added: number; removed: number } };
   /** The lessons that cite the job, proposed or kept. */
@@ -113,6 +115,9 @@ export type JobRun = {
   findings: { round: number; severity: string; fate: 'fixed' | 'open' | 'not-acted-on' }[];
   tools: { calls: number; errors: number; text: string };
 };
+
+/** An agent session of a job still on its first attempt; `live` is the one working now, with the tool it last used. */
+export type LiveSession = { stage: string; role: string; model: string; effort: string; started: string; ms: number; calls: number; errors: number; live: boolean; tool?: string; target?: string };
 
 /** An open pull request one of Helix's jobs opened, as GitHub lists it now. */
 export type DisplayPr = { /** Helix's number, or a local job's own id. */ job: number | string; repo: string; person: string; number: number; title: string; url: string; draft: boolean; created: string };

@@ -101,6 +101,30 @@ test('a local job with progress but no state shows as stopped during setup, with
   assert.match(job.reason!, /during setup/);
 });
 
+// Protects: a first attempt's page shows its sessions before any run record, from the tool-call log read incrementally, with no tokens or cost. Fails when sessions are missing until the run ends, the live one lacks its calls and current tool, or a later request misses lines appended since.
+test('a running first attempt shows its sessions from the tool-call log and progress', async () => {
+  seed('first-attempt');
+  const at = (s: number) => new Date(Date.now() - s * 1000).toISOString();
+  const file = join(jobDir('first-attempt'), 'tools.jsonl');
+  const line = (secs: number, stage: string, role: string, tool: string, target: string, ok = true) => `${JSON.stringify({ at: at(secs), tool, target, ok, ms: 500, stage, role, session: `${role}-1` })}\n`;
+  // The planner ended before the implementer's progress was written.
+  appendFileSync(file, line(130, 'plan-1', 'planner', 'Read', 'spec.md') + line(125, 'plan-1', 'planner', 'Grep', 'display', false));
+  writeJson(join(jobDir('first-attempt'), 'progress.json'), { ...loadProgress('first-attempt')!, stage: 'implement', who: 'implementer · deep tier', at: at(60), model: 'opus', effort: 'high' });
+  appendFileSync(file, line(30, 'implement', 'implementer', 'Edit', 'plugin/display/app.ts'));
+  const s = await served();
+  const page = (await (await s.get('/jobs/first-attempt/page-data')).json()) as JobPage;
+  assert.deepEqual(page.sessions!.map((x) => [x.role, x.stage, x.live, x.calls, x.errors]), [['planner', 'plan-1', false, 2, 1], ['implementer', 'implement', true, 1, 0]]);
+  const live = page.sessions![1]!;
+  assert.deepEqual([live.model, live.effort, live.tool, live.target], ['opus', 'high', 'Edit', 'plugin/display/app.ts']);
+  assert.ok(live.ms >= 59_000 && live.ms < 70_000);
+  assert.deepEqual(Object.keys(live).filter((k) => ['tokens', 'cost_usd'].includes(k)), []);
+  // Only what was appended since the last request is read, and a half-written line waits.
+  appendFileSync(file, line(5, 'implement', 'implementer', 'Bash', 'npm test') + '{"at":');
+  const next = (await (await s.get('/jobs/first-attempt/page-data')).json()) as JobPage;
+  assert.deepEqual([next.sessions![1]!.calls, next.sessions![1]!.tool], [2, 'Bash']);
+  s.stop();
+});
+
 // ---- the local display's server and page
 
 /** The local display on a free port, over the jobs seeded so far. */

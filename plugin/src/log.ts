@@ -18,6 +18,8 @@ export const runLog = () => join(animusHome(), 'runs.jsonl');
 
 export type AgentRun = {
   stage: string; role: string; tier: string; effort: string; model: string;
+  /** When the session began (ISO); runs recorded before this was kept have none. */
+  started?: string;
   session?: string; ok: boolean; status: string; cost_usd: number; turns: number; tokens: Tokens; ms: number; transcript?: string;
   /** Tokens in the session's context when it ended. */
   context?: number;
@@ -176,6 +178,8 @@ export type Progress = {
   stage: Stage; who: string; at: string;
   /** When this process began writing progress: how long a running job has run, before its run row exists. */
   started?: string;
+  /** The model and effort of the agent working now, when an agent is. */
+  model?: string; effort?: string;
   /** The `animus run` process and machine writing it: a job is running only where that process is alive. */
   pid?: number; host?: string;
 };
@@ -199,12 +203,12 @@ export function loadState(job: string, home = animusHome()): JobState | undefine
   return existsSync(file) ? (JSON.parse(readFileSync(file, 'utf8')) as JobState) : undefined;
 }
 
-export function saveProgress(job: string, stage: Stage, who: string): void {
+export function saveProgress(job: string, stage: Stage, who: string, agent?: { model: string; effort: string }): void {
   const at = new Date().toISOString();
   // The same process keeps the time it began; a resumed job's new process starts its own.
   const before = loadProgress(job);
   const started = before?.pid === process.pid && before.host === hostname() && before.started ? before.started : at;
-  writeJson(join(jobDir(job), 'progress.json'), { stage, who, at, started, pid: process.pid, host: hostname() } satisfies Progress);
+  writeJson(join(jobDir(job), 'progress.json'), { stage, who, at, started, ...agent, pid: process.pid, host: hostname() } satisfies Progress);
 }
 
 /** True for a live process; EPERM means it exists under another user. */
