@@ -22,6 +22,8 @@ export type Facts = {
   read: string;
   hasBranch: (branch: string) => boolean;
   hasPath: (branch: string, path: string) => boolean;
+  /** Why a secret of the profile would not reach a job where it runs, or undefined when it would. */
+  missingSecret?: (name: string) => string | undefined;
 };
 
 /** A profile problem carries the YAML to add to the profile and where the profile was read from. */
@@ -69,6 +71,11 @@ export function admit(factory: Factory, text: string, facts: Facts, name = 'spec
   if (!baseThere) {
     if (spec.base) specProblem(`base ${base} is not a branch of the project`);
     else profileProblem(`the profile's base branch ${base} does not exist`, `base: <a branch that exists>`);
+  }
+
+  for (const name of profile.secrets) {
+    const why = facts.missingSecret?.(name);
+    if (why) profileProblem(why);
   }
 
   const gates = checksFor(profile, spec.type).filter((n) => profile.commands[n]).map((n) => `${n}: ${profile.commands[n]!.run}`);
@@ -143,6 +150,8 @@ export function checkoutFacts(repo: string, profile: Profile): Facts {
     profile, read: `the checkout, on ${tryGit(repo, ['branch', '--show-current']) || 'no branch'}`,
     hasBranch: (b) => ref(b) !== undefined,
     hasPath: (b, path) => { const c = ref(b); return c !== undefined && tryGit(repo, ['cat-file', '-e', `${c}:${path}`]) !== undefined; },
+    // On one machine a job has the environment of the loop that runs it, which is this process's or its parent's.
+    missingSecret: (name) => (process.env[name] ? undefined : `secret ${name} is not set in the environment jobs run with on this machine: export it in the shell you start animus from, then stop the queue's loop so the next job starts it again with it`),
   };
 }
 

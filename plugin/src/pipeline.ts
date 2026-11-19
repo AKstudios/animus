@@ -16,7 +16,7 @@ import { commitAll, mainCheckout, matchesAny, touchedFiles } from './git.ts';
 import { appendRun, CANCELLED_MARKER, jobDir, toolsLog, saveProgress, saveState, writeJson, type Cause, type FindingLog, type JobState, type Outcome, type Run, type Stage } from './log.ts';
 import { evidenceBranch, findPrByTitle, prBody, prDraft, prState, PushRejected, type DraftLookup, type PrFind, type Evidence, type PrLookup, type Publish } from './pr.ts';
 import { admitFile, profileOnBase, refusal, type Admitted } from './admit.ts';
-import { loadProfile } from './profile.ts';
+import { loadProfile, useJobEnv } from './profile.ts';
 import { describePlan, escalate, modelFor, PLUGIN_ROOT, raise, readPrompt, resolvePlan, type Factory, type Plan, type Tier } from './profiles.ts';
 import { animusCommand, git, AnimusError, tryGit } from './proc.ts';
 import { factoryVersion } from './version.ts';
@@ -166,6 +166,8 @@ async function runJobWith(opts: RunOptions, deps: Deps, live: { run?: Run; start
   // On Helix the profile is the base branch's as Helix fetched it, not whatever the clone has checked out (docs/adr/0008).
   const onBase = opts.trigger === 'helix' || process.env.ANIMUS_TRIGGER === 'helix' ? profileOnBase(repo) : undefined;
   const repoProfile = onBase?.profile ?? loadProfile(repo);
+  // One job per process: every command and session it starts inherits this.
+  useJobEnv(repoProfile);
   // A new job is admitted before any work (docs/adr/0007); a resumed one was, when it started.
   let spec: Spec;
   let plan: Plan;

@@ -12,7 +12,7 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, runGates, type CheckResult } from '../../plugin/src/gates.ts';
 import { githubUrl } from '../../plugin/src/git.ts';
-import { loadProfile, PROFILE_PATH } from '../../plugin/src/profile.ts';
+import { loadProfile, PROFILE_PATH, useJobEnv } from '../../plugin/src/profile.ts';
 import { failureExcerpt } from '../../plugin/src/proc.ts';
 import { ensureSetup } from '../../plugin/src/workspace.ts';
 import { readDockerfile } from './project-image.ts';
@@ -108,6 +108,7 @@ const gatesFile = (worktree: string) => join(dirname(worktree), 'gates.json');
 export function setupAndGates(worktree: string, say: (line: string) => void): void {
   rmSync(gatesFile(worktree), { force: true });
   const profile = loadProfile(worktree);
+  useJobEnv(profile);
   ensureSetup(worktree, profile, say);
   const checks = Object.entries(profile.commands).map(([name, c]) => ({ name, command: c.run, ...(c.cwd ? { cwd: c.cwd } : {}) }));
   writeFileSync(gatesFile(worktree), JSON.stringify(runGates(worktree, checks, 'add-check', say)));

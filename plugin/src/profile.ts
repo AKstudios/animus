@@ -67,9 +67,17 @@ export type Profile = {
   /** Where job worktrees go; default ../.worktrees/<repo name>. */
   worktrees?: string;
   ui: UiProfile;
+  /** Plain settings every step of a job runs with: setup, installs, gates, a UI target's commands and the agent sessions. */
+  env: Record<string, string>;
+  /** Names of the project's secrets, whose values a job gets from where it runs (on one machine: the queue's own environment). */
+  secrets: string[];
 };
 
 export const PROFILE_PATH = '.animus/animus.yaml';
+
+// Names Animus or Helix sets for a job itself: the person's tokens, git's identity and credentials, the check's CI, the serve command's PORT.
+const RESERVED = new Set(['HOME', 'PATH', 'CI', 'PORT', 'GH_TOKEN', 'GITHUB_TOKEN', 'GH_REFRESH_TOKEN', 'GH_TOKEN_EXPIRES', 'CLAUDE_CODE_OAUTH_TOKEN', 'ANTHROPIC_API_KEY', 'CLAUDE_CONFIG_DIR']);
+const RESERVED_PREFIX = /^(ANIMUS_|HELIX_|GIT_AUTHOR_|GIT_COMMITTER_|GIT_CONFIG_)/;
 
 const DEFAULTS: Profile = {
   installs: [],
@@ -80,6 +88,8 @@ const DEFAULTS: Profile = {
   base: 'main',
   issue_link: 'closes',
   ui: { targets: [], human_review: true },
+  env: {},
+  secrets: [],
 };
 
 export function loadProfile(dir: string): Profile {
@@ -156,7 +166,39 @@ export function parseProfile(text: string, file = PROFILE_PATH): Profile {
     });
   }
   if (raw.ui !== undefined) profile.ui = parseUi(raw.ui, bad);
+  const name = (at: string, n: string) => {
+    if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(n)) throw bad(`${at}: ${n} is not a variable name (letters, digits and _, not starting with a digit)`);
+    if (RESERVED.has(n) || RESERVED_PREFIX.test(n)) throw bad(`${at}: Animus or Helix sets ${n} itself; use another name`);
+  };
+  if (raw.env !== undefined) {
+    if (!isRecord(raw.env)) throw bad('env must map a variable name to its value');
+    for (const [n, v] of Object.entries(raw.env)) {
+      name(`env.${n}`, n);
+      if (typeof v !== 'string' && typeof v !== 'number' && typeof v !== 'boolean') throw bad(`env.${n} must be text`);
+      profile.env[n] = String(v);
+    }
+  }
+  if (raw.secrets !== undefined) {
+    if (!isStrings(raw.secrets)) throw bad('secrets must list names; their values are kept where jobs run, never in the profile');
+    for (const n of raw.secrets) {
+      name('secrets', n);
+      if (n in profile.env) throw bad(`${n} is in both env and secrets; keep it in one`);
+    }
+    profile.secrets = [...new Set(raw.secrets)];
+  }
   return profile;
+}
+
+/** What a job runs with beyond its process's own environment: the profile's env, and each of its secrets that `source` has. */
+export function jobEnv(profile: Pick<Profile, 'env' | 'secrets'>, source: Record<string, string | undefined> = process.env): Record<string, string> {
+  const env = { ...profile.env };
+  for (const n of profile.secrets) if (source[n]) env[n] = source[n];
+  return env;
+}
+
+/** Puts a job's env into this process's environment, so every command and session it starts has it. */
+export function useJobEnv(profile: Pick<Profile, 'env' | 'secrets'>): void {
+  Object.assign(process.env, jobEnv(profile));
 }
 
 function parseUi(raw: unknown, bad: (what: string) => AnimusError): UiProfile {

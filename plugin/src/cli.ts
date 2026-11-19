@@ -26,7 +26,7 @@ import { listenLocal, localServer } from './local-display.ts';
 import { enqueue, ensureLoop, openLocalQueue, queueFile, type LocalQueue } from './local-queue.ts';
 import { answerLocal, cancelLocal, describeLocalJob, describeLocalJobs, localJob, logTail, needsYou } from './local-status.ts';
 import { logFile, runLoop } from './local-loop.ts';
-import { loadProfile, PROFILE_PATH } from './profile.ts';
+import { loadProfile, PROFILE_PATH, useJobEnv } from './profile.ts';
 import { describePlan, loadFactory, resolvePlan } from './profiles.ts';
 import { admitFile, describeAdmit } from './admit.ts';
 import { git, tryGit, AnimusError, GitError } from './proc.ts';
@@ -585,6 +585,7 @@ async function main(argv: string[]): Promise<number> {
       if (!state) throw new AnimusError(`animus ${command} runs inside a job's worktree, and this is not one`);
       const spec = loadSpec(state.spec);
       const profile = loadProfile(state.repo);
+      useJobEnv(profile);
       if (command === 'check') {
         const files = [...new Set([...touchedFiles(root, state.workspace.base, 'HEAD'), ...git(root, ['ls-files', '--others', '--modified', '--exclude-standard']).split('\n').filter(Boolean)])];
         // Part-way through a job's slices, only the criteria of the slices so far are checked.

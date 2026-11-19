@@ -177,6 +177,13 @@ test('a gate that fails on the base fails the add, with its name and the end of 
   c.store.close();
 });
 
+// Protects: the add check runs as a job would, with the profile's env. Fails when: setup or a gate runs without it.
+test('the add check runs setup and the gates with the profile\'s env', () => {
+  const c = toCheck('env:\n  STAGE_ENV_TEST: staging\nsetup: echo "$STAGE_ENV_TEST" > stage.txt\ncommands:\n  test: test "$STAGE_ENV_TEST" = staging && grep -q staging stage.txt\n');
+  assert.equal(checkProject({ store: c.store, home: c.home, name: 'app', say: c.say, setup: setupHere }), true, c.said.join('\n'));
+  c.store.close();
+});
+
 // Protects: a flaky gate counts as in a job. Fails when: one that fails once and passes again fails the add.
 test('a gate that fails once and passes when run again counts as passed', () => {
   // Outside the worktree, so the restore before the second run leaves it.
