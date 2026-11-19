@@ -65,8 +65,15 @@ job('drafts-from-slack', REPO.animus, 'Drafts from Slack', {
   outcome: 'pr', spec: SPEC('Drafts from Slack', criteria),
   extra: { slicing: { by: 'planner', slices: [{ title: 'Drafts in a DM', delivers: 'criterion 1' }, { title: 'Submit from a draft', delivers: 'criterion 2' }, { title: 'Manifest scopes', delivers: 'criterion 3' }] } as unknown as JobState['slicing'], slices_done: ['1', '2', '3'] },
 });
-ran('drafts-from-slack', REPO.animus, 'Drafts from Slack', 900, 41, 6.02, { outcome: 'pr', pr: 16 });
+const ag = (stage: string, role: string, tier: string, cost: number, calls: number, errors: number) => ({ stage, role, tier, effort: 'medium', model: tier, ok: true, status: 'ok', cost_usd: cost, turns: 10, tokens: { input: 0, output: 0, cache_read: 0, cache_write: 0 }, ms: 1000, tools: { calls, errors, by_tool: { Bash: calls - 2, Edit: 2 } } });
+ran('drafts-from-slack', REPO.animus, 'Drafts from Slack', 900, 41, 6.02, { outcome: 'pr', pr: 16, extra: {
+  fix_rounds: 1, gates: [{ attempt: 1, ok: false, ms: 1000, checks: [{ name: 'test', ok: false, skipped: false, ms: 900, flaky: true }] }, { attempt: 2, ok: true, ms: 1000, checks: [] }],
+  agents: [ag('plan', 'planner', 'opus', 0.9, 14, 0), ag('implement', 'implementer', 'sonnet', 3.4, 62, 3), ag('implement', 'implementer', 'sonnet', 0.7, 18, 1), ag('review', 'reviewer', 'opus', 1.02, 20, 0)],
+  review: { rounds: 1, findings: 2, blockers: 1, acted_on: 1, open: 0, log: [{ round: 1, severity: 'blocker', file: 'helix/src/drafts.ts', line: 88, fate: 'fixed' }, { round: 1, severity: 'should-fix', file: 'helix/src/slack.ts', line: 212, fate: 'not-acted-on' }] },
+} as Partial<Run> });
 pr(REPO.animus, 16, 'drafts-from-slack', 'MERGED', 400);
+Object.assign(outcomes[`https://github.com/example/animus/pull/16`] as object, { human_commits: 2, human_lines: { added: 24, removed: 6 }, reverted: false, reworked: false });
+writeFileSync(join(jobDir('drafts-from-slack'), 'tools.jsonl'), ['plan|Read|docs/slack.md', 'implement|Bash|npm test', 'implement|Edit|helix/src/drafts.ts'].map((l, i) => { const [stage, tool, target] = l.split('|'); return JSON.stringify({ at: ago(900 - i), stage, role: stage === 'plan' ? 'planner' : 'implementer', tool, target, ok: true, ms: 120 }); }).join('\n') + '\n');
 const gates = join(jobDir('drafts-from-slack'), 'gates');
 mkdirSync(gates, { recursive: true });
 const list = (test: string) => [`ok   typecheck: npm run typecheck (1.0s)`, `${test} test: npm test (14.7s)`, ...criteria.map((_, i) => `ok   acceptance-${i + 1}: node --test test/c${i + 1}.test.ts (0.${i + 2}s)`)].join('\n');
@@ -123,8 +130,9 @@ past.forEach(([cls, proj, days, minutes, cost, end, humans, undone, first, flaky
   }
 });
 writeJson(outcomesFile(), outcomes);
-writeJson(join(process.env.ANIMUS_HOME!, 'lessons.json'), { next: 4, lessons: [
+writeJson(join(process.env.ANIMUS_HOME!, 'lessons.json'), { next: 5, lessons: [
   { id: 1, text: 'Run the full test file, not one test, before saying the gates pass.', scope: 'project', project: 'animus', agent: 'implementer', cites: ['past-2', 'past-4'], status: 'proposed', created: ago(3 * DAY_MIN), uses: 0 },
+  { id: 4, text: 'Say in the DM when an upload gives up, not only in the log.', scope: 'project', project: 'animus', agent: 'implementer', cites: ['drafts-from-slack'], status: 'proposed', created: ago(2 * DAY_MIN), uses: 0 },
   { id: 2, text: "Check the Slack manifest's scopes when a command is added.", scope: 'factory', project: 'animus', agent: 'planner', cites: ['drafts-from-slack'], status: 'kept', created: ago(30 * DAY_MIN), acceptedAt: ago(20 * DAY_MIN), uses: 7 },
   { id: 3, text: 'A shopping list keeps its order when an item is ticked.', scope: 'project', project: 'meal-planner', agent: 'implementer', cites: ['shop-ticks'], status: 'kept', created: ago(25 * DAY_MIN), acceptedAt: ago(12 * DAY_MIN), uses: 2 },
 ] });

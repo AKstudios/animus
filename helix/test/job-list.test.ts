@@ -127,6 +127,6 @@ test('To merge is the PR\'s merge time less the job\'s end, and — when unknown
 // Protects: the Fix rounds column. Fails when: a job whose gates never ran shows 0, or a count is lost.
 test('the Jobs table shows each job\'s fix rounds, and a dash before the gates ran', () => {
   const job = (id: number, over: Partial<ListJob>): ListJob => ({ id, person: 'ana', repo: 'app', title: `J${id}`, submitted: `2026-11-17T10:0${id}:00Z`, state: 'ended', outcome: 'failed', ...over });
-  const rows = jobListView({ at: '2026-11-17T12:00:00Z', jobs: [job(1, { fix_rounds: 2 }), job(2, { fix_rounds: 0 }), job(3, {})], more: false } as JobListPage, false).rows;
-  assert.deepEqual(rows.map((r) => r.fixes), ['—', '0', '2']);
+  const rows = jobListView({ at: '2026-11-17T12:00:00Z', jobs: [job(1, { fix_rounds: 2 }), job(2, { fix_rounds: 0 }), job(3, {})], more: false, totals: { jobs: 3, merged: 0, failed: 3, cost_usd: 0 } } as JobListPage, false).rows;
+  assert.deepEqual(rows.map((r) => r.fixes), ['2', '0', '—']);
 });
