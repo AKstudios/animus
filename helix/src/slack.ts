@@ -45,11 +45,54 @@ type Core = { store: Store; config: Config };
 type Jobs = Pick<Supervisor, 'answer' | 'cancel' | 'submit' | 'progress'>;
 
 const CANCEL = 'cancel_job';
-/** A thread's opening post: its text, and the Cancel button while the job can still be cancelled. */
-const openingBlocks = (id: number, text: string, button: boolean) => [
-  { type: 'section', text: { type: 'mrkdwn', text } },
-  ...(button ? [{ type: 'actions', elements: [{ type: 'button', action_id: CANCEL, value: String(id), text: { type: 'plain_text', text: 'Cancel job' } }] }] : []),
-];
+const mrkdwn = (text: string) => ({ type: 'section', text: { type: 'mrkdwn', text } });
+
+/** The state a job's card shows, in words. */
+function stateWord(job: HelixJob): string {
+  if (job.state === 'running') return 'Running';
+  if (job.state === 'cancelled') return 'Cancelled';
+  if (job.state !== 'ended') return 'Queued';
+  if (job.outcome === 'needs-input') return 'Needs input';
+  if (job.pr) return 'Pull request opened';
+  return job.outcome === 'refused' ? 'Refused' : 'Failed';
+}
+
+/**
+ * A job's card, the thread's opening post: title, project and number, state,
+ * labelled links, and the Cancel button while the job can be cancelled. Never
+ * the question or the reason; the thread's replies carry those. text is the
+ * one line Slack shows in a notification.
+ */
+export function jobCard(job: HelixJob, config: Pick<Config, 'url' | 'lan_url'> = {}): { text: string; blocks: unknown[] } {
+  const state = stateWord(job);
+  const pages = ([[config.url, 'Tailscale'], [config.lan_url, 'office network']] as const)
+    .filter(([base]) => base)
+    .map(([base, label]) => `<${base!.replace(/\/+$/, '')}/jobs/${job.id}|${label}>`);
+  return {
+    text: `Job ${job.id}: ${job.title}, ${state}`,
+    blocks: [
+      { type: 'header', text: { type: 'plain_text', text: job.title.slice(0, 150) } },
+      { type: 'context', elements: [{ type: 'mrkdwn', text: `Project ${job.repo}, job ${job.id}` }] },
+      mrkdwn(`*State:* ${state}`),
+      ...(pages.length ? [mrkdwn(`*Job page:* ${pages.join(', ')}`)] : []),
+      ...(job.pr ? [mrkdwn(`*Pull request:* <${job.pr}|Open pull request>`)] : []),
+      ...(jobIsOver(job) ? [] : [{ type: 'actions', elements: [{ type: 'button', action_id: CANCEL, value: String(job.id), text: { type: 'plain_text', text: 'Cancel job' } }] }]),
+    ],
+  };
+}
+
+/** What a job's thread is told of an event, with the detail the card leaves out; nothing for a start, a resume or a cancel, which others announce. */
+export function jobReply(job: HelixJob): { text: string; blocks: unknown[] } | undefined {
+  if (job.state !== 'ended') return undefined;
+  const said = (text: string, detail?: string) => ({ text: detail ? `${text}\n${detail}` : text, blocks: [mrkdwn(text), ...(detail ? [mrkdwn(detail)] : [])] });
+  if (job.outcome === 'needs-input') {
+    const quote = (job.question ?? '').split('\n').map((l) => `> ${l}`).join('\n');
+    return said(`Job ${job.id} needs input. Reply in this thread to answer it, or run \`animus answer ${job.id} "<your answer>"\`.`, quote);
+  }
+  if (job.pr) return said(`Job ${job.id} opened a pull request: <${job.pr}|Open pull request>`);
+  const reason = (job.reason ?? job.outcome ?? '').replace(/```/g, "'''");
+  return said(`Job ${job.id} ${job.outcome === 'refused' ? 'was refused' : 'failed'}:`, `\`\`\`${reason}\`\`\``);
+}
 
 /** Where a job's page is, at each address Helix has set; never with a token. */
 export const jobLinks = (config: Pick<Config, 'url' | 'lan_url'>, id: number): string[] =>
@@ -105,7 +148,7 @@ export function slackBot(transport: Transport, opts: Core & { supervisor?: Jobs;
         return said ? reply(said) : undefined;
       }
       if (event.action !== CANCEL || !supervisor) return;
-      const said = await cancelJob(transport, store, supervisor, owner, byOwner, person, event.user, Number(event.value), event.value);
+      const said = await cancelJob(transport, store, config, supervisor, owner, byOwner, person, event.user, Number(event.value), event.value);
       return said ? reply(said) : undefined;
     }
     const [sub, ...args] = event.text.trim().split(/\s+/);
@@ -114,7 +157,7 @@ export function slackBot(transport: Transport, opts: Core & { supervisor?: Jobs;
     if (sub === 'job') return reply(jobCommand(store, supervisor, owner, byOwner, person, args[0]));
     if (sub === 'cancel') {
       if (!supervisor) return;
-      const said = await cancelJob(transport, store, supervisor, owner, byOwner, person, event.user, jobNumber(args[0]), args[0] ?? '');
+      const said = await cancelJob(transport, store, config, supervisor, owner, byOwner, person, event.user, jobNumber(args[0]), args[0] ?? '');
       return reply(said ?? `Job ${jobNumber(args[0])} was cancelled.`);
     }
     if (sub === 'status') return reply(statusCommand(store, config));
@@ -151,14 +194,14 @@ const jobNumber = (word = ''): number | undefined => /^#?\d+$/.test(word) ? Numb
  * and tells its thread. Returns what to tell the sender when it did not,
  * nothing when it did.
  */
-async function cancelJob(transport: Transport, store: Store, supervisor: Jobs, owner: string, byOwner: boolean, person: string, user: string, id: number | undefined, typed: string): Promise<string | undefined> {
+async function cancelJob(transport: Transport, store: Store, config: Config, supervisor: Jobs, owner: string, byOwner: boolean, person: string, user: string, id: number | undefined, typed: string): Promise<string | undefined> {
   const job = id === undefined ? undefined : store.get(id);
   if (!job) return `There is no job ${typed}.`;
   if (!byOwner && job.person !== person) return `Only ${job.person} or ${owner} may cancel job ${job.id}.`;
   if (jobIsOver(job)) {
     // A button left on an old message, or a command for a finished job: say so and take the thread's button off.
     const thread = store.slackThread(job.id);
-    if (thread) { const text = progress(job) ?? `Job ${job.id} has ended.`; await transport.update(thread.channel, thread.ts, text, openingBlocks(job.id, text, false)); }
+    if (thread) { const card = jobCard(job, config); await transport.update(thread.channel, thread.ts, card.text, card.blocks); }
     return `Job ${job.id} has already ended.`;
   }
   try {
@@ -248,44 +291,37 @@ function projectCommand(store: Store, person: string, channel: string, args: str
   return `Drafts started here are for ${name} now, unless their message links an issue of another project.`;
 }
 
-/** What a job that just started or ended says in its thread; nothing for a state no one is told of. */
-function progress(job: HelixJob, links: string[] = []): string | undefined {
-  if (job.state === 'running') return [job.animus_job ? `Job ${job.id} resumed` : `Job ${job.id} started: ${job.title} (${job.repo})`, ...links].join('\n');
-  if (job.state === 'cancelled') return `Job ${job.id} was cancelled`;
-  if (job.state !== 'ended') return undefined;
-  if (job.outcome === 'needs-input') return `Job ${job.id} needs input: ${job.question}\nReply in this thread to answer it, or run animus answer ${job.id} "<your answer>"`;
-  if (job.pr) return `Job ${job.id} opened a pull request: ${job.pr}`;
-  return `Job ${job.id} ${job.outcome === 'refused' ? 'was refused' : 'failed'}: ${job.reason ?? job.outcome}`;
-}
-
 /**
- * The supervisor's notify for a Slack bot: a linked person's job posts each
- * step to one DM thread of its own, the first post opening it, unless the
- * person turned notifications off. Posts go out one at a time, so a job that
- * ends at once still finds the thread its start opened.
+ * The supervisor's notify for a Slack bot: a linked person's job opens one DM
+ * thread of its own with its card, which is updated in place at each change,
+ * and the thread is replied to for the events that have detail to say, unless
+ * the person turned notifications off. Posts go out one at a time, so a job
+ * that ends at once still finds the thread its start opened.
  */
 export function slackNotifier(transport: Pick<Transport, 'dm' | 'post' | 'update'>, store: Store, say: (line: string) => void = () => {}, config: Pick<Config, 'url' | 'lan_url'> = {}): (job: HelixJob) => void {
   let last = Promise.resolve();
-  const post = async (job: HelixJob, text: string, user: string) => {
-    const thread = store.slackThread(job.id);
-    // The opening post shows the outcome without the button once the job is over, and has it back when an answered job resumes.
-    const blocks = openingBlocks(job.id, text, job.state === 'running');
+  const post = async (job: HelixJob, user: string) => {
+    // Only a start, a resume or an end is shown; a queued or waiting job is not told of.
+    if (job.state !== 'running' && job.state !== 'ended' && job.state !== 'cancelled') return;
+    const card = jobCard(job, config);
+    const reply = jobReply(job);
+    let thread = store.slackThread(job.id);
     if (thread) {
-      // A cancelled job is announced by whoever cancelled it; only its opening post changes.
-      if (job.state !== 'cancelled') await transport.post(thread.channel, text, thread.ts);
-      await transport.update(thread.channel, thread.ts, text, blocks);
-      return;
+      await transport.update(thread.channel, thread.ts, card.text, card.blocks);
+    } else {
+      // A cancelled job that never had a thread is not given one.
+      if (job.state === 'cancelled') return;
+      const channel = await transport.dm(user);
+      thread = { channel, ts: await transport.post(channel, card.text, undefined, card.blocks) };
+      store.putSlackThread(job.id, thread);
     }
-    if (job.state === 'cancelled') return;
-    const channel = await transport.dm(user);
-    store.putSlackThread(job.id, { channel, ts: await transport.post(channel, text, undefined, blocks) });
+    if (reply) await transport.post(thread.channel, reply.text, thread.ts, reply.blocks);
   };
   return (job) => {
     // Who is told, and whether, is settled when it happens, not when the post goes out.
-    const text = progress(job, jobLinks(config, job.id));
     const user = store.slackOf(job.person);
-    if (!text || !user || !store.notifies(job.person)) return;
-    last = last.then(() => post(job, text, user)).catch((err: unknown) => say(`Slack: job ${job.id}'s post failed: ${(err as Error).message}`));
+    if (!user || !store.notifies(job.person)) return;
+    last = last.then(() => post(job, user)).catch((err: unknown) => say(`Slack: job ${job.id}'s post failed: ${(err as Error).message}`));
   };
 }
 

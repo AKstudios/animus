@@ -52,52 +52,77 @@ async function helix(links: Pick<Config, 'url' | 'lan_url'> = {}) {
   return { store, slack, supervisor, posts, settled, stop };
 }
 
-// Protects: criterion 6, a job submitted with animus submit. Fails when: a linked person's job posts nothing, its PR link is missing, or its posts open a second thread instead of replying in the first.
-test('a linked person\'s job from animus submit posts started, then its pull request, in one DM thread', async () => {
-  const h = await helix();
+const flat = (x: unknown) => JSON.stringify(x);
+const EMOJI = /\p{Extended_Pictographic}|:[a-z0-9_+-]+:/u;
+const buttons = (blocks?: unknown[]) => (blocks as { type: string }[]).filter((b) => b.type === 'actions').length;
+
+// Protects: criteria 1, 2 and 6, a job from animus submit. Fails when: the start is also a reply, the card lacks its parts, the end repeats the card, or anything holds an emoji.
+test('a job from animus submit opens its DM thread with a card, updated to Pull request opened with one reply that differs from it', async () => {
+  const h = await helix({ url: 'https://helix.tail.ts.net/', lan_url: 'http://10.0.0.5:7777' });
 
   const job = await client.submit({ repo: 'app', spec: SPEC('add login'), name: 'spec.md' });
   await h.settled(job.id, 2);
-  await until('the opening post to be updated', () => h.slack.sent.length >= 4);
+  await until('the card update', () => updates(h).length >= 1);
 
   h.stop();
-  assert.deepEqual(h.slack.sent, [
-    { method: 'dm', user: 'U0ANA' },
-    {
-      method: 'post', channel: 'D-U0ANA', text: `Job ${job.id} started: add login (app)`,
-      blocks: [
-        { type: 'section', text: { type: 'mrkdwn', text: `Job ${job.id} started: add login (app)` } },
-        { type: 'actions', elements: [{ type: 'button', action_id: 'cancel_job', value: String(job.id), text: { type: 'plain_text', text: 'Cancel job' } }] },
-      ],
-    },
-    { method: 'post', channel: 'D-U0ANA', thread: 'ts-2', text: `Job ${job.id} opened a pull request: https://example.test/pr/add-login` },
-    { method: 'update', channel: 'D-U0ANA', ts: 'ts-2', text: `Job ${job.id} opened a pull request: https://example.test/pr/add-login`, blocks: [{ type: 'section', text: { type: 'mrkdwn', text: `Job ${job.id} opened a pull request: https://example.test/pr/add-login` } }] },
-  ]);
+  const [dm, card, update, reply] = h.slack.sent as Extract<Sent, { method: 'post' | 'update' }>[];
+  assert.deepEqual(dm, { method: 'dm', user: 'U0ANA' } as never);
+  assert.equal(card!.method, 'post');
+  assert.equal((card as { thread?: string }).thread, undefined);
+  assert.equal(card!.text, `Job ${job.id}: add login, Running`);
+  assert.deepEqual((card!.blocks as { type: string; text?: { text: string } }[]).slice(0, 2).map((b) => b.type), ['header', 'context']);
+  assert.equal((card!.blocks![0] as { text: { text: string } }).text.text, 'add login');
+  assert.match(flat(card!.blocks), new RegExp(`Project app, job ${job.id}`));
+  assert.match(flat(card!.blocks), /State:\* Running/);
+  assert.match(flat(card!.blocks), new RegExp(`<https://helix.tail.ts.net/jobs/${job.id}\\|Tailscale>`));
+  assert.match(flat(card!.blocks), new RegExp(`<http://10.0.0.5:7777/jobs/${job.id}\\|office network>`));
+  assert.equal(buttons(card!.blocks), 1);
+  assert.equal(h.posts().length, 2);
+  assert.equal(reply!.method, 'post');
+  assert.equal((reply as { thread?: string }).thread, 'ts-2');
+  assert.match(reply!.text, /https:\/\/example.test\/pr\/add-login/);
+  assert.equal(update!.method, 'update');
+  assert.match(flat(update!.blocks), /State:\* Pull request opened/);
+  assert.match(flat(update!.blocks), /example.test\/pr\/add-login/);
+  assert.equal(buttons(update!.blocks), 0);
+  assert.notEqual(reply!.text, update!.text);
+  assert.notDeepEqual(reply!.blocks, update!.blocks);
+  assert.doesNotMatch(flat(h.slack.sent), EMOJI);
 });
 
-// Protects: criterion 6, needs input and failed, for a job however it reached the supervisor. Fails when: the question or the reason is left out, or an answered job's later posts leave its thread.
-test('a job that asks posts its question and, once answered, carries on in its thread; one that fails posts why', async () => {
+// Protects: criterion 3. Fails when: the question is on the card, is not a quote, the answer is announced twice, or a failure's reason is not set apart.
+test('a job that asks quotes its question in a reply, not on the card, and once answered the card is Running again; a failure replies with its reason apart', async () => {
   const h = await helix();
 
   const asked = h.supervisor.submit('ana', { repo: 'app', spec: SPEC('ask me'), name: 'spec.md' });
   await h.settled(asked.id, 2);
+  await until('the needs-input update', () => updates(h).length >= 1);
   h.supervisor.answer('ana', asked.id, 'the second');
-  await h.settled(asked.id, 4);
+  await h.settled(asked.id, 3);
+  await until('three updates', () => updates(h).length >= 3);
   const failed = h.supervisor.submit('ana', { repo: 'app', spec: SPEC('fail hard'), name: 'spec.md' });
-  await h.settled(failed.id, 6);
+  await h.settled(failed.id, 5);
+  await until('the failure card', () => updates(h).length >= 4);
 
   h.stop();
-  assert.deepEqual(h.posts().map(({ thread, text }) => [thread, text]), [
-    [undefined, `Job ${asked.id} started: ask me (app)`],
-    ['ts-2', `Job ${asked.id} needs input: which one?\nReply in this thread to answer it, or run animus answer ${asked.id} "<your answer>"`],
-    ['ts-2', `Job ${asked.id} resumed`],
-    ['ts-2', `Job ${asked.id} opened a pull request: https://example.test/pr/ask-me`],
-    [undefined, `Job ${failed.id} started: fail hard (app)`],
-    ['ts-10', `Job ${failed.id} failed: the gates failed`],
-  ]);
+  const [, ask, , ...rest] = h.posts();
+  assert.match(ask!.text, /> which one\?/);
+  assert.match(ask!.text, new RegExp(`animus answer ${asked.id}`));
+  assert.match(ask!.text, /Reply in this thread/);
+  assert.doesNotMatch(flat(updates(h)[0]!.blocks), /which one/);
+  assert.match(flat(updates(h)[0]!.blocks), /State:\* Needs input/);
+  assert.deepEqual(updates(h).slice(0, 3).map((u) => [/Running/.test(flat(u.blocks)), buttons(u.blocks)]), [[false, 0], [true, 1], [false, 0]]);
+  // The resume posts no reply of its own: the thread holds the card, the question, then the pull request.
+  assert.equal(h.posts().filter((p) => p.thread === 'ts-2').length, 2);
+  const reason = h.posts().find((p) => /failed/.test(p.text))!;
+  assert.match(reason.text, /```the gates failed```/);
+  assert.match(flat(updates(h).at(-1)!.blocks), /State:\* Failed/);
+  assert.doesNotMatch(flat(updates(h).at(-1)!.blocks), /gates failed/);
+  assert.equal(rest.length, 2);
+  assert.doesNotMatch(flat(h.slack.sent), EMOJI);
 });
 
-// Protects: criterion 6, notify off and on. Fails when: /helix notify off does not stop a person's posts, on does not bring them back, or an unlinked person's job posts anywhere.
+// Protects: notify off and on. Fails when: /helix notify off does not stop a person's posts, on does not bring them back, or an unlinked person's job posts anywhere.
 test('/helix notify off stops a person\'s job posts and /helix notify on starts them again; an unlinked person\'s job posts nothing', async () => {
   const h = await helix();
 
@@ -114,32 +139,13 @@ test('/helix notify off stops a person\'s job posts and /helix notify on starts 
     { method: 'respond', url: 'https://hooks.slack.com/commands/T0/1/x', text: 'Job notifications are off. /animus notify on starts them again.' },
     { method: 'respond', url: 'https://hooks.slack.com/commands/T0/1/y', text: 'Job notifications are on: each of your jobs posts its progress to a thread in our DM.' },
   ]);
-  assert.deepEqual(h.posts().map((p) => p.text), [`Job ${loud.id} started: loud (app)`, `Job ${loud.id} opened a pull request: https://example.test/pr/loud`]);
+  assert.deepEqual(h.posts().map((p) => p.text), [`Job ${loud.id}: loud, Running`, `Job ${loud.id} opened a pull request: <https://example.test/pr/loud|Open pull request>`]);
 });
 
 const updates = (h: Awaited<ReturnType<typeof helix>>) => h.slack.sent.filter((s): s is Extract<Sent, { method: 'update' }> => s.method === 'update');
-const hasButton = (u: { blocks?: unknown[] }) => (u.blocks as { type: string }[]).some((b) => b.type === 'actions');
 
-// Protects: criteria 1 and 2. Fails when: a link is missing, mislabelled or carries a token, or the opening post keeps its button once the job asks, or lacks it after resuming.
-test('start and resume posts link the job page at each address set; the opening post loses Cancel when the job needs input and has it back on resume', async () => {
-  const h = await helix({ url: 'https://helix.tail.ts.net/', lan_url: 'http://10.0.0.5:7777' });
-
-  const asked = h.supervisor.submit('ana', { repo: 'app', spec: SPEC('ask me'), name: 'spec.md' });
-  await h.settled(asked.id, 2);
-  await until('the needs-input update', () => updates(h).length >= 1);
-  h.supervisor.answer('ana', asked.id, 'the second');
-  await h.settled(asked.id, 4);
-  await until('three updates', () => updates(h).length >= 3);
-
-  h.stop();
-  const links = `\nTailscale: https://helix.tail.ts.net/jobs/${asked.id}\noffice network: http://10.0.0.5:7777/jobs/${asked.id}`;
-  assert.deepEqual(h.posts().map((p) => p.text).slice(0, 3), [`Job ${asked.id} started: ask me (app)${links}`, h.posts()[1]!.text, `Job ${asked.id} resumed${links}`]);
-  assert.deepEqual(updates(h).map((u) => [u.ts, hasButton(u)]), [['ts-2', false], ['ts-2', true], ['ts-2', false]]);
-  assert.match(updates(h)[0]!.text, /needs input: which one\?/);
-});
-
-// Protects: criteria 1 and 2, cancelling. Fails when: a job with no addresses set mentions links, or a cancelled job's opening post keeps its button.
-test('with no address set a post has no links; cancelling a running job updates its opening post without the button', async () => {
+// Protects: criterion 4, a cancel with no thread reply from the notifier. Fails when: a cancelled job's card keeps its button or says anything but Cancelled, or the notifier adds a reply of its own.
+test('with no address set the card has no job page; cancelling a running job updates the card to Cancelled without the button and replies nothing', async () => {
   const h = await helix();
 
   const job = h.supervisor.submit('ana', { repo: 'app', spec: SPEC('ask me'), name: 'spec.md' });
@@ -147,10 +153,11 @@ test('with no address set a post has no links; cancelling a running job updates 
   await until('the thread', () => h.store.slackThread(job.id) !== undefined);
   h.store.save({ ...h.store.get(job.id)!, state: 'running', ended: undefined, outcome: undefined });
   h.supervisor.cancel('ana', job.id);
-  await until('the cancel update', () => updates(h).some((u) => /cancelled/.test(u.text)));
+  await until('the cancel update', () => updates(h).some((u) => /Cancelled/.test(flat(u.blocks))));
 
   h.stop();
-  assert.equal(h.posts()[0]!.text, `Job ${job.id} started: ask me (app)`);
-  assert.equal(updates(h).at(-1)!.text, `Job ${job.id} was cancelled`);
-  assert.equal(hasButton(updates(h).at(-1)!), false);
+  assert.doesNotMatch(flat(h.posts()[0]!.blocks), /Job page/);
+  assert.equal(buttons(updates(h).at(-1)!.blocks), 0);
+  assert.equal(updates(h).at(-1)!.text, `Job ${job.id}: ask me, Cancelled`);
+  assert.equal(h.posts().filter((p) => /cancel/i.test(p.text) && p.thread).length, 0);
 });

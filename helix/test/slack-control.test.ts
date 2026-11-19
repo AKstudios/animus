@@ -264,11 +264,10 @@ test('pressing Cancel job on a job that is already over replies privately and re
   await h.slack.deliver(press('U0ANA', job.id));
   h.stop();
 
-  const text = `Job ${job.id} was cancelled`;
-  assert.deepEqual(h.slack.sent, [
-    { method: 'update', channel: 'D0ANA', ts: '9.1', text, blocks: [{ type: 'section', text: { type: 'mrkdwn', text } }] },
-    { method: 'respond', url: URL, text: `Job ${job.id} has already ended.` },
-  ]);
+  const [update, said] = h.slack.sent as { text: string; blocks: { type: string }[] }[];
+  assert.equal(update!.text, `Job ${job.id}: too late, Cancelled`);
+  assert.equal(update!.blocks.some((b) => b.type === 'actions'), false);
+  assert.equal(said!.text, `Job ${job.id} has already ended.`);
 });
 
 // Protects: criterion 4. Fails when: /helix me omits a part of the profile, lists another person's or more than five ended jobs, links the wrong page, or shows a token hash.
