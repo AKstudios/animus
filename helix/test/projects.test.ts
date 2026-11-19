@@ -148,8 +148,9 @@ function toCheck(profile?: string) {
   return { home, store, said, say: (line: string) => said.push(line) };
 }
 
-test('the check clones the project, reads its profile, runs its setup once in a worktree on the base, and takes it', () => {
-  const c = toCheck('commands:\n  test: grep -q done src/feature.txt\nsetup: echo "set up for $GH_TOKEN" > setup.txt\n');
+test('the check clones the project, reads its profile, runs its setup then every gate in full in a worktree on the base, and takes it', () => {
+  // A job would skip lint (nothing changed under its paths) or run its affected form; the check runs it in full, after setup.
+  const c = toCheck('commands:\n  lint:\n    run: grep -q github_pat_ana setup.txt\n    affected: exit 1\n    paths: [nothing/**]\n  test: "true"\nsetup: echo "set up for $GH_TOKEN" > setup.txt\n');
   let ranIn = '';
   const ok = checkProject({
     store: c.store, home: c.home, name: 'app', say: c.say,
@@ -160,7 +161,29 @@ test('the check clones the project, reads its profile, runs its setup once in a 
   assert.ok(existsSync(join(projectDir(c.home, 'app'), '.animus', 'animus.yaml')));
   assert.equal(ranIn, join(checkFolder(c.home, 'app'), 'setup'));
   assert.ok(!existsSync(ranIn), 'the worktree is removed after');
-  assert.ok(c.said.some((l) => /base main, gates test/.test(l)) && c.said.some((l) => l === 'setup passed'));
+  assert.ok(c.said.some((l) => /base main, gates lint, test/.test(l)) && c.said.some((l) => l === 'setup passed'));
+  assert.ok(c.said.some((l) => /^ {2}ok {3}lint: grep -q github_pat_ana setup\.txt/.test(l)), c.said.join('\n'));
+  assert.ok(c.said.some((l) => /^ {2}ok {3}test: true/.test(l)), c.said.join('\n'));
+  c.store.close();
+});
+
+// Protects: a project is ready only when a job could pass its gates. Fails when: a red gate on the base lets the add through, or its name and output are lost.
+test('a gate that fails on the base fails the add, with its name and the end of its output', () => {
+  const c = toCheck('commands:\n  lint: "true"\n  test: echo the test broke; exit 1\n');
+  assert.equal(checkProject({ store: c.store, home: c.home, name: 'app', say: c.say, setup: setupHere }), false);
+  const reason = c.store.project('app')!.reason!;
+  assert.match(reason, /--- test: echo the test broke; exit 1\nthe test broke/);
+  assert.doesNotMatch(reason, /--- lint/);
+  c.store.close();
+});
+
+// Protects: a flaky gate counts as in a job. Fails when: one that fails once and passes again fails the add.
+test('a gate that fails once and passes when run again counts as passed', () => {
+  // Outside the worktree, so the restore before the second run leaves it.
+  const c = toCheck('commands:\n  test: test -f ../tried || { touch ../tried; exit 1; }\n');
+  assert.equal(checkProject({ store: c.store, home: c.home, name: 'app', say: c.say, setup: setupHere }), true, c.said.join('\n'));
+  assert.equal(c.store.project('app')!.state, 'ready');
+  assert.ok(c.said.some((l) => /flaky: test failed, then passed/.test(l)), c.said.join('\n'));
   c.store.close();
 });
 
@@ -186,7 +209,7 @@ test('a project with no profile, or whose setup fails, is failed with why; one a
   const store = raced.store;
   const check = checkProject({
     store, home: raced.home, name: 'app', say: raced.say,
-    setup: () => { store.putProject({ ...store.project('app')!, added: '2026-11-17T00:00:00.000Z' }); return { code: 0, output: '' }; },
+    setup: () => { store.putProject({ ...store.project('app')!, added: '2026-11-17T00:00:00.000Z' }); return { code: 0, output: '', gates: [] }; },
   });
   assert.equal(check, true);
   assert.equal(store.project('app')!.state, 'checking', 'the newer add is its own check\'s to settle');
@@ -216,7 +239,7 @@ test('Helix runs the check as a helix check-project process of its own, whose ou
     const said = () => existsSync(checkLog(c.home, 'app')) && /is ready|failed:/.test(readFileSync(checkLog(c.home, 'app'), 'utf8'));
     for (let i = 0; i < 500 && (c.store.project('app')!.state === 'checking' || !said()); i++) await new Promise((r) => { setTimeout(r, 20); });
     assert.equal(c.store.project('app')!.state, 'ready', readFileSync(checkLog(c.home, 'app'), 'utf8'));
-    assert.match(readFileSync(checkLog(c.home, 'app'), 'utf8'), /^cloning [\s\S]*setup passed\napp is ready/m);
+    assert.match(readFileSync(checkLog(c.home, 'app'), 'utf8'), /^cloning [\s\S]*setup passed\n {2}ok {3}test: true[^\n]*\napp is ready/m);
   } finally {
     if (before === undefined) delete process.env.HELIX_HOME; else process.env.HELIX_HOME = before;
     c.store.close();

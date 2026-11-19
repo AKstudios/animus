@@ -2,7 +2,8 @@
 // needs it, the way `animus cleanup` does it on a laptop. `helix serve` runs
 // it once a day. Each person's Animus home gets `animus cleanup`, run as an
 // animus process with that person's credentials (their pull requests and
-// branches are theirs), and the job images of other releases go. Every
+// branches are theirs), and the job images of other releases go, with the
+// project images no project's current Dockerfile and job image give. Every
 // job's record stays for analysis: Helix's own folder of it (its spec and
 // log.txt), and the person's job folders and transcripts.
 import { spawnSync } from 'node:child_process';
@@ -10,7 +11,8 @@ import { existsSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { credentialEnv, personEnv } from './config.ts';
-import { imageName, personDirs } from './container.ts';
+import { docker, imageName, personDirs, type Docker } from './container.ts';
+import { currentDockerfile, PROJECT_IMAGE, projectImageName } from './project-image.ts';
 import type { Store } from './store.ts';
 
 const CLI = join(dirname(fileURLToPath(import.meta.url)), '..', '..', 'plugin', 'src', 'cli.ts');
@@ -18,14 +20,6 @@ const CLI = join(dirname(fileURLToPath(import.meta.url)), '..', '..', 'plugin', 
 /** How often `helix serve` cleans up, and how long after it starts it first does. */
 export const CLEANUP_EVERY_MS = 24 * 60 * 60 * 1000;
 export const CLEANUP_FIRST_MS = 10 * 60 * 1000;
-
-/** Runs docker; undefined when it is not there. Replaced in tests. */
-export type Docker = (args: string[]) => { status: number | null; stdout: string } | undefined;
-
-const docker: Docker = (args) => {
-  const r = spawnSync('docker', args, { encoding: 'utf8' });
-  return r.error ? undefined : { status: r.status, stdout: r.stdout ?? '' };
-};
 
 export type CleanupOptions = { home: string; contained: boolean; days: number; dryRun: boolean; docker?: Docker; fresh?: (person: string) => Promise<unknown> };
 
@@ -70,13 +64,23 @@ export async function helixCleanup(store: Store, opts: CleanupOptions & { versio
     for (const line of out.split('\n').filter(Boolean)) say(`  ${line}`);
   }
   const run = opts.docker ?? docker;
-  const ls = run(['image', 'ls', imageName('').replace(/:$/, ''), '--format', '{{.Tag}}']);
-  if (ls?.status === 0) {
-    for (const image of staleImages(ls.stdout.split('\n'), opts.version)) {
-      // An image a container still runs is refused by Docker, and tried again next time.
-      if (opts.dryRun || run(['image', 'rm', image])?.status === 0) say(`${would} ${image}`);
-      else say(`${image} could not be removed; it may still be in use`);
-    }
+  const tags = (repository: string) => {
+    const ls = run(['image', 'ls', repository, '--format', '{{.Tag}}']);
+    return ls?.status === 0 ? ls.stdout.split('\n').filter((t) => t && t !== '<none>') : [];
+  };
+  const jobImage = run(['image', 'inspect', '--format', '{{.Id}}', imageName(opts.version)]);
+  const current = new Set(jobImage?.status === 0 ? store.projects().flatMap((p) => {
+    const dockerfile = currentDockerfile(p.dir);
+    return dockerfile === undefined ? [] : [projectImageName(dockerfile, jobImage.stdout.trim())];
+  }) : []);
+  const stale = [
+    ...staleImages(tags(imageName('').replace(/:$/, '')), opts.version),
+    ...tags(PROJECT_IMAGE).map((t) => `${PROJECT_IMAGE}:${t}`).filter((image) => !current.has(image)),
+  ];
+  for (const image of stale) {
+    // An image a container still runs is refused by Docker, and tried again next time.
+    if (opts.dryRun || run(['image', 'rm', image])?.status === 0) say(`${would} ${image}`);
+    else say(`${image} could not be removed; it may still be in use`);
   }
   return ok;
 }

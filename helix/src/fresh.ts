@@ -23,6 +23,12 @@ const baseOf = (text: string | undefined): string | undefined => {
   try { return parseProfile(text).base; } catch { return undefined; }
 };
 
+/** The base branch the clone's checked-out profile names, `main` when it names none. */
+export const cloneBase = (dir: string): string => {
+  const file = join(dir, PROFILE_PATH);
+  return baseOf(existsSync(file) ? readFileSync(file, 'utf8') : undefined) ?? 'main';
+};
+
 /**
  * Fetches the project's base branch and returns the commit GitHub has it at.
  * The base is the profile's `base` as GitHub has it: the clone's profile says
@@ -30,8 +36,7 @@ const baseOf = (text: string | undefined): string | undefined => {
  * another. Throws why when the fetch fails.
  */
 export function freshBase(dir: string, env: Record<string, string> = {}): string {
-  const file = join(dir, PROFILE_PATH);
-  let base = baseOf(existsSync(file) ? readFileSync(file, 'utf8') : undefined) ?? 'main';
+  let base = cloneBase(dir);
   // shortcut: a profile that names a base that names another is followed twice, then the third is taken as it is.
   for (let tries = 0; ; tries++) {
     const got = git(dir, ['fetch', '--quiet', 'origin', `+refs/heads/${base}:refs/remotes/origin/${base}`], env);

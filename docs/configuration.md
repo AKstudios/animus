@@ -49,6 +49,41 @@ your machine the profile is read from your checkout; on Helix, from the
 project's base branch as GitHub has it, so a profile fix counts once it is
 pushed.
 
+## The project image
+
+On a Helix whose jobs run in containers, every job runs in the job image
+(Node, git, gh, Python, uv, Claude Code and a browser). A project that needs
+more, such as Go or a system library, commits `.animus/Dockerfile` on its
+base branch, built on top of the job image:
+
+```dockerfile
+ARG ANIMUS_JOB
+FROM $ANIMUS_JOB
+USER root
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends golang libvips-dev \
+ && rm -rf /var/lib/apt/lists/*
+```
+
+- It must start with `ARG ANIMUS_JOB` then `FROM $ANIMUS_JOB` (comments and
+  blank lines aside). Helix passes the job image as that argument, and
+  refuses a Dockerfile that starts any other way.
+- It is built with no files: the Dockerfile alone, with no build context,
+  so `COPY` and `ADD` of the repo's files do not work. Download what you
+  need in a `RUN`. The build gets no secrets and no one's tokens, and is
+  stopped after 30 minutes.
+- The job image ends on `USER animus`; switch to `root` to install system
+  packages. Whatever `USER` it ends on, a job runs as the same user as
+  without the Dockerfile, so install tools where everyone can run them
+  (`/usr/local`, the system's package manager), not in root's home.
+- Like the profile it is read from the base branch as GitHub has it: a
+  change counts once it is merged, never in the job that makes it.
+
+Helix builds it when the project is added, and before a job when the image
+is missing because the Dockerfile or the job image changed
+([helix.md](helix.md#project-images)). On your own machine there is no
+container, so the Dockerfile is not read: your machine is the environment.
+
 ## Task profiles
 
 [plugin/config/profiles.yaml](../plugin/config/profiles.yaml) is the one file

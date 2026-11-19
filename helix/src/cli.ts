@@ -19,7 +19,8 @@ import { checkComments, commentWatcher, githubNotifier } from './github-comments
 import { addPerson, addRepo, configFile, envFileVars, helixHome, identityEnv, importRegistry, loadConfig, readyRepos, removeRepo } from './config.ts';
 import { ensureSetup } from '../../plugin/src/workspace.ts';
 import { loadProfile } from '../../plugin/src/profile.ts';
-import { checkInChild, checkProject, failInterruptedChecks, forgetProject, setupHere, setupInContainer } from './projects.ts';
+import { checkInChild, checkProject, failInterruptedChecks, forgetProject, setupAndGates, setupHere, setupInContainer } from './projects.ts';
+import { jobImageOf, projectImage } from './project-image.ts';
 import { INVITE_HOURS, invite, takeOff } from './join.ts';
 import { ask } from '../../plugin/src/join.ts';
 import { describeInvite, describeRemoval } from '../../plugin/src/remote.ts';
@@ -122,7 +123,8 @@ const USAGE = `helix: runs Animus jobs for several people on one machine
         Remove what finished jobs leave on this machine: animus cleanup in
         each person's Animus home, with their credentials (a merged or
         closed pull request's worktree at once, its branches --days after,
-        default ${KEEP_DAYS}), and the job images of other releases. Job folders,
+        default ${KEEP_DAYS}), the job images of other releases, and the
+        project images no project's current Dockerfile gives. Job folders,
         logs and transcripts are kept. helix serve runs it once a day.
   helix slack setup
         Turn on the Slack bot: asks for the Slack app's bot token (xoxb-),
@@ -185,6 +187,7 @@ function main(argv: string[]): number | undefined | Promise<number> {
         if (problem) throw new AnimusError(`config.yaml asks for containers, but ${problem}`);
         isolation = {
           launch: containerLaunch({ home, animusRoot: ROOT, image, limits: config.container, uid: uid(), gid: gid() }),
+          image: jobImageOf({ jobImage: image }),
           reap: removeContainer,
           animusHomeOf: (person: string) => personDirs(home, person).animus,
         };
@@ -337,10 +340,13 @@ function main(argv: string[]): number | undefined | Promise<number> {
       const name = positionals[0];
       if (!name) throw new AnimusError('usage: helix check-project <name>');
       const config = loadConfig();
-      const setup = config.container
-        ? setupInContainer({ animusRoot: ROOT, image: imageName(animusVersion()), limits: config.container, uid: uid(), gid: gid(), name })
-        : setupHere;
-      return withStore((store) => (checkProject({ store, home: helixHome(), name, setup, say: (line) => console.log(line) }) ? 0 : 1));
+      const jobImage = imageName(animusVersion());
+      const say = (line: string) => console.log(line);
+      const contained = config.container && {
+        setup: setupInContainer({ animusRoot: ROOT, image: jobImage, limits: config.container, uid: uid(), gid: gid(), name }),
+        image: (dockerfile: string | undefined, base: string) => projectImage({ dockerfile, base, jobImage, say }),
+      };
+      return withStore((store) => (checkProject({ store, home: helixHome(), name, say, ...(contained || { setup: setupHere }) }) ? 0 : 1));
     }
     case 'fresh-base': {
       // Run inside a job's container, before animus: the clone's base branch as GitHub has it, with the job's credentials from the environment.
@@ -349,10 +355,10 @@ function main(argv: string[]): number | undefined | Promise<number> {
       return 0;
     }
     case 'setup': {
-      // Run by a project's check, in the job image when jobs run in one: the profile's installs and setup in a worktree.
+      // Run by a project's check, in the project's image when jobs run in one: the profile's installs and setup, then every gate, in a worktree.
       const dir = positionals[0];
       if (!dir) throw new AnimusError('usage: helix setup <worktree>');
-      ensureSetup(dir, loadProfile(dir), (line) => console.log(line));
+      setupAndGates(dir, (line) => console.log(line));
       return 0;
     }
     case 'remove-repo': {
