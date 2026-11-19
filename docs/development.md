@@ -33,8 +33,9 @@ The rules about agents, skills, state and releases are in
 
 The maintainer keeps what is built, what is next and what has never run
 against a real session in `notes/handoff.md`, outside git, since it names
-their machines and network. User-facing changes go in
-`CHANGELOG.md`'s Unreleased section ([releases.md](releases.md)).
+their machines and network. The release notes are
+written from the merged pull requests ([releases.md](releases.md)); a pull
+request does not touch `CHANGELOG.md`.
 
 ## From orbit
 

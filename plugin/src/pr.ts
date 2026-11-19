@@ -18,6 +18,8 @@ export type PrInput = {
   /** The implementer's one-sentence account of the change. */
   summary: string;
   notes?: string;
+  /** What the change breaks and what a person must do; the pull request says it under a Breaking heading. */
+  breaking?: string;
   /** The last gate run. */
   gates: readonly CheckResult[];
   gateAttempts: number;
@@ -65,6 +67,8 @@ export function prBody(p: PrInput): string {
     out.push('');
   } else if (p.summary) out.push(p.summary, '');
   if (p.closes) out.push(`${p.issueLink === 'refs' ? 'Refs' : 'Closes'} #${p.closes}`, '');
+
+  if (p.breaking) out.push('## Breaking', '', p.breaking.trim(), '');
 
   const here: string[] = [];
   if (p.failure && p.failure.includes('\n')) here.push(`- The failure in full:\n\n\`\`\`\n${tail(p.failure)}\n\`\`\``);

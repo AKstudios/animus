@@ -85,6 +85,21 @@ test('a fix starts a fresh session from a handoff when the last session ended ov
   assert.match(a.calls[1]!.prompt, /Say it twice/);
 });
 
+// Protects: references of a fix from an /animus fix comment. Fails when: the review comments Helix fetched into the references folder do not reach the implementer.
+test('a fix given a references folder tells the implementer what is in it', async () => {
+  const repo = makeRepo();
+  const first = await opened(repo, 'session-job');
+  const references = mkdtempSync(join(tmpdir(), 'animus-references-'));
+  write(references, '1-review-500.md', 'Review by bob-gh:\n\nRename the button\n');
+  write(references, '2-comment-700.md', 'bob-gh on src/login.ts line 1:\n\nTypo in this label\n');
+  const { state } = fixTarget(repo, '1', () => 'OPEN');
+  const a = fakeAgent([say('done, again'), () => clean()]);
+
+  await runJob({ repo, fix: { of: first.job, from: state!, ask: 'Say it twice', pr: first.pr!, references } }, deps(a.agent));
+
+  assert.match(a.calls[0]!.prompt, /Say it twice[\s\S]*Rename the button[\s\S]*src\/login\.ts line 1:\n\nTypo in this label/);
+});
+
 // Protects: criterion 3 of the fix spec. Fails when: the fix starts from the local branch and loses or overwrites a hand push, or the implementer is not told about it.
 test('a fix starts from the branch as GitHub has it and tells the implementer the commits it lacked', async () => {
   const repo = makeRepo();

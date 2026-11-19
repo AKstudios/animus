@@ -1,13 +1,25 @@
 # Changelog
 
-What each release changes, newest first. `node scripts/release.ts` turns
-Unreleased into the release it cuts. Mark anything that breaks the HTTP API, a
-spec, a profile or a job's files with **Breaking**: such a release bumps the
+What each release changes, newest first. `node scripts/release.ts` writes
+each release from the merged pull requests, so a pull request does not edit
+this file. What breaks the HTTP API, a spec, a profile or a job's files is
+marked **Breaking**: such a release bumps the
 minor version before 1.0 and the major after, and Helix then refuses older
 clients with how to update.
 
 ## Unreleased
 
+- Pull requests no longer touch CHANGELOG.md: `npm run release` writes the release's notes from the merged pull requests, and a job's pull request has a `## Breaking` section when its implementer reports a breaking change (the report gains an optional `breaking`). The `changelog` gate is gone; `npm run changelog` stays as a no-op until a later change drops it.
+- `/animus fix <what to change>` on an open pull request a job opened, from
+  the job's person or the owner, gets 👀 and queues a fix on Helix with the
+  pull request's reviews and inline comments since the last push as
+  references (`animus fix --references <dir>`). A plain `/animus` there, a
+  fix from anyone else, on a pull request no job opened, a merged or closed
+  one or one with a fix already queued, running or waiting gets a one-line
+  reply and queues nothing. The fix comments on the pull request when it
+  pushed (what changed, its cost, its job page), failed or was refused (the
+  reason) or asks a question, and nothing in between; `/animus answer <text>`
+  and `/animus cancel` on the pull request act on it.
 - The job page tells what the run cost and what came of it: the third number is fix rounds (with the gate runs), the Pull request panel adds the commits and lines people added after the job and, once merged, the 30-day watch, an Agents panel shows cost by role and tier with each one's sessions, tool calls and failed calls, "What this run taught" lists the lessons citing the job, a flaky check is a chip, each review finding says its fate, and a folded Tool calls row lists the calls as `animus tools` does. The Jobs page has a Fix rounds column, and the overview's This week shows gates passed first time and cost per merged PR in place of jobs finished and money spent, with a link to Insights. Job and list data gain `run`, `after`, `lessons` and `fix_rounds`; nothing is removed.
 - The display has an Insights page (`/insights`, a tab beside Jobs, on Helix and on `animus ui`) that asks whether the factory is getting better: the last 30 days against the 30 before, for the factory or one project (`?scope=`). It shows merge rate, merged untouched, gates passed first time (a flaky check counts as passed), cost per merged PR with the median job time, and PRs reverted or reworked within the 30-day watch, each with its change; a table by task class; one bar per reason jobs did not deliver; agents by role and tier with their share of cost, tool calls, failed calls and review findings acted on; flaky checks; and proposed and kept lessons (read-only: accept one with `animus lessons accept <id>`). Its data is the new `GET /insights-data[?scope=]`, served on Helix to any person with a token and on the local display without one.
 - `animus fix <pr> "<text>"` changes an open pull request a job opened: a new

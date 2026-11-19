@@ -67,7 +67,7 @@ export type RunOptions = {
   /** Pick a job up again, with the person's answer if it asked a question. */
   resume?: { state: JobState; answer?: string };
   /** Start a fix (fix.ts): a new job on the pull request's branch, in the worktree of `from`, the job it continues. */
-  fix?: { of: string; from?: JobState; alone?: FromPr; ask: string; pr: string; /** What the pull request's description keeps (fix.ts, keptFromBody); it wins over the earlier job's state, which may predate it. */ kept?: { closes?: number; fixes: FromPr['fixes'] } };
+  fix?: { of: string; from?: JobState; alone?: FromPr; ask: string; pr: string; /** A folder of what a script fetched for it (Helix: the pull request's reviews since its last push). */ references?: string; /** What the pull request's description keeps (fix.ts, keptFromBody); it wins over the earlier job's state, which may predate it. */ kept?: { closes?: number; fixes: FromPr['fixes'] } };
 };
 
 /** Ends the job where it is thrown, with an outcome that is not a pull request. */
@@ -158,7 +158,7 @@ async function runJobWith(opts: RunOptions, deps: Deps, live: { run?: Run; start
   const repo = mainCheckout(opts.repo);
   const prior = opts.resume?.state;
   // A fix starts from the job it continues; a fix picked up again has that in its own state.
-  const fix: { of: string; ask: string; pr?: string | undefined; from?: JobState } | undefined = opts.fix ? { of: opts.fix.of, ask: opts.fix.ask, pr: opts.fix.pr } : prior?.fix_of && prior.ask ? { of: prior.fix_of, ask: prior.ask, pr: prior.pr } : undefined;
+  const fix: { of: string; ask: string; pr?: string | undefined; from?: JobState; references?: string | undefined } | undefined = opts.fix ? { of: opts.fix.of, ask: opts.fix.ask, pr: opts.fix.pr, references: opts.fix.references } : prior?.fix_of && prior.ask ? { of: prior.fix_of, ask: prior.ask, pr: prior.pr } : undefined;
   if (!prior && !opts.specFile && !opts.fix) throw new AnimusError('animus run needs a spec file');
   // On Helix the profile is the base branch's as Helix fetched it, not whatever the clone has checked out (docs/adr/0008).
   const onBase = opts.trigger === 'helix' || process.env.ANIMUS_TRIGGER === 'helix' ? profileOnBase(repo) : undefined;
@@ -281,6 +281,7 @@ async function runJobWith(opts: RunOptions, deps: Deps, live: { run?: Run; start
 
   let summary = '';
   let notes: string | undefined;
+  let breaking: string | undefined;
   /** What a session new to the job is told first: where it is, the gates, the spec. */
   let brief = '';
   let lastGates: CheckResult[] = [];
@@ -397,6 +398,8 @@ async function runJobWith(opts: RunOptions, deps: Deps, live: { run?: Run; start
     }
     if (report.summary) summary = report.summary;
     if (report.notes) notes = report.notes;
+    // Kept across slices and sessions: a later session's silence does not take back what an earlier one broke.
+    if (report.breaking && !breaking?.includes(report.breaking)) breaking = [breaking, report.breaking].filter(Boolean).join('\n\n');
     return report;
   };
 
@@ -587,7 +590,7 @@ async function runJobWith(opts: RunOptions, deps: Deps, live: { run?: Run; start
     } else if (slices.length === 1) {
       brief = whole;
       // A fix picked up again (after a question or an interruption) still has its ask, and the commit it started from.
-      if (fix) await implementer(prior ? 'resume' : 'fix', `${prior ? `${resumePrompt(prior, opts.resume?.answer)}\n\n` : ''}${resumeFixPrompt({ ask: fix.ask, foreign })}`, plan.implement.tier, false, () => handoffFixPrompt({ brief, base: ws.base, cwd: wt, answers, ask: fix.ask, foreign }));
+      if (fix) await implementer(prior ? 'resume' : 'fix', `${prior ? `${resumePrompt(prior, opts.resume?.answer)}\n\n` : ''}${resumeFixPrompt({ ask: fix.ask, foreign, references: fix.references })}`, plan.implement.tier, false, () => handoffFixPrompt({ brief, base: ws.base, cwd: wt, answers, ask: fix.ask, foreign, references: fix.references }));
       else await implementer(prior ? 'resume' : 'implement', prior ? resumePrompt(prior, opts.resume?.answer) : brief, plan.implement.tier, !prior);
     } else {
       if (!prior) log(`${slices.length} slices: ${slices.map((s) => s.title).join('; ')}`);
@@ -735,7 +738,7 @@ async function runJobWith(opts: RunOptions, deps: Deps, live: { run?: Run; start
     const body = prBody({
       job, spec, plan, summary, ...(sliced ? { slices: sliced } : {}), gates: lastGates, gateAttempts: run.gates.length, fixRounds: run.fix_rounds, reviewRounds, open: failed ? open : [],
       protectedTouched: run.protected_touched, escalations: run.escalations, models, cost_usd: run.cost_usd,
-      ...(notes ? { notes } : {}), ...(review ? { review } : {}), ...(shots ? { shots } : {}), ...(caughtUp ? { caughtUp: { branch: ws.baseBranch, commit: caughtUp, resolved } } : {}), ...(failed && reason ? { failure: reason } : {}),
+      ...(notes ? { notes } : {}), ...(breaking ? { breaking } : {}), ...(review ? { review } : {}), ...(shots ? { shots } : {}), ...(caughtUp ? { caughtUp: { branch: ws.baseBranch, commit: caughtUp, resolved } } : {}), ...(failed && reason ? { failure: reason } : {}),
       // A failure report is a draft, which should not close the issue when merged.
       ...(!failed && issue ? { closes: issue, issueLink: repoProfile.issue_link } : {}),
       ...(state.fixes ? { fixes: state.fixes } : {}),

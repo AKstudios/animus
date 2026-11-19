@@ -1,7 +1,7 @@
 // `animus fix <pr> "<text>"` (GLOSSARY.md, "Fix"): a new job on the branch of an open pull request a job
 // opened. This holds what is particular to it: finding the job it continues, bringing the worktree to the
 // branch as GitHub has it, and what the implementer and the reviewer are told.
-import { existsSync, readdirSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { hostname } from 'node:os';
 import { join } from 'node:path';
 import { alive, jobDir, loadProgress, loadState, readRuns, type JobState, type Run } from './log.ts';
@@ -104,10 +104,17 @@ export function syncBranch(worktree: string, branch: string): string {
 
 const foreignNote = (foreign: string) => (foreign ? `The branch had commits from outside this job, which Animus took from GitHub (a hand push, "Update branch"). Their log:\n${foreign}` : '');
 
+/** What a script fetched for the fix (Helix: the pull request's reviews since its last push), one file each, in name order. */
+const referencesNote = (dir?: string) => {
+  const files = dir && existsSync(dir) ? readdirSync(dir).sort() : [];
+  return files.length ? `What reviewers said on the pull request since its last push, which may explain the ask:\n\n${files.map((f) => readFileSync(join(dir!, f), 'utf8').trim()).join('\n\n---\n\n')}` : '';
+};
+
 /** The part of a fix every prompt to the implementer carries: what was asked, and what the branch is. */
-function ask(p: { ask: string; foreign: string }): string {
+function ask(p: { ask: string; foreign: string; references?: string | undefined }): string {
   return [
     `A person asked for this change to the open pull request, which this branch is:\n\n${p.ask.trim()}`,
+    referencesNote(p.references),
     foreignNote(p.foreign),
     'Make the change, commit, run `animus check` as before and finish as before. Animus runs the gates again for every acceptance criterion in the spec, and a fresh reviewer judges the work against the spec and against this ask.',
   ].filter(Boolean).join('\n\n');
@@ -119,7 +126,7 @@ export const resumeFixPrompt = ask;
 const DIFF_MAX = 60_000;
 
 /** What a fresh session is told when there is no session to carry on: the spec, the pull request's diff, earlier answers, then the ask. */
-export function handoffFixPrompt(p: { brief: string; base: string; cwd: string; answers: readonly { question: string; answer: string }[]; ask: string; foreign: string }): string {
+export function handoffFixPrompt(p: { brief: string; base: string; cwd: string; answers: readonly { question: string; answer: string }[]; ask: string; foreign: string; references?: string | undefined }): string {
   const diff = tryGit(p.cwd, ['diff', `${p.base}...HEAD`]) ?? '';
   return [
     p.brief,
