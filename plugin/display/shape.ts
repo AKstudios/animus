@@ -26,6 +26,8 @@ export type DisplayJob = {
   reason?: string;
   question?: string;
   cost_usd?: number;
+  /** Times its gates sent the work back; left out for a job whose gates have not run. */
+  fix_rounds?: number;
   /** A stopped job (its process is gone, with no outcome): the command that picks it up again. */
   resume?: string;
   /** Why a queued job is held for room: memory, load or a tier at its limit, with the numbers. */
@@ -69,8 +71,23 @@ export type JobPage = {
   pr_state?: PrState;
   pr_opened?: string;
   pr_merged?: string;
+  /** What the job's run log says of its runs, left out until one has ended. */
+  run?: JobRun;
+  /** What happened to its PR after the job, as outcomes.json says; left out where it has not said. */
+  after?: Pick<InsightsOutcome, 'human_commits' | 'reverted' | 'reworked'> & { lines?: { added: number; removed: number } };
+  /** The lessons that cite the job, proposed or kept. */
+  lessons?: InsightsLesson[];
   /** What the job's run has printed, all of it. */
   log: string;
+};
+
+/** A job's runs put together, for its page: fix rounds, each gate run's flaky checks, each agent session with its calls, each review finding's fate, and `animus tools` as text. */
+export type JobRun = {
+  fix_rounds: number;
+  gates: { flaky: string[] }[];
+  agents: { role: string; tier: string; cost_usd: number; calls: number; errors: number }[];
+  findings: { round: number; severity: string; fate: 'fixed' | 'open' | 'not-acted-on' }[];
+  tools: { calls: number; errors: number; text: string };
 };
 
 /** An open pull request one of Helix's jobs opened, as GitHub lists it now. */

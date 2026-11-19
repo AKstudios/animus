@@ -130,9 +130,10 @@ const project = (p: Project) => `<button type="button" class="project${p.busy ? 
 const week = (v: View) => `<section class="panel week" data-key="week">
   <h2>This week</h2>
   <dl>
-    <div><dt>PRs merged</dt><dd>${v.week.merged}</dd></div><div><dt>Jobs finished</dt><dd>${v.week.finished}</dd></div>
-    <div><dt>Spent</dt><dd>${v.week.spent}</dd></div><div><dt>Median job</dt><dd>${v.week.median}</dd></div>
+    <div><dt>PRs merged</dt><dd>${v.week.merged}</dd></div><div><dt>Gates first time</dt><dd>${v.week.firstPass}</dd></div>
+    <div><dt>Per merged PR</dt><dd>${v.week.perMerged}</dd></div><div><dt>Median job</dt><dd>${v.week.median}</dd></div>
   </dl>
+  <a class="more-link" href="/insights">Insights →</a>
 </section>`;
 
 const nav = (v: View) => `<aside class="side">${week(v)}<nav class="panel projects" aria-label="Projects">
@@ -235,10 +236,11 @@ function jobSections(v: JobPageView): string {
   const mark = (tone: string, tag: string) => `<span class="mark tone-${tone}" aria-label="${tone === 'fail' ? 'failed' : tone === 'ink' ? 'passed' : esc(tag)}">${esc(tag)}</span>`;
   const criteria = v.criteria.map((c) => `<div class="criterion">${mark(c.tone, c.tag)}<div class="what"><p>${esc(c.text)}</p>${c.command ? `<code>${esc(c.command)}</code>` : ''}</div>${c.output ? `<details class="out"><summary>output</summary>${pre(c.output)}</details>` : ''}</div>`).join('');
   const pills = v.pills.map((c) => c.output ? `<details class="chip"><summary>${mark(c.tone, c.tag)}${esc(c.name)}</summary>${pre(c.output)}</details>` : `<span class="chip" title="${esc(c.command)}">${mark(c.tone, c.tag)}${esc(c.name)}</span>`).join('');
+  const chips = pills + v.flaky.map((f) => `<span class="chip mute">${esc(f)}</span>`).join('');
   const note = (text: string) => (text ? ` <span class="count">${esc(text)}</span>` : '');
   const slices = v.slices.length ? `<ol class="slices">${v.slices.map((s) => `<li${s.done ? ' class="done"' : ''}><span class="b">${esc(s.title)}</span> <span class="mute">${s.done ? 'done' : ''}</span><div class="mute">${esc(s.delivers)}</div></li>`).join('')}</ol>` : '';
   const reviews = v.reviews.map((r) => `<div class="round"><div class="label">${esc(r.title)}</div><p>${esc(r.summary)}</p>
-    ${r.findings.map((f) => `<div class="finding"><span class="tag tone-${f.tone}">${esc(f.tag)}</span>${f.where ? `<code>${esc(f.where)}</code>` : ''}<p>${esc(f.problem)}</p>${f.fix ? `<p class="mute">${esc(f.fix)}</p>` : ''}</div>`).join('') || none('No findings.')}</div>`).join('');
+    ${r.findings.map((f) => `<div class="finding"><span class="tag tone-${f.tone}">${esc(f.tag)}${f.fate ? ` · ${esc(f.fate)}` : ''}</span>${f.where ? `<code>${esc(f.where)}</code>` : ''}<p>${esc(f.problem)}</p>${f.fix ? `<p class="mute">${esc(f.fix)}</p>` : ''}</div>`).join('') || none('No findings.')}</div>`).join('');
   const shots = v.shots.map((s) => {
     const src = shotUrls.get(shotKey(s.src));
     return `<figure class="shot" data-key="s-${esc(s.src)}">${src ? `<img src="${esc(src)}" alt="${esc(s.name)}">` : none('Loading…')}<figcaption>${esc(s.name)}</figcaption></figure>`;
@@ -249,13 +251,14 @@ function jobSections(v: JobPageView): string {
     `<div class="numbers">${v.numbers.map((n) => `<div><code class="num">${esc(n.v)}</code><span class="mute">${esc(n.k)}</span></div>`).join('')}</div>`,
     section('stages', 'Where the time went', stages || none('No stage has taken time yet.')),
     criteria ? section('criteria', `Acceptance criteria${note(v.notes.criteria)}`, `<div class="list">${criteria}</div>`) : '',
-    section('checks', `Checks${note(v.notes.checks)}`, pills ? `<div class="chips">${pills}</div>` : none(criteria ? 'No other checks.' : 'No checks have run yet.')),
+    section('checks', `Checks${note(v.notes.checks)}`, chips ? `<div class="chips">${chips}</div>` : none(criteria ? 'No other checks.' : 'No checks have run yet.')),
     section('review', `Review${note(v.notes.review)}`, reviews || none('Not reviewed yet.')),
     shots ? section('screenshots', 'Screenshots', `<div class="shots">${shots}</div>`) : '',
     `<div class="folds">${[
       slices ? fold('slices', `Slices${note(`${v.slices.filter((s) => s.done).length} of ${v.slices.length}`)}`, slices) : '',
       fold('spec', 'Spec', v.spec ? pre(v.spec) : none('Helix no longer has the spec.')),
       fold('log', 'Log', v.log ? pre(v.log, ' data-log') : none(v.noLog), v.follow),
+      v.tools ? fold('tools', `Tool calls${note(v.tools.summary)}`, pre(v.tools.text)) : '',
       fold('questions', `Questions${note(v.questions.length ? '' : 'none asked')}`, questions || none('It has asked nothing.')),
     ].join('')}</div>`,
   ].join('');
@@ -267,7 +270,10 @@ function jobSide(v: JobPageView): string {
   const pr = v.pr ? `<section class="panel pr"><h2>Pull request</h2>
     <div class="kv"><span>${esc(v.pr.number)}</span>${v.pr.href ? `<a class="tone-${v.pr.tone}" href="${esc(v.pr.href)}" target="_blank" rel="noopener noreferrer">${esc(v.pr.state)} ↗</a>` : `<span class="tone-${v.pr.tone}">${esc(v.pr.state)}</span>`}</div>${rows(v.pr.rows)}</section>` : '';
   const labels = v.labels.length ? `<section class="panel labels"><h2>Labels</h2>${rows(v.labels)}</section>` : '';
-  return pr || labels ? `<aside class="side">${pr}${labels}</aside>` : '';
+  // Each agent's bar is its share of the cost, in a colour by rank (a class, since the CSP allows no style attribute).
+  const agents = v.agents.length ? `<section class="panel agents"><h2>Agents</h2>${v.agents.map((a, i) => `<div class="agent"><span>${esc(a.name)}</span><span class="mono mute">${esc(a.cost)}</span><svg class="bar a${Math.min(i, 3)}" aria-hidden="true"><rect width="${a.pct}%" height="100%"/></svg><span class="calls">${esc(a.calls)}</span></div>`).join('')}</section>` : '';
+  const taught = v.taught.length ? `<section class="panel learn"><h2>What this run taught</h2><ul>${v.taught.map((l) => `<li>${esc(l.text)} <span class="mute">${esc(l.state)}</span></li>`).join('')}</ul><span class="mute note">Lessons from the retro that cite this job. One is kept only when you accept it.</span></section>` : '';
+  return pr || agents || taught || labels ? `<aside class="side">${pr}${agents}${taught}${labels}</aside>` : '';
 }
 
 function jobMain(id: number | string, now: number, local: boolean): string {
@@ -332,9 +338,9 @@ function jobsMain(local: boolean): string {
     ${r.href ? `<a class="tag tone-${r.tone}" href="${esc(r.href)}" target="_blank" rel="noopener noreferrer">${esc(r.tag)}</a>` : `<span class="tag tone-${r.tone}">${esc(r.tag)}</span>`}
     <span class="job"><a class="title" href="${esc(r.page)}">${esc(r.title)}</a>${r.why ? `<span class="why tone-${r.tone === 'fail' || r.tone === 'ask' ? r.tone : 'mute'}">${esc(r.why)}</span>` : ''}</span>
     <span class="mute">${esc(r.repo)}</span>${local ? '' : `<span class="mute">${who(r)}</span>`}
-    <span class="n">${esc(r.took)}</span><span class="n cost">${esc(r.cost)}</span><span class="n">${esc(r.toMerge)}</span>
+    <span class="n">${esc(r.took)}</span><span class="n">${esc(r.fixes)}</span><span class="n cost">${esc(r.cost)}</span><span class="n">${esc(r.toMerge)}</span>
   </div>`;
-  const table = lv ? `<div class="tbl${local ? ' local' : ''}"><div class="tr th"><span>Result</span><span>Job</span><span>Project</span>${local ? '' : '<span>Person</span>'}<span class="n">Took</span><span class="n cost">Cost</span><span class="n">To merge</span></div>${
+  const table = lv ? `<div class="tbl${local ? ' local' : ''}"><div class="tr th"><span>Result</span><span>Job</span><span>Project</span>${local ? '' : '<span>Person</span>'}<span class="n">Took</span><span class="n">Fix rounds</span><span class="n cost">Cost</span><span class="n">To merge</span></div>${
     lv.rows.map((r, i) => `${lv.days.filter((d) => d.at === i).map((d) => `<div class="day">${esc(d.heading)}</div>`).join('')}${tr(r)}`).join('')}</div>` : '';
   const body = notice ? `<div class="none boxed">${esc(notice)}</div>${local ? '' : signIn}` : state.list
     ? `${sum}${lv!.rows.length ? table : none('No job matches.')}${state.listMore ? '<button type="button" class="more" data-more>Show more</button>' : ''}` : '';

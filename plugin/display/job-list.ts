@@ -46,7 +46,7 @@ export function listJobs(jobs: readonly ListJob[], f: Partial<JobFilter>, before
 }
 
 /** A row of the table: the finished list's tag, with a PR as GitHub last said; took, cost and to merge are `—` when unknown. */
-export type JobRow = Recent & { submitted: string; took: string; cost: string; toMerge: string; /** Under the title. */ why?: string };
+export type JobRow = Recent & { submitted: string; took: string; /** Times the gates sent the work back; — before they ran. */ fixes: string; cost: string; toMerge: string; /** Under the title. */ why?: string };
 
 /** The totals above the table, as strings ready to draw. */
 export type Totals = { jobs: string; merged: string; mergedShare: string; failed: string; spent: string; perMerged: string };
@@ -77,6 +77,7 @@ export function jobListView(p: JobListPage, local: boolean, now = Date.parse(p.a
     return {
       ...row, tag, tone: j.pr_state === 'closed' ? 'mute' : j.pr_state === 'merged' ? 'merged' : j.pr_state === 'open' ? 'open' : row.tone, submitted: j.submitted,
       took: j.started && end !== undefined ? span(end - Date.parse(j.started)) : '—',
+      fixes: j.fix_rounds === undefined ? '—' : String(j.fix_rounds),
       cost: j.cost_usd !== undefined ? usd(j.cost_usd) : '—',
       toMerge: j.pr_merged && j.ended ? span(Date.parse(j.pr_merged) - Date.parse(j.ended)) : '—',
       ...(why ? { why } : {}), ...(local || !link ? {} : { personPage: link }),

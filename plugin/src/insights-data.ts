@@ -3,10 +3,10 @@
 // to what the view needs, the outcomes of their PRs, and the lessons. Shared
 // by Helix (its people's homes) and the local display (this machine's).
 import { basename, join } from 'node:path';
-import type { InsightsLesson, InsightsOutcome, InsightsPage, InsightsRun } from '../display/shape.ts';
+import type { InsightsLesson, InsightsOutcome, InsightsPage, InsightsRun, JobPage } from '../display/shape.ts';
 import { expiresAt, inScope, readLessons, type Lesson } from './lessons.ts';
 import { readRuns } from './log.ts';
-import { readOutcomes } from './outcomes.ts';
+import { readOutcomes, type PrOutcome } from './outcomes.ts';
 
 const DAY = 24 * 60 * 60 * 1000;
 
@@ -31,8 +31,30 @@ export function insightsData(scope: string, homes: readonly string[], now: numbe
       review: r.review ? { findings: r.review.findings, acted_on: r.review.acted_on } : null,
     })),
     outcomes: Object.fromEntries(Object.entries(outcomes).filter(([pr]) => prs.has(pr))),
-    lessons: kept.filter((l) => l.status !== 'dismissed' && (scope === 'factory' || inScope(l, scope))).map((l): InsightsLesson => ({
-      id: l.id, text: l.text, scope: l.scope, project: l.project, cites: l.cites, status: l.status as 'proposed' | 'kept', uses: l.uses, expires: new Date(expiresAt(l)).toISOString(),
-    })),
+    lessons: kept.filter((l) => l.status !== 'dismissed' && (scope === 'factory' || inScope(l, scope))).map(lessonOf),
   };
+}
+
+const lessonOf = (l: Lesson): InsightsLesson => ({
+  id: l.id, text: l.text, scope: l.scope, project: l.project, cites: l.cites, status: l.status as 'proposed' | 'kept', uses: l.uses, expires: new Date(expiresAt(l)).toISOString(),
+});
+
+/** The lessons, proposed or kept, that cite a job (its Animus id); none when the lessons file cannot be read. */
+export function lessonsCiting(job: string, lessons?: readonly Lesson[]): InsightsLesson[] {
+  let all = lessons;
+  if (!all) { try { all = readLessons(); } catch { all = []; } }
+  return all.filter((l) => l.status !== 'dismissed' && l.cites.includes(job)).map(lessonOf);
+}
+
+/** What happened to a PR after the job: the commits a person added (and their lines) and the 30-day watch. */
+export const afterOf = (o: PrOutcome): NonNullable<JobPage['after']> => ({
+  human_commits: o.human_commits, ...(o.human_lines ? { lines: o.human_lines } : {}),
+  ...(o.reverted !== undefined ? { reverted: o.reverted } : {}), ...(o.reworked !== undefined ? { reworked: o.reworked } : {}),
+});
+
+/** Fix rounds per job (a resumed job's runs added), for each job whose gates ran. */
+export function fixRounds(runs: readonly { job: string; fix_rounds?: number; gates?: unknown[] }[]): Map<string, number> {
+  const rounds = new Map<string, number>();
+  for (const r of runs) if (r.gates?.length) rounds.set(r.job, (rounds.get(r.job) ?? 0) + (r.fix_rounds ?? 0));
+  return rounds;
 }

@@ -28,7 +28,7 @@ export type Waiting = { id: number | string; page: string; tag: string; title: s
 export type Headline = { needs: string; rest: string; last?: { when: string; tag: string; tone: Tone } };
 
 /** The last 7 days, as strings ready to draw. */
-export type Week = { merged: string; finished: string; spent: string; median: string };
+export type Week = { merged: string; /** Of the jobs whose gates ran. */ firstPass: string; /** All the week's cost over the PRs merged. */ perMerged: string; median: string };
 
 /** meta: how long it took and what it cost; the project and person are drawn from repo and person. */
 export type Recent = { id: number | string; page: string; tag: string; /** Local display: the pull request the tag names, on GitHub. */ href?: string; tone: Tone; title: string; repo: string; person: string; personPage?: string; meta: string; reason?: string };
@@ -193,7 +193,12 @@ export function view(d: Display, picked: string | null, now: number): View {
     const took = done.filter((j) => j.started && j.ended).map((j) => Date.parse(j.ended!) - Date.parse(j.started!)).sort((a, b) => a - b);
     const mid = took.length ? (took[(took.length - 1) >> 1]! + took[took.length >> 1]!) / 2 : undefined;
     const spent = shown.filter((j) => Date.parse(j.ended ?? j.started ?? j.submitted) >= since).reduce((sum, j) => sum + (j.cost_usd ?? 0), 0);
-    return { merged: String(merged), finished: String(done.length), spent: usd(spent), median: mid === undefined ? '–' : span(mid) };
+    // A job whose gates ran passed them first time when they sent the work back no round.
+    const gated = done.filter((j) => j.fix_rounds !== undefined);
+    return {
+      merged: String(merged), firstPass: gated.length ? `${Math.round((gated.filter((j) => j.fix_rounds === 0).length / gated.length) * 100)}%` : '–',
+      perMerged: merged ? usd(spent / merged) : '–', median: mid === undefined ? '–' : span(mid),
+    };
   })();
   const ended = shown.filter((j) => isOver(j) && !open.has(j.id as number)).reverse();
   const prs = (d.prs ?? []).filter((p) => !sel || p.repo === sel.name).sort((a, b) => Date.parse(b.created) - Date.parse(a.created)).slice(0, PRS).map((p) => pr(p, d.local === true));

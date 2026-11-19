@@ -8,8 +8,9 @@ import { join } from 'node:path';
 import { listJobs, type JobFilter } from '../../plugin/display/job-list.ts';
 import { PERSON_JOBS, type InsightsPage, type Display, type DisplayClosed, type DisplayPr, type JobListPage, type ListJob, type DisplayJob, type DisplayRepo, type JobPage, type PeoplePage, type PersonPage, type PersonRow } from '../../plugin/display/shape.ts';
 import { folderParts, read, shotFile } from '../../plugin/src/job-folder.ts';
-import { insightsData } from '../../plugin/src/insights-data.ts';
+import { afterOf, fixRounds, insightsData, lessonsCiting } from '../../plugin/src/insights-data.ts';
 import { animusHome, readRuns, STAGES } from '../../plugin/src/log.ts';
+import { readOutcomes } from '../../plugin/src/outcomes.ts';
 import { loadProfile, PROFILE_PATH } from '../../plugin/src/profile.ts';
 import { readyRepos, type Config } from './config.ts';
 import type { HelixJob, Person, Store } from './store.ts';
@@ -37,8 +38,18 @@ function repoOf(name: string, dir: string): DisplayRepo {
   return repo;
 }
 
-function jobOf(job: HelixJob, supervisor: Supervisor): DisplayJob {
-  const { spec: _spec, pid: _pid, answer, draft: _draft, interrupted: _interrupted, ...shown } = job;
+/** Each person's jobs' fix rounds from their run logs, by person and Animus job, for the jobs whose gates ran. */
+function fixOf(opts: { store: Store; supervisor: Supervisor }): (j: HelixJob) => { fix_rounds?: number } {
+  const rounds = new Map<string, number>();
+  for (const person of Object.keys(opts.store.people())) {
+    for (const [job, n] of fixRounds(readRuns(join(opts.supervisor.animusHome(person), 'runs.jsonl')))) rounds.set(`${person}\u0000${job}`, n);
+  }
+  return (j) => { const n = rounds.get(`${j.person}\u0000${j.animus_job}`); return n === undefined ? {} : { fix_rounds: n }; };
+}
+
+function jobOf(job: HelixJob, supervisor: Supervisor, fix: (j: HelixJob) => { fix_rounds?: number } = () => ({})): DisplayJob {
+  const { spec: _spec, pid: _pid, answer, draft: _draft, interrupted: _interrupted, ...rest } = job;
+  const shown = { ...rest, ...fix(job) };
   if (job.state === 'queued' && job.animus_job) return { ...shown, resumed: answer ? 'answer' : 'restart' };
   if (job.state !== 'running') return shown;
   const progress = supervisor.progress(job);
@@ -107,8 +118,12 @@ export function jobPage(opts: { store: Store; supervisor: Supervisor }, id: numb
   const page: JobPage = { at: new Date().toISOString(), stages: STAGES, job: jobOf(job, opts.supervisor), ...pr, ...(spec !== undefined ? { spec } : {}), log: opts.supervisor.log(id, Infinity) };
   const dir = folderOf(opts.supervisor, job);
   if (!job.animus_job || !dir) return page;
-  const runs = readRuns(join(opts.supervisor.animusHome(job.person), 'runs.jsonl')).filter((r) => r.job === job.animus_job);
-  return Object.assign(page, folderParts(dir, runs, job.answer));
+  const home = opts.supervisor.animusHome(job.person);
+  const runs = readRuns(join(home, 'runs.jsonl')).filter((r) => r.job === job.animus_job);
+  let o;
+  try { o = job.pr ? readOutcomes(join(home, 'outcomes.json'))[job.pr] : undefined; } catch { /* unreadable: no PR is known */ }
+  const lessons = lessonsCiting(job.animus_job);
+  return Object.assign(page, folderParts(dir, runs, job.answer), o ? { after: afterOf(o) } : {}, lessons.length ? { lessons } : {});
 }
 
 /** The job's Animus folder. Its Animus id comes from what the job printed: only a plain name is taken as a folder. */
@@ -131,13 +146,14 @@ export function insights(opts: { store: Store; supervisor: Supervisor }, scope: 
 
 export function display(opts: { config: Config; store: Store; supervisor: Supervisor }): Display {
   const { config, store, supervisor } = opts;
+  const fix = fixOf(opts);
   return {
     name: config.name ?? hostname(),
     at: new Date().toISOString(),
     slots: config.slots,
     stages: STAGES,
     repos: Object.entries(readyRepos(store)).map(([name, dir]) => repoOf(name, dir)),
-    jobs: store.list(SHOWN).map((j) => jobOf(j, supervisor)),
+    jobs: store.list(SHOWN).map((j) => jobOf(j, supervisor, fix)),
   };
 }
 
@@ -149,10 +165,11 @@ export function display(opts: { config: Config; store: Store; supervisor: Superv
 export function jobList(opts: { store: Store; supervisor: Supervisor }, f: Partial<JobFilter>, before: string | undefined, github: { prs: DisplayPr[]; closed: DisplayClosed[] }): JobListPage {
   const open = new Set(github.prs.map((p) => p.job));
   const closed = new Map(github.closed.map((c) => [c.job, c]));
+  const fix = fixOf(opts);
   const jobs = opts.store.list(-1).map((j): ListJob => {
     const c = closed.get(j.id);
     const state = open.has(j.id) ? 'open' as const : c ? c.merged ? 'merged' as const : 'closed' as const : undefined;
-    return { ...jobOf(j, opts.supervisor), ...(state ? { pr_state: state } : {}), ...(c?.merged && !open.has(j.id) ? { pr_merged: c.at } : {}) };
+    return { ...jobOf(j, opts.supervisor, fix), ...(state ? { pr_state: state } : {}), ...(c?.merged && !open.has(j.id) ? { pr_merged: c.at } : {}) };
   });
   return { at: new Date().toISOString(), ...listJobs(jobs, f, before) };
 }
