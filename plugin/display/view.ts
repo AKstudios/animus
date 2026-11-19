@@ -57,7 +57,7 @@ export type View = {
   week: Week;
   /** Jobs waiting for an answer, longest wait first. */
   needs: Need[];
-  /** The first of the queue, in order; `queued` counts all of it. */
+  /** The first of the queue, in order, waiting jobs with it; `queued` counts all of it, as the Queued heading shows it. */
   line: Waiting[];
   /** The newest open PRs the jobs opened. */
   prs: Pr[];
@@ -217,7 +217,7 @@ export function view(d: Display, picked: string | null, now: number): View {
 
   return {
     name: d.name,
-    slots: d.slots, running, queued: line.length, asks: d.jobs.filter(isAsk).length,
+    slots: d.slots, running, queued: queue.length, asks: d.jobs.filter(isAsk).length,
     projects: d.repos.map((r) => {
       const mine = d.jobs.filter((j) => j.repo === r.name);
       const [run, q, a] = [count(mine, 'running'), count(mine, 'queued'), count(mine, 'ask')];

@@ -80,6 +80,19 @@ test('/helix status privately says the slots in use, the queue length and the ve
   assert.deepEqual(h.respondedTo(), [`Helix ${animusVersion()}: 1 of 3 slots in use, 2 queued.`]);
 });
 
+// Protects: jobs held by after: in /animus status. Fails when: waiting jobs are left out, so two of them read "0 queued".
+test('/animus status counts jobs waiting for an earlier pull request apart from the queue', async () => {
+  const h = helix({ slots: 3 });
+  const base = { person: 'ben', repo: 'app', spec: '', draft: false, submitted: '', title: 't' };
+  h.store.add({ ...base, state: 'waiting' });
+  h.store.add({ ...base, state: 'waiting' });
+
+  await h.slack.deliver(command('U0OWNER', 'status'));
+  h.stop();
+
+  assert.deepEqual(h.respondedTo(), [`Helix ${animusVersion()}: 0 of 3 slots in use, 0 queued, 2 waiting for an earlier pull request.`]);
+});
+
 const reply = (user: string, channel: string, thread: string, text: string, mentioned = false) =>
   ({ kind: 'message' as const, user, channel, text, thread, ...(mentioned ? { mentioned: true as const } : {}) });
 

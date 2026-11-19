@@ -228,7 +228,8 @@ async function meCommand(store: Store, config: Config, name: string, byOwner: bo
 
 /** /helix status: how busy this Helix is, and its Animus version. */
 function statusCommand(store: Store, config: Config): string {
-  return `Helix ${animusVersion()}: ${store.inState('running').length} of ${config.slots} slots in use, ${store.inState('queued').length} queued.`;
+  const waiting = store.inState('waiting').length;
+  return `Helix ${animusVersion()}: ${store.inState('running').length} of ${config.slots} slots in use, ${store.inState('queued').length} queued${waiting ? `, ${waiting} waiting for an earlier pull request` : ''}.`;
 }
 
 /** /helix notify off|on: whether the sender's jobs post their progress to them. */
