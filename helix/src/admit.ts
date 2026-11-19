@@ -39,9 +39,6 @@ export function admitOnBase(repoDir: string, env: Record<string, string>, text: 
     hasPath: (b, path) => git(repoDir, ['cat-file', '-e', `${origin(b)}:${path}`], env).ok,
   };
   const admitted = admit(loadFactory(), text, facts, name);
-  if (admitted.spec.after.length) {
-    admitted.problems.push({ who: 'spec', what: 'after: needs the earlier spec on the machine that follows it, and Helix cannot: start this one with `animus start --local`, or drop `after:`' });
-  }
   const warnings = checkout !== undefined && checkout.trim() !== shown.out.trim()
     ? [`your checkout's ${PROFILE_PATH} differs from ${facts.read}: Helix reads GitHub's, so push yours first if the job should use it`]
     : [];

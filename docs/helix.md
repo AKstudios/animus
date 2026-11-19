@@ -42,6 +42,13 @@ Helix's answers to a job's submit and status carry `links`: its job page at
 `url` (Tailscale) and `lan_url` (office network), whichever are set, built as
 Slack's posts build them and never with a token. `animus submit` and
 `animus status <id>` print them under `watch it:`.
+The queue, its loop and the room check are the plugin's shared module
+(`plugin/src/queue.ts`, `plugin/src/room.ts`;
+[ADR 0010](adr/0010-one-queue-on-helix-and-on-one-machine.md)); Helix runs on
+it and adds people, containers, the HTTP API, Slack and GitHub. On macOS the
+room check counts free, inactive and speculative pages from `vm_stat` as
+free memory, elsewhere Node's free memory.
+
 A wrong value is refused with its key named. A `config.yaml` from
 before 0.3.3 that names `people` and `repos` has them moved into `helix.db`
 the first time a `helix` command runs.
@@ -236,8 +243,8 @@ never from what the clone has checked out, so a clone left on another branch
 cannot give a job an old profile.
 
 - `POST /jobs` answers 400 with the whole list of problems for a spec that is
-  refused, and queues nothing. A spec with `after:` is refused with a pointer
-  to `animus start --local`, since Helix cannot follow an earlier job yet.
+  refused, and queues nothing. A spec with `after:` is admitted and queued as
+  [waiting](#waiting-jobs).
 - A submit that carries the checkout's profile gets back `warnings` when it
   differs from the base branch's; `animus start --helix` prints them.
 - A queued job is admitted again when it starts, since the profile may have
@@ -246,6 +253,26 @@ cannot give a job an old profile.
   A job that is resumed was admitted when it first started.
 - A base branch GitHub cannot be reached for, or one with no profile, ends the
   job or draft before any work, with the reason.
+
+## Waiting jobs
+
+A spec whose header says `after: <spec.md>` is queued as **waiting**
+(GLOSSARY.md): a row in the queue with no slot and no `animus` process, so a
+job that fits starts while it waits. `animus status <id>` and the display say
+`waiting for <spec>'s pull request`. About once a minute the queue looks at
+each waiting job's earlier pull requests with the job's person's GitHub token,
+finding each as `animus run` does on a laptop: the pull request of the job
+Helix ran for that spec file, else one titled as the spec.
+
+- Every earlier pull request merged: the job is queued, and runs as any queued
+  job, from a base that holds the merge.
+- One closed without merging: the job ends failed with `its earlier pull
+  request was closed`, and its person is told as for any failure.
+- GitHub cannot say: the job keeps waiting and is looked at again.
+
+A waiting job is kept when Helix restarts and is cancelled like a queued one.
+A spec on Helix can therefore wait on one submitted separately, and its
+session need not stay open.
 
 ## Projects
 
@@ -382,7 +409,7 @@ process ends, however it ends, so a cancelled job leaves nothing serving.
 ## The display
 
 Helix serves a page at its own address showing the slots, each running job's
-stage, the queue, jobs waiting for an answer, the ten newest open pull
+stage, the queue (a waiting job says which pull request it waits for), jobs waiting for an answer, the ten newest open pull
 requests its jobs opened (drafts marked), and the jobs that failed or were
 cancelled. Helix finds the open PRs by asking GitHub, once a minute per
 project, with the GitHub token of the person whose job opened one; a PR
