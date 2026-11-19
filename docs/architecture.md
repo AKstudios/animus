@@ -23,9 +23,12 @@ spec.md ──► animus start ──┬─► animus run  (this machine, in the
 
 - **The plugin** (`plugin/`) is what a developer installs in Claude Code:
   the skills that shape a spec, and the `animus` command that runs a job.
-- **Helix** (`helix/`) is the supervisor for a shared machine: a queue in
-  SQLite, an HTTP API, a display page, and one `animus run` process per job.
-  It imports from `plugin/` and is never shipped in the plugin. It holds no
+- **Helix** (`helix/`) is the supervisor for a shared machine: the plugin's
+  shared queue (`plugin/src/queue.ts`) over SQLite, an HTTP API, a display
+  page, and one `animus run` process per job. A job whose `after:` spec has
+  not merged is waiting in the queue, with no slot and no process, until
+  that spec's pull request merges. It imports from `plugin/` and is never
+  shipped in the plugin. It holds no
   state of its own beyond `helix.db` and the job files, so a restart carries
   on from them. See [helix.md](helix.md).
 
@@ -105,6 +108,8 @@ A job leaves nothing in the target repository but its branch.
 | `skills.ts`, `personal.ts` | Vendored skills granted by role, and a person's own config and skills |
 | `log.ts` | The run log and each job's state |
 | `after.ts` | Waiting for an earlier spec's PR to merge |
+| `queue.ts` | The shared queue and its loop: start what fits, notice dead jobs, resume, drain, and hold waiting jobs until the earlier PR merges. Takes its store and machine reading as inputs; Helix runs on it |
+| `room.ts` | The room check (memory, load, tier limits) and the machine reading, the only code that reads the operating system |
 | `outcomes.ts`, `cleanup.ts` | `animus outcomes` and `animus cleanup` |
 | `retro.ts`, `lessons.ts` | `animus retro` (assembles the records, runs the `retro` role, filters its proposals) and `animus lessons` (`~/.animus/lessons.json`) |
 | `init.ts`, `doctor.ts` | `animus init` and `animus doctor` |
@@ -124,7 +129,8 @@ Helix serves; ADR 0004), `bin/animus`.
 | --- | --- |
 | `cli.ts` | The `helix` command, including `upgrade` |
 | `server.ts` | The HTTP API and the display page |
-| `supervisor.ts` | The queue: starts jobs while slots are free, restarts, cancels, answers |
+| `supervisor.ts` | Helix's side of the shared queue (`plugin/src/queue.ts`): people, containers, restarts, cancels, answers |
+| `waiting.ts` | Finds a waiting job's earlier pull requests on GitHub, with the person's token |
 | `store.ts` | `helix.db`: jobs, people, projects, invites, upgrades, activity (what each person did, kept for good) |
 | `upgrade.ts` | Which release `helix upgrade --follow` moves to |
 | `cleanup.ts` | `helix cleanup`: each person's `animus cleanup`, old job folders, old job images |

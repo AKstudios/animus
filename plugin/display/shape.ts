@@ -8,7 +8,7 @@ import type { Review } from '../src/review.ts';
 export type DisplayJob = {
   /** Helix's number, or a local job's own id. */
   id: number | string;
-  state: 'queued' | 'running' | 'ended' | 'cancelled' | 'stopped';
+  state: 'queued' | 'waiting' | 'running' | 'ended' | 'cancelled' | 'stopped';
   person: string;
   /** The repository's name in Helix's config. */
   repo: string;
@@ -34,7 +34,7 @@ export type DisplayJob = {
   fix_rounds?: number;
   /** A stopped job (its process is gone, with no outcome): the command that picks it up again. */
   resume?: string;
-  /** Why a queued job is held for room: memory, load or a tier at its limit, with the numbers. */
+  /** Why a queued job is held for room (memory, load or a tier at its limit, with the numbers), or what a waiting job waits for: "waiting for <spec>'s pull request". */
   waiting?: string;
   /** Why a queued job is in the queue a second time. */
   resumed?: 'answer' | 'restart';

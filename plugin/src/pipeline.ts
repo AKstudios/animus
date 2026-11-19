@@ -59,6 +59,8 @@ export type RunOptions = {
   draft?: boolean;
   /** Leave the worktree in place when the job ends. */
   keep?: boolean;
+  /** The queue has seen every `after:` pull request merged: start from the base without looking for the earlier spec or waiting again. */
+  afterMerged?: boolean;
   trigger?: string;
   /** The line saying where the job runs (`animus start`), logged first so the watch line can follow it with the job's id. */
   runsLine?: string;
@@ -238,7 +240,7 @@ async function runJobWith(opts: RunOptions, deps: Deps, live: { run?: Run; start
   log(describePlan(factory, plan));
   if (personal.length) log(`the submitter's skills: ${personal.map((p) => `${p.name} (${p.roles.join(', ')}${p.types ? `; ${p.types.join(', ')} jobs` : ''})`).join(', ')}`);
   // A spec that builds on another waits for it, then starts from a base that holds it.
-  if (!carried && spec.after.length) {
+  if (!carried && !opts.afterMerged && spec.after.length) {
     at('setup', 'setup · waits for an earlier pull request to merge');
     const files = resolveAfter(repo, source!, spec.after);
     await timed('queue', () => waitForMerged({ repo, files, lookup: deps.prState ?? prState, find: deps.findPr ?? findPrByTitle, log, ...(deps.sleep ? { sleep: deps.sleep } : {}) }));

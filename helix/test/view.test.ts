@@ -55,6 +55,19 @@ test('a job waiting for an answer is a card with its question and the command th
   assert.equal(view({ ...shown(jobs), local: true }, null, NOW).needs[0]!.command, 'animus resume 2 --answer "…"');
 });
 
+// Protects: criterion 1 (a waiting job in the display). Fails when: the display does not say what the job waits for, or gives it a place in the line.
+test('a waiting job says which spec\'s pull request it waits for and has no place in the line', () => {
+  const jobs = [
+    job({ id: 1, state: 'waiting', waiting: "waiting for specs/base.md's pull request", submitted: ago(5) }),
+    job({ id: 2, state: 'queued', submitted: ago(4) }),
+  ];
+  const v = view(shown(jobs), null, NOW);
+  assert.deepEqual(v.line.map((w) => [w.id, w.tag, w.note]), [
+    [1, 'Waiting', "waiting for specs/base.md's pull request, for 5m."],
+    [2, 'Queued', 'Position 1 in the queue, waiting 4m.'],
+  ]);
+});
+
 // Protects: the headline sentence, its ask-coloured part and the last-finished tag. Fails when: a count or plural is wrong, the quiet words show while a job needs the person, or the last finished job's tag is missing.
 test('the headline is built from the counts and names the last job that finished', () => {
   const ask = job({ state: 'ended', outcome: 'needs-input', question: '?', ended: ago(50) });
