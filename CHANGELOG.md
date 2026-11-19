@@ -9,6 +9,8 @@ clients with how to update.
 
 ## Unreleased
 
+## 0.6.0 (2026-11-19)
+
 - Pull requests no longer touch CHANGELOG.md: `npm run release` writes the release's notes from the merged pull requests, and a job's pull request has a `## Breaking` section when its implementer reports a breaking change (the report gains an optional `breaking`). The `changelog` gate is gone; `npm run changelog` stays as a no-op until a later change drops it.
 - `/animus fix <what to change>` on an open pull request a job opened, from
   the job's person or the owner, gets 👀 and queues a fix on Helix with the
@@ -139,6 +141,20 @@ clients with how to update.
 - This repo's profile has a ui target, `display`: the display served from
   made-up jobs (`scripts/display-fixture.ts`), each page compared with its
   design in `docs/design/display/`. Display specs can now be `type: ui`.
+- An Insights page shows whether the factory is getting better ([#35](https://github.com/AKstudios/animus/pull/35))
+- Fix a pull request with an /animus fix comment ([#34](https://github.com/AKstudios/animus/pull/34))
+- Release notes come from the merged pull requests ([#33](https://github.com/AKstudios/animus/pull/33))
+- Fix an open pull request with animus fix ([#32](https://github.com/AKstudios/animus/pull/32))
+- The factory proposes lessons and uses the ones you keep ([#31](https://github.com/AKstudios/animus/pull/31))
+- The display looks like its design ([#30](https://github.com/AKstudios/animus/pull/30))
+- Glossary and ADR for fix on pull requests ([#29](https://github.com/AKstudios/animus/pull/29))
+- Every run records what each agent did and why it stopped ([#28](https://github.com/AKstudios/animus/pull/28))
+- Design references: time bar colours and Insights ([#27](https://github.com/AKstudios/animus/pull/27))
+- A spec is admitted against its project before it runs ([#26](https://github.com/AKstudios/animus/pull/26))
+- Display design references follow the redesign canvas ([#25](https://github.com/AKstudios/animus/pull/25))
+- Helix jobs and drafts read the base branch as GitHub has it ([#24](https://github.com/AKstudios/animus/pull/24))
+- The display shows what needs you first ([#23](https://github.com/AKstudios/animus/pull/23))
+- Glossary and ADRs: admit decides whether a spec runs, at every entry point and at job start; Helix reads the profile from the base branch
 
 ## 0.5.1 (2026-11-18)
 
