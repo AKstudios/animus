@@ -345,23 +345,26 @@ const tone = (t: string) => (t === 'good' ? ' good' : t === 'bad' ? ' bad' : '')
 
 function insightsMain(local: boolean, now: number): string {
   const notice = insightsNotice(readToken(storage) !== null, state.insightsStatus, local);
-  const head = `<div class="scope"><div><h1>Insights</h1><p class="last">Is the factory getting better? Last 30 days against the 30 before.</p></div></div>`;
+  const title = '<div><h1>Insights</h1><p class="last">Is the factory getting better? Last 30 days against the 30 before.</p></div>';
+  const head = `<div class="scope">${title}</div>`;
   if (notice) return `<main class="main">${head}<div class="none boxed">${esc(notice)}</div>${local ? '' : signIn}</main>`;
   if (!state.insights) return '';
   const v = insightsView(state.insights, now);
   const scopes = `<nav class="segmented" aria-label="Scope" data-key="scopes">${v.scopes.map((s) => `<a href="${esc(s.href)}"${s.on ? ' aria-current="true"' : ''}>${esc(s.name)}</a>`).join('')}</nav>`;
-  if (v.none) return `<main class="main">${head}${scopes}${none('No job ended in the last 30 days.')}</main>`;
-  const tiles = `<div class="tiles">${v.tiles.map((t) => `<div class="tile" data-key="t-${esc(t.label)}"><span class="mute">${esc(t.label)}</span><b>${esc(t.value)}</b><span class="note">${esc(t.note)}</span>${t.change ? `<span class="delta${tone(t.change.tone)}">${esc(t.change.text)}</span>` : ''}</div>`).join('')}</div>`;
+  const top = `<div class="scope">${title}${scopes}</div>`;
+  if (v.none) return `<main class="main">${top}${none('No job ended in the last 30 days.')}</main>`;
+  const tiles = `<div class="tiles">${v.tiles.map((t) => `<div class="tile" data-key="t-${esc(t.label)}"><span class="mute">${esc(t.label)}</span><b>${esc(t.value)}</b><span class="note">${t.change ? `<span class="delta${tone(t.change.tone)}">${esc(t.change.text)}</span> · ` : ''}${esc(t.note)}</span></div>`).join('')}</div>`;
   const classes = `<div class="scroll"><table class="grid"><thead><tr><th>Task class</th><th class="num">Jobs</th><th class="num">Merged</th><th class="num">First pass</th><th class="num">$ / merged</th></tr></thead><tbody>${v.classes.map((c) => `<tr data-key="c-${esc(c.name)}"><td>${esc(c.name)}</td><td class="num">${esc(c.jobs)}</td><td class="num">${esc(c.merged)}</td><td class="num">${esc(c.firstPass)}</td><td class="num">${esc(c.perMerged)}</td></tr>`).join('')}</tbody></table></div>`;
   const causes = v.causes.map((c) => `<div class="cause" data-key="k-${esc(c.label)}"><span>${esc(c.label)}</span><svg class="bar tone-${c.tone}" viewBox="0 0 100 6" preserveAspectRatio="none" aria-hidden="true"><rect width="100" height="6" class="rail"></rect><rect width="${c.pct}" height="6" class="fill"></rect></svg><span class="mono mute">${c.count}</span></div>`).join('');
   const agents = `<div class="scroll"><table class="grid"><thead><tr><th>Agent</th><th>Tier</th><th class="num">Cost</th><th class="num">Tool calls</th><th class="num">Failed</th></tr></thead><tbody>${v.agents.map((a) => `<tr data-key="a-${esc(a.role)}-${esc(a.tier)}"><td>${esc(a.role)}</td><td class="mute">${esc(a.tier)}</td><td class="num">${esc(a.cost)}</td><td class="num">${esc(a.calls)}</td><td class="num">${esc(a.failed)}</td></tr>`).join('')}</tbody></table></div>${v.findings ? `<p class="note">Review findings acted on: <b>${esc(v.findings)}</b></p>` : ''}`;
   const flaky = v.flaky.map((f) => `<div class="li" data-key="f-${esc(f.name)}-${esc(f.where)}"><span class="mono">${esc(f.name)}</span><span class="mute">${esc(f.times)} · ${esc(f.where)}</span></div>`).join('');
-  const lessons = v.proposed.map((l) => `<div class="lesson" data-key="lp-${l.id}"><span class="tag tone-open">proposed</span><span class="text">${esc(l.text)}</span><span class="mute">${esc(l.scope)} · ${esc(l.source)}</span><code class="cmd">${esc(l.command)}</code></div>`).join('')
-    + v.kept.map((l) => `<div class="lesson" data-key="lk-${l.id}"><span class="tag tone-merged">kept</span><span class="text">${esc(l.text)}</span><span class="mute">${esc(l.where)}</span><span class="mono mute">${esc(l.uses)}</span></div>`).join('');
-  return `<main class="main">${head}${scopes}${tiles}
+  const proposed = v.proposed.map((l) => `<div class="lesson" data-key="lp-${l.id}"><span class="said">${esc(l.text)}</span><span class="mute">${esc(l.scope)} · ${esc(l.source)}</span><code class="cmd">${esc(l.command)}</code></div>`).join('');
+  const kept = v.kept.map((l) => `<div class="lesson" data-key="lk-${l.id}"><span class="said">${esc(l.text)}</span><span class="mute">${esc(l.where)}</span><span class="mono${l.used ? ' used' : ' mute'}">${esc(l.uses)}</span></div>`).join('');
+  return `<main class="main">${top}${tiles}
     <div class="two">${section('classes', 'By task class', classes)}${section('causes', 'Why jobs did not deliver', (causes || none('Every job delivered.')) + (v.causeCount ? `<p class="note">${esc(v.causeCount)} did not deliver.</p>` : ''))}</div>
     <div class="two">${section('agents', 'Agents', agents)}${section('flaky', 'Flaky checks', flaky || none('No flaky check.'))}</div>
-    ${section('lessons', 'Lessons', lessons || none('No lesson yet.'))}</main>`;
+    ${section('lessons', 'Proposed lessons', proposed || none('No lesson is waiting for a yes.'))}
+    ${section('kept', 'Kept lessons', kept || none('No lesson is kept.'))}</main>`;
 }
 
 function page(): string {
