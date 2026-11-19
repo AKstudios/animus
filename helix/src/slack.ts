@@ -91,7 +91,7 @@ export function jobReply(job: HelixJob): { text: string; blocks: unknown[] } | u
   }
   if (job.pr) return said(`Job ${job.id} opened a pull request: <${job.pr}|Open pull request>`);
   const reason = (job.reason ?? job.outcome ?? '').replace(/```/g, "'''");
-  return said(`Job ${job.id} ${job.outcome === 'refused' ? 'was refused' : 'failed'}:`, `\`\`\`${reason}\`\`\``);
+  return said(`Job ${job.id} ${job.outcome === 'refused' ? 'was refused' : 'failed'}:`, `\`\`\`\n${reason}\n\`\`\``);
 }
 
 /** Where a job's page is, at each address Helix has set; never with a token. */

@@ -115,7 +115,7 @@ test('a job that asks quotes its question in a reply, not on the card, and once 
   // The resume posts no reply of its own: the thread holds the card, the question, then the pull request.
   assert.equal(h.posts().filter((p) => p.thread === 'ts-2').length, 2);
   const reason = h.posts().find((p) => /failed/.test(p.text))!;
-  assert.match(reason.text, /```the gates failed```/);
+  assert.match(reason.text, /```\nthe gates failed\n```/);
   assert.match(flat(updates(h).at(-1)!.blocks), /State:\* Failed/);
   assert.doesNotMatch(flat(updates(h).at(-1)!.blocks), /gates failed/);
   assert.equal(rest.length, 2);
