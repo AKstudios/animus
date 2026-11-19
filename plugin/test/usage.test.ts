@@ -5,7 +5,7 @@ import type { Run } from '../src/log.ts';
 import { personOf, profilesInfo, tokensByJob, usageOf } from '../src/usage.ts';
 
 const tok = (input: number, output = 0, cache_read = 0, cache_write = 0) => ({ input, output, cache_read, cache_write });
-const agent = (role: string, model: string, cost_usd: number, tokens: ReturnType<typeof tok>) => ({ role, model, cost_usd, tokens, stage: role, tier: 'fast', effort: '', ok: true, ms: 0, turns: 0, calls: 0, errors: 0 });
+const agent = (role: string, model: string, cost_usd: number, tokens: ReturnType<typeof tok>) => ({ role, model, cost_usd, tokens, stage: role, tier: 'fast', effort: '', ok: true, status: 'ok', ms: 0, turns: 0 });
 const run = (over: Partial<Run>) => ({ job: 'j', submitter: 'a@b.c', started: '2026-11-17T10:00:00Z', ended: '2026-11-17T10:05:00Z', cost_usd: 0, tokens: tok(0), agents: [], ...over }) as unknown as Run;
 
 // Protects: criterion 1, a person shown by name. Fails when: an address, or a blank git name, is shown.

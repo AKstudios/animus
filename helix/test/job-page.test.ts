@@ -181,7 +181,7 @@ test('a merged job page leads with its tag and line, four numbers and a bar of e
 
 // Protects: criterion 4's side panels and chips. Fails when: the third number, the Agents shares, the after-the-job rows, the watch, the lessons, the flaky chip, a finding's fate or the tool calls are wrong.
 /** An agent session's fields that a test does not care about. */
-const session = { model: '', effort: '', ok: true, ms: 0, turns: 0, tokens: { input: 0, output: 0, cache_read: 0, cache_write: 0 } };
+const session = { model: '', effort: '', ok: true, ms: 0, turns: 0, errors: 0, tokens: { input: 0, output: 0, cache_read: 0, cache_write: 0 } };
 
 test('a merged job page tells its fix rounds, agents, what happened after, the watch, lessons, flaky checks, finding fates and tool calls', () => {
   const p = page({ state: 'ended', outcome: 'pr', pr: 'https://github.com/o/app/pull/4', cost_usd: 4, started: '2026-11-17T10:05:00Z', ended: '2026-11-17T10:40:30Z' }, {
