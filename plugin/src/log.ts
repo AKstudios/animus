@@ -71,6 +71,10 @@ export type Run = {
   repo: string;
   submitter: string;
   trigger: string;
+  /** The job this one is a fix of: the one before it on the same pull request. */
+  fix_of?: string;
+  /** A fix that began from the pull request alone, because the earlier job's folder or worktree was gone: no earlier session carried on. */
+  without_session?: true;
   title: string;
   /** The spec file the job was started from, as a path on the machine that ran it. */
   spec_file?: string;
@@ -141,6 +145,16 @@ export type JobState = {
   slices_done?: string[];
   outcome?: Outcome;
   question?: string;
+  /** Set on a fix: the job it continues, what was asked, and every fix on the pull request so far (this one last, once its body is built). */
+  fix_of?: string;
+  ask?: string;
+  /** On a fix: the pull request it updates, as its URL. */
+  pr?: string;
+  fixes?: { ask: string; job: string; cost_usd: number }[];
+  /** On a fix: the commit it started from (the branch as GitHub had it), so a fix picked up again can tell whether the implementer changed anything. */
+  fix_start?: string;
+  /** The issue the pull request closes, so a fix keeps the line. */
+  closes?: number;
   /** The questions this job stopped to ask, each with the person's answer: the reviewer reads them beside the spec. */
   answers?: { question: string; answer: string }[];
   findings?: Finding[];
@@ -177,6 +191,11 @@ export function loadState(job: string, home = animusHome()): JobState | undefine
 export function saveProgress(job: string, stage: Stage, who: string): void {
   writeJson(join(jobDir(job), 'progress.json'), { stage, who, at: new Date().toISOString(), pid: process.pid, host: hostname() } satisfies Progress);
 }
+
+/** True for a live process; EPERM means it exists under another user. */
+export const alive = (pid: number): boolean => {
+  try { process.kill(pid, 0); return true; } catch (e) { return (e as NodeJS.ErrnoException).code === 'EPERM'; }
+};
 
 /** A job's progress; home is the Animus home it ran under, when not this process's (a Helix job in a container). */
 export function loadProgress(job: string, home = animusHome()): Progress | undefined {

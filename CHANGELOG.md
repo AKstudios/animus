@@ -10,6 +10,24 @@ clients with how to update.
 
 - The job page tells what the run cost and what came of it: the third number is fix rounds (with the gate runs), the Pull request panel adds the commits and lines people added after the job and, once merged, the 30-day watch, an Agents panel shows cost by role and tier with each one's sessions, tool calls and failed calls, "What this run taught" lists the lessons citing the job, a flaky check is a chip, each review finding says its fate, and a folded Tool calls row lists the calls as `animus tools` does. The Jobs page has a Fix rounds column, and the overview's This week shows gates passed first time and cost per merged PR in place of jobs finished and money spent, with a link to Insights. Job and list data gain `run`, `after`, `lessons` and `fix_rounds`; nothing is removed.
 - The display has an Insights page (`/insights`, a tab beside Jobs, on Helix and on `animus ui`) that asks whether the factory is getting better: the last 30 days against the 30 before, for the factory or one project (`?scope=`). It shows merge rate, merged untouched, gates passed first time (a flaky check counts as passed), cost per merged PR with the median job time, and PRs reverted or reworked within the 30-day watch, each with its change; a table by task class; one bar per reason jobs did not deliver; agents by role and tier with their share of cost, tool calls, failed calls and review findings acted on; flaky checks; and proposed and kept lessons (read-only: accept one with `animus lessons accept <id>`). Its data is the new `GET /insights-data[?scope=]`, served on Helix to any person with a token and on the local display without one.
+- `animus fix <pr> "<text>"` changes an open pull request a job opened: a new
+  job in that job's worktree, reset to the branch as GitHub has it, that
+  carries on from its implementer session (or a handoff when the session is
+  over the context budget), proves every criterion again and pushes to the
+  same pull request, whose body keeps `Closes #N` and gains a Fixes list. The
+  run log's `fix_of` names the job it continues; `trigger` is `fix`, and
+  `without_session: true` marks a fix that ran from the pull request alone
+  (its spec read from the description, a fresh session). `animus fix`
+  refuses a pull request no job opened, a merged or closed one and one with
+  a fix queued, running or waiting for an answer; a failed fix, or one the
+  reviewer refuses on a ready pull request, pushes nothing. Every pull
+  request body now carries the spec in a collapsed block, left out with a
+  note past GitHub's 65,536 characters. `animus cleanup` keeps a job's
+  worktree and branch while a fix of its pull request is queued, running or
+  waiting. With a Helix, `animus fix` submits to the new `POST /jobs/fix`
+  (`repo`, `pr`, `ask`; the job's person or the owner), which runs it as an
+  `animus fix` process in a new container, and the job page links the job it
+  fixes. Adding the route is not breaking.
 - The display's overview is the same on `animus ui` and on Helix: Needs you, Working now, Queued, Open pull requests, Finished. Result tags are in sentence case, a Finished row says how long its PR took to merge, and the Projects panel has ticks and a key in place of the "All projects" button.
 - `animus retro [--project <name>] [--days <n>]` runs a read-only `retro`
   session (standard tier, a new role in profiles.yaml) over a project's runs

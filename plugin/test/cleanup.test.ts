@@ -5,6 +5,7 @@ import { join } from 'node:path';
 import { test } from 'node:test';
 import { claudeProjectDirs } from '../src/agent.ts';
 import { cleanup, KEEP_DAYS, type PrEnd } from '../src/cleanup.ts';
+import { fixTarget } from '../src/fix.ts';
 import { jobDir, loadState } from '../src/log.ts';
 import { runJob } from '../src/pipeline.ts';
 import type { PrState } from '../src/pr.ts';
@@ -116,4 +117,41 @@ test('a job waiting for an answer is kept however old, until it is named', async
 
   only(run.job, undefined, { named: true });
   assert.equal(existsSync(jobDir(run.job)), false);
+});
+
+// Protects: criterion 7. Fails when: cleanup removes the worktree and branch a fix still waits on because the pull request it updates has since merged, or the fix's own job is treated as having no pull request.
+test('a worktree and branch stay while a fix of their pull request waits for an answer, even after the pull request merged', async () => {
+  const repo = makeRepo();
+  const { agent } = fakeAgent([(req) => { write(req.cwd, 'src/feature.txt', 'done\n'); git(req.cwd, ['add', '-A']); git(req.cwd, ['commit', '-qm', 'say done']); return done(); }, () => clean()]);
+  const first = await runJob({ repo, specFile: writeSpec('size: small\ndifficulty: routine\ntype: feature'), keep: true }, deps(agent));
+  const { run, state } = fixTarget(repo, '1', () => 'OPEN');
+  const asking = fakeAgent([() => ({ output: { status: 'needs-input', summary: '', question: 'Which one?' } })]);
+  const fix = await runJob({ repo, fix: { of: run.job, from: state!, ask: 'Say it twice', pr: run.pr! } }, deps(asking.agent));
+  assert.equal(fix.outcome, 'needs-input');
+
+  const kept = only(first.job, 'MERGED', { now: LATER, ended: new Date(LATER - 40 * DAY).toISOString() });
+  assert.deepEqual(kept.removed, []);
+  assert.match(kept.kept!, new RegExp(`fix ${fix.job} is waiting for an answer`));
+  assert.equal(tryGit(repo, ['rev-parse', '--verify', '--quiet', `refs/heads/animus/${first.job}`]) !== undefined, true);
+  assert.equal(existsSync(loadState(fix.job)!.workspace.worktree), true);
+
+  // Once the fix is gone the pull request's end counts for the job again.
+  only(fix.job, 'MERGED', { named: true });
+  assert.equal(only(first.job, 'MERGED', { now: LATER, ended: new Date(LATER - 40 * DAY).toISOString() }).kept, undefined);
+  assert.equal(tryGit(repo, ['rev-parse', '--verify', '--quiet', `refs/heads/animus/${first.job}`]), undefined);
+});
+
+// Protects: criterion 7. Fails when: a fix that failed, whose run holds no pull request, is taken for a job with none and takes the open pull request's branch with it.
+test('a failed fix counts as its pull request\'s: its branch stays while the pull request is open', async () => {
+  const repo = makeRepo();
+  const { agent } = fakeAgent([(req) => { write(req.cwd, 'src/feature.txt', 'done\n'); git(req.cwd, ['add', '-A']); git(req.cwd, ['commit', '-qm', 'say done']); return done(); }, () => clean()]);
+  const first = await runJob({ repo, specFile: writeSpec('size: small\ndifficulty: routine\ntype: feature'), keep: true }, deps(agent));
+  const { run, state } = fixTarget(repo, '1', () => 'OPEN');
+  const fix = await runJob({ repo, fix: { of: run.job, from: state!, ask: 'Say it twice', pr: run.pr! } }, deps(fakeAgent([() => done()]).agent));
+  assert.equal(fix.outcome, 'failed');
+
+  const kept = only(fix.job, 'OPEN', { now: LATER });
+  assert.deepEqual(kept.removed, []);
+  assert.match(kept.kept!, /is open/);
+  assert.equal(tryGit(repo, ['rev-parse', '--verify', '--quiet', `refs/heads/animus/${first.job}`]) !== undefined, true);
 });

@@ -279,7 +279,8 @@ function jobSide(v: JobPageView): string {
 function jobMain(id: number | string, now: number, local: boolean): string {
   const notice = jobNotice(id, readToken(storage) !== null, state.jobStatus, local);
   const v = state.job?.job.id === id ? jobView(state.job, now, local, state.display?.closed?.find((c) => c.job === id)) : undefined;
-  const lead = v && !notice ? `<div class="tag-row"><span class="tag tone-${v.tag.tone}">${esc(v.tag.text)}</span><span class="mute">${ref(id) ? `${ref(id)} · ` : ''}${esc(v.line)}</span></div>` : '';
+  const fixes = v?.facts.find((f) => f.k === 'fixes');
+  const lead = v && !notice ? `<div class="tag-row"><span class="tag tone-${v.tag.tone}">${esc(v.tag.text)}</span><span class="mute">${ref(id) ? `${ref(id)} · ` : ''}${esc(v.line)}${fixes?.page ? ` · fixes <a href="${esc(fixes.page)}">${esc(fixes.v)}</a>` : ''}</span></div>` : '';
   const scope = `<div class="scope"><div><h1>${esc(v?.title ?? `Job ${ref(id) || id}`)}</h1>${lead}</div></div>`;
   const body = notice ? `<div class="none boxed">${esc(notice.text)}</div>${notice.signIn ? signIn : ''}` : v ? jobSections(v) : '';
   const trail = v && !notice ? `<nav class="crumb" aria-label="Trail"><a href="/jobs">Jobs</a> / ${esc(v.trail.project)} / <code>${esc(v.trail.job)}</code></nav>` : back('/jobs', 'Jobs');
