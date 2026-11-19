@@ -27,8 +27,8 @@ missing, there is nothing to read or update.
   checked against stays in the project's `.animus/animus.yaml`.
 - A job leaves nothing in the target repo but its branch; its state lives
   under `ANIMUS_HOME`.
-- Jobs run in the foreground of whoever started them; Helix is where jobs
-  outlive a session. Helix holds no state beyond `helix.db` and the job
+- Jobs run under one queue and its loop, on Helix or on one machine, never
+  in the foreground of a session (docs/adr/0010). Helix holds no state beyond `helix.db` and the job
   files, and starts jobs only as `animus` processes.
 - Errors meant for the user throw `AnimusError`.
 - A breaking change to the HTTP API, a spec, a profile or a job's files is
