@@ -197,13 +197,13 @@ const fixOf = (f: NonNullable<Recent['fix']>) => `<span class="reason tone-mute"
 
 const recent = (j: Recent) => `<div class="done-row" data-key="j-${j.id}">
   <span>${j.href ? `<a class="tag tone-${j.tone}" href="${esc(j.href)}" target="_blank" rel="noopener noreferrer">${esc(j.tag)}</a>` : `<span class="tag tone-${j.tone}">${esc(j.tag)}</span>`}${j.fix ? '<span class="tag tone-mute">Fix</span>' : ''}</span>
-  <a class="title" href="${esc(j.page)}">${esc(j.title)}</a><span class="by">${[ref(j.id), esc(j.repo), who(j), esc(j.meta)].filter(Boolean).join(' · ')}</span>
+  <a class="title" href="${esc(j.page)}">${esc(j.title)}</a><span class="by">${[esc(j.repo), who(j), esc(j.took)].filter(Boolean).join(' · ')}</span>
   ${j.fix ? fixOf(j.fix) : ''}${j.reason ? `<span class="reason tone-${j.tone}">${esc(j.reason)}</span>` : ''}
 </div>`;
 
 const openPr = (p: Pr) => `<div class="done-row" data-key="pr-${esc(p.href)}">
   <a class="tag tone-${p.draft ? 'mute' : 'open'}" href="${esc(p.href)}" target="_blank" rel="noopener noreferrer">${esc(p.tag)}</a>
-  <a class="title" href="${esc(p.page)}">${esc(p.title)}</a><span class="by">${[ref(p.id), esc(p.repo), who(p)].filter(Boolean).join(' · ')}</span>
+  <a class="title" href="${esc(p.page)}">${esc(p.title)}</a><span class="by">${[esc(p.repo), who(p), esc(p.took)].filter(Boolean).join(' · ')}</span>
 </div>`;
 
 const section = (name: string, title: string, body: string, pulse = false, more = '') => `<section class="section ${name}">
