@@ -20,6 +20,7 @@ import { parseSpec } from '../../plugin/src/spec.ts';
 import { deps, fakeAgent, makeRepo, write, writeSpec, type Step } from '../../plugin/test/helpers.ts';
 import { hashToken, type Config } from '../src/config.ts';
 import { freshBase } from '../src/fresh.ts';
+import { keepLiveToken } from '../src/github-app.ts';
 import { checkProject, projectDir, removeProject, setupHere } from '../src/projects.ts';
 import { jobSecrets, secretsDir, setSecret } from '../src/secrets.ts';
 import { serve } from '../src/server.ts';
@@ -173,6 +174,34 @@ test('a job gets only the names its base branch lists, its person\'s own value b
   assert.match(log, /using \*\*\*/);
   assert.doesNotMatch(log, /ana-own-api-key-1/);
   assert.equal(h.store.get(job.id)!.reason, 'it printed ***');
+});
+
+// Protects: criterion 4 of helix-keeps-running-hides-tokens. Fails when: a person's GitHub token (from their env file or their live token file, renewed while the job runs) or Claude token shows in log.txt, the reason or the question.
+test('a person\'s GitHub and Claude credentials show as *** in their job\'s log, reason and question', async (t) => {
+  const launch: Launch = () => ({ command: process.execPath, args: ['-e', [
+    'const fs = require("node:fs"); const file = process.env.ANIMUS_GH_TOKEN_FILE;',
+    'process.stderr.write("gh " + process.env.GITHUB_TOKEN + " claude " + process.env.CLAUDE_CODE_OAUTH_TOKEN + " live " + fs.readFileSync(file, "utf8") + "\\n");',
+    // Helix renews the live token while the job runs.
+    'fs.writeFileSync(file, "ghu_renewed_token_456"); process.stderr.write("renewed " + fs.readFileSync(file, "utf8") + "\\n");',
+    'console.log(JSON.stringify({ outcome: "needs-input", reason: "push refused for " + process.env.GITHUB_TOKEN, question: "is " + process.env.CLAUDE_CODE_OAUTH_TOKEN + " right?" }))',
+  ].join('\n')] });
+  const h = await helix(undefined, launch);
+  t.after(h.stop);
+  const before = process.env.HELIX_HOME;
+  process.env.HELIX_HOME = h.home;
+  t.after(() => { if (before === undefined) delete process.env.HELIX_HOME; else process.env.HELIX_HOME = before; });
+  writeFileSync(join(h.home, 'ana.env'), 'GITHUB_TOKEN=github_pat_ana_0123\nCLAUDE_CODE_OAUTH_TOKEN=sk-ant-oat-ana-0123\n');
+  h.store.putPerson('ana', { token_sha256: hashToken('ana-token'), env_file: join(h.home, 'ana.env') });
+  keepLiveToken('ana', 'ghu_live_token_123');
+
+  const job = await client.submit({ repo: 'app', spec: SPEC, name: 'spec.md' });
+  await until('the job ends', () => h.store.get(job.id)?.state === 'ended');
+
+  const log = readFileSync(join(h.home, 'jobs', String(job.id), 'log.txt'), 'utf8');
+  assert.match(log, /gh \*\*\* claude \*\*\* live \*\*\*\nrenewed \*\*\*\n/);
+  const ended = h.store.get(job.id)!;
+  assert.equal(ended.reason, 'push refused for ***');
+  assert.equal(ended.question, 'is *** right?');
 });
 
 // Protects: criterion 6 in the add check's output. Fails when: a gate that prints a secret puts its value in the check's log or reason.

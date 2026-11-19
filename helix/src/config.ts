@@ -214,6 +214,10 @@ export function personEnv(person: Person | undefined): Record<string, string> {
   return env;
 }
 
+/** The values of a person's env that are their GitHub or Claude credentials: shown as *** wherever their job's output is kept. */
+export const credentialValues = (env: Record<string, string>): string[] =>
+  ['GH_TOKEN', 'GITHUB_TOKEN', 'CLAUDE_CODE_OAUTH_TOKEN', 'ANTHROPIC_API_KEY'].flatMap((n) => (env[n] ? [env[n]] : []));
+
 /** The KEY=value lines of an env file. */
 export function envFileVars(file: string): Record<string, string> {
   const out: Record<string, string> = {};

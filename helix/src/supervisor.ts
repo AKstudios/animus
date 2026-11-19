@@ -19,7 +19,7 @@ import { parseSpec } from '../../plugin/src/spec.ts';
 import { isOwner } from './owner.ts';
 import { createQueue, MAX_INTERRUPTIONS } from '../../plugin/src/queue.ts';
 import type { Reading } from '../../plugin/src/room.ts';
-import { credentialEnv, personEnv, readyRepos, type Config } from './config.ts';
+import { credentialEnv, credentialValues, personEnv, readyRepos, type Config } from './config.ts';
 import { GITHUB, githubRepo, liveTokenFile, type GitHubUrls } from './github-app.ts';
 import { readPull } from './github-comments.ts';
 import { didNotBuild, DOCKERFILE, type ImageBuild } from './project-image.ts';
@@ -210,13 +210,21 @@ export function supervise(opts: {
     let image: ReturnType<NonNullable<typeof opts.image>> | undefined;
     let cause: Cause | undefined;
     let secrets: Record<string, string> = {};
+    let credentials: string[] = [];
+    const live = liveTokenFile(job.person);
+    // What the job's log, reason and question show as ***: the live token as it is now, since Helix renews it while a job runs.
+    const hidden = () => {
+      let token: string[] = [];
+      try { token = [readFileSync(live, 'utf8')]; } catch { /* signed in without the app */ }
+      return [...Object.values(secrets), ...credentials, ...token];
+    };
     try {
       // Taken off since the job was queued: it never runs, and never with the machine's own logins in place of theirs.
       if (!person) throw new AnimusError(`${job.person} is no longer on Helix`);
       if (!repoDir) throw new AnimusError(`Helix no longer has the project ${job.repo}`);
-      const live = liveTokenFile(job.person);
       // Signed in with the GitHub App: git and Animus's gh read the token as it is when they use it (github-app.ts liveTokenDir).
       const theirs = { ...personEnv(person), ...(existsSync(live) ? { ANIMUS_GH_TOKEN_FILE: live } : {}) };
+      credentials = credentialValues(theirs);
       const looked = opts.preflight?.(job.person, theirs, repoDir, job.repo) ?? {};
       if (looked.why) throw new AnimusError(looked.why);
       // What the person set themselves wins over what was looked up.
@@ -225,7 +233,8 @@ export function supervise(opts: {
       opts.fresh?.(repoDir, jobEnv);
       // A queued job is admitted again: the profile may have changed since it was submitted. A resumed one was admitted when it first started.
       // A fix has no spec of its own: the animus process reads the spec of the job it continues, or of its pull request.
-      const refused = job.animus_job || job.ask || job.provision ? undefined : opts.admit?.(job, repoDir, jobEnv);
+      const admitted = job.animus_job || job.ask || job.provision ? undefined : opts.admit?.(job, repoDir, jobEnv);
+      const refused = admitted && mask(admitted, hidden());
       if (refused) {
         saveAndTell({ ...job, state: 'ended', ended: now(), outcome: 'refused', reason: refused });
         say(`job ${job.id} was refused before it started: ${refused.split('\n')[0]}`);
@@ -242,11 +251,12 @@ export function supervise(opts: {
       launched = launch(job, repoDir, { ...jobEnv, ...secrets }, image?.image);
       env = { ...process.env, ...jobEnv, ...secrets, ...launched.env };
     } catch (err) {
-      saveAndTell({ ...job, state: 'ended', ended: now(), outcome: 'failed', ...(cause ? { cause } : {}), reason: (err as Error).message });
-      say(`job ${job.id} did not start: ${(err as Error).message}`);
+      const reason = mask((err as Error).message, hidden());
+      saveAndTell({ ...job, state: 'ended', ended: now(), outcome: 'failed', ...(cause ? { cause } : {}), reason });
+      say(`job ${job.id} did not start: ${reason}`);
       return false;
     }
-    const spawnJob = (started?: string) => run(job, launched, env, launched.cwd ?? repoDir, Object.values(secrets), started);
+    const spawnJob = (started?: string) => run(job, launched, env, launched.cwd ?? repoDir, hidden, started);
     if (image?.build) buildFirst(job, image.image, image.build, spawnJob);
     else spawnJob();
     return true;
@@ -290,8 +300,8 @@ export function supervise(opts: {
     child.on('close', (code) => ended(code));
   }
 
-  /** Spawns a job's process and follows it to its end. started: when it began building its image, and was said to have started. */
-  function run(job: HelixJob, launched: ReturnType<Launch>, env: NodeJS.ProcessEnv, cwd: string, secrets: string[], started?: string): void {
+  /** Spawns a job's process and follows it to its end. started: when it began building its image, and was said to have started. hidden: the values its output shows as *** now. */
+  function run(job: HelixJob, launched: ReturnType<Launch>, env: NodeJS.ProcessEnv, cwd: string, hidden: () => string[], started?: string): void {
     const child = spawn(launched.command, launched.args, { cwd, env, detached: process.platform !== 'win32', stdio: ['ignore', 'pipe', 'pipe'] });
     children.set(job.id, child);
     const { answer: _used, ...rest } = job;
@@ -305,7 +315,7 @@ export function supervise(opts: {
     let out = '';
     // The log is written whole lines at a time, so a secret split across two chunks is still masked.
     let pending = '';
-    const flush = () => { if (pending) appendFileSync(logFile(job.id), mask(pending, secrets)); pending = ''; };
+    const flush = () => { if (pending) appendFileSync(logFile(job.id), mask(pending, hidden())); pending = ''; };
     child.stdout!.on('data', (chunk: Buffer) => { out += chunk.toString(); });
     child.stderr!.on('data', (chunk: Buffer) => {
       const text = chunk.toString();
@@ -329,8 +339,8 @@ export function supervise(opts: {
       if (current?.state === 'running') {
         let result: { outcome?: string; pr?: string; reason?: string; question?: string; cost_usd?: number } = {};
         try { result = JSON.parse(out) as typeof result; } catch { /* it died before it could say */ }
-        if (result.reason) result.reason = mask(result.reason, secrets);
-        if (result.question) result.question = mask(result.question, secrets);
+        if (result.reason) result.reason = mask(result.reason, hidden());
+        if (result.question) result.question = mask(result.question, hidden());
         const { pid: _pid, ...kept } = current;
         saveAndTell({
           ...kept, state: 'ended', ended: now(), outcome: result.outcome ?? 'failed',
