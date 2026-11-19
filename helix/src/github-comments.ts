@@ -99,17 +99,25 @@ async function pages<T>(path: string, token: string, urls: GitHubUrls): Promise<
 const listComments = (repo: string, since: string, token: string, urls: GitHubUrls) =>
   pages<IssueComment>(`/repos/${repo}/issues/comments?since=${encodeURIComponent(since)}&sort=created&direction=asc`, token, urls);
 
-/** A pull request's reviews and inline comments made after since, as a draft's references are kept: one file each, by name. */
-async function reviewsSince(repo: string, pull: number, since: string, token: string, urls: GitHubUrls): Promise<{ name: string; text: string }[]> {
+/**
+ * A pull request's reviews and inline comments made after since by people on this Helix (by GitHub login, as /animus comments are),
+ * as a draft's references are kept: one file each, by name; left_out counts those by anyone else, which no session is shown.
+ */
+async function reviewsSince(store: Store, repo: string, pull: number, since: string, token: string, urls: GitHubUrls): Promise<{ references: { name: string; text: string }[]; left_out: number }> {
   type Review = { id: number; user: { login: string }; body?: string; submitted_at?: string };
   type Inline = { id: number; user: { login: string }; body: string; path: string; line?: number; created_at: string };
   const after = (t?: string) => Boolean(t) && Date.parse(t!) > Date.parse(since);
+  const ours = new Set(Object.values(store.people()).flatMap((p) => p.github ? [p.github.toLowerCase()] : []));
+  const isOurs = (c: { user: { login: string } }) => ours.has(c.user.login.toLowerCase());
   const reviews = (await pages<Review>(`/repos/${repo}/pulls/${pull}/reviews?`, token, urls)).filter((r) => r.body?.trim() && after(r.submitted_at));
   const inline = (await pages<Inline>(`/repos/${repo}/pulls/${pull}/comments?`, token, urls)).filter((c) => after(c.created_at));
-  return [
-    ...reviews.map((r) => ({ name: `review-${r.id}.md`, text: `Review by ${r.user.login}:\n\n${r.body!.trim()}\n` })),
-    ...inline.map((c) => ({ name: `comment-${c.id}.md`, text: `${c.user.login} on ${c.path}${c.line ? ` line ${c.line}` : ''}:\n\n${c.body.trim()}\n` })),
-  ];
+  return {
+    references: [
+      ...reviews.filter(isOurs).map((r) => ({ name: `review-${r.id}.md`, text: `Review by ${r.user.login}:\n\n${r.body!.trim()}\n` })),
+      ...inline.filter(isOurs).map((c) => ({ name: `comment-${c.id}.md`, text: `${c.user.login} on ${c.path}${c.line ? ` line ${c.line}` : ''}:\n\n${c.body.trim()}\n` })),
+    ],
+    left_out: [...reviews, ...inline].filter((c) => !isOurs(c)).length,
+  };
 }
 
 /** Who may read a project's comments, in the order their tokens are tried: whoever added it, then everyone else. */
@@ -162,6 +170,12 @@ export function draftComment(spec: string, summary?: string): string {
  * step, which neither is told. A fix that pushed says what it changed, its cost and its page at url.
  */
 function milestone(job: HelixJob, url?: string): string | undefined {
+  const text = step(job, url);
+  const n = job.left_out;
+  return text && n ? `${text}\nIt left out ${n} ${n === 1 ? 'review or comment' : 'reviews and comments'} by people not on this Helix.` : text;
+}
+
+function step(job: HelixJob, url?: string): string | undefined {
   if (job.state !== 'ended') return undefined;
   if (job.outcome === 'needs-input') return `Job ${job.id} needs input: ${job.question}\nReply with a comment: \`/animus answer <your answer>\``;
   if (job.ask && job.outcome === 'pr') return `Job ${job.id} pushed to this pull request: ${job.ask}\nIt cost $${(job.cost_usd ?? 0).toFixed(2)}.${url ? ` Its page: ${url.replace(/\/+$/, '')}/jobs/${job.id}` : ''}`;
@@ -252,13 +266,14 @@ export function commentWatcher(opts: {
     // The latest job on Helix that pushed to it, as the supervisor finds the one a fix continues; its end is the last push.
     const last = store.list(-1).filter((j) => j.repo === project.name && j.pr?.endsWith(`/pull/${number}`) && j.ended && (j.outcome === 'pr' || j.outcome === 'draft-pr')).sort((a, b) => a.id - b.id).at(-1);
     let references: { name: string; text: string }[] = [];
+    let left_out = 0;
     if (last) {
       const token = await tokenOf(store, config, person, urls);
       if (!token) throw new AnimusError(`${person} has no GitHub token to read pull request ${number} with`);
-      references = await reviewsSince(repo, number, last.ended!, token, urls);
+      ({ references, left_out } = await reviewsSince(store, repo, number, last.ended!, token, urls));
     }
     try {
-      await jobs.fix(person, { repo: project.name, pr: String(number), ask, github: { repo, issue: number }, ...(references.length ? { references } : {}) });
+      await jobs.fix(person, { repo: project.name, pr: String(number), ask, github: { repo, issue: number }, ...(references.length ? { references } : {}), ...(left_out ? { left_out } : {}) });
     } catch (err) {
       if (err instanceof AnimusError) return `Not queued: ${err.message}.`;
       throw err;

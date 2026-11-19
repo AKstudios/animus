@@ -80,7 +80,7 @@ export const UNTIL_RESTART = 'until restart';
  * A fix on an open pull request (GLOSSARY.md): the pull request as a number, `#number` or its URL, and what to change.
  * From a /animus fix comment: github, the pull request it reports on, and references, files fetched for it by name.
  */
-export type FixRequest = { repo: string; pr: string; ask: string; skills?: PersonalSkill[]; github?: { repo: string; issue: number }; references?: { name: string; text: string }[] };
+export type FixRequest = { repo: string; pr: string; ask: string; skills?: PersonalSkill[]; github?: { repo: string; issue: number }; references?: { name: string; text: string }[]; left_out?: number };
 
 export type Supervisor = {
   submit(person: string, s: Submission): HelixJob;
@@ -403,7 +403,7 @@ export function supervise(opts: {
       // It runs as the author's person: their folder holds the worktree and session it continues, and their token pushes to the branch.
       const job = store.add({
         state: 'queued', person: author, repo: f.repo, spec: '', title: `fix: ${target?.title ?? pull.title}`, ...(target?.tier ? { tier: target.tier } : {}), draft: false,
-        pr: target?.pr ?? pull.url, ...(target ? { fix_of: target.id } : {}), ask: f.ask, ...(f.github ? { github: f.github } : {}), submitted: now(),
+        pr: target?.pr ?? pull.url, ...(target ? { fix_of: target.id } : {}), ask: f.ask, ...(f.github ? { github: f.github } : {}), ...(f.left_out ? { left_out: f.left_out } : {}), submitted: now(),
       });
       // The job's folder is where a container finds what Helix keeps for the job (its skills); a fix has no spec file in it.
       job.spec = join(home, 'jobs', String(job.id), 'fix');
