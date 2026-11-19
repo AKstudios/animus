@@ -12,6 +12,7 @@ import * as client from '../../plugin/src/remote.ts';
 import { startAdmit, submissionAdmit } from '../src/admit.ts';
 import { hashToken, type Config } from '../src/config.ts';
 import { freshBase } from '../src/fresh.ts';
+import { checkProject, projectDir } from '../src/projects.ts';
 import { serve } from '../src/server.ts';
 import { openStore, type HelixJob } from '../src/store.ts';
 import { pauseFile, supervise, type Launch } from '../src/supervisor.ts';
@@ -55,8 +56,8 @@ async function helix(gh: ReturnType<typeof github>, launch: Launch) {
   const store = openStore(join(gh.dir, 'helix.db'));
   store.putPerson('ana', { token_sha256: hashToken('t') });
   store.putProject({ name: 'app', url: 'https://github.com/o/app.git', dir: gh.clone, state: 'ready', added: '' });
-  const supervisor = supervise({ store, config, home: gh.dir, launch, fresh: freshBase, admit: startAdmit });
-  const server = serve({ config, store, supervisor, home: gh.dir, admit: submissionAdmit(store, config) });
+  const supervisor = supervise({ store, config, home: gh.dir, launch, fresh: freshBase, admit: startAdmit(gh.dir) });
+  const server = serve({ config, store, supervisor, home: gh.dir, admit: submissionAdmit(store, config, gh.dir) });
   await new Promise<void>((r) => { server.listen(0, '127.0.0.1', r); });
   process.env.HELIX_URL = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
   process.env.HELIX_TOKEN = 't';
@@ -139,4 +140,58 @@ test('a submit for a project still being checked is answered as still checking, 
     await assert.rejects(h.submit(uiSpec()), /still checking the project app/);
     await assert.rejects(client.submit({ repo: 'nope', spec: uiSpec(), name: 'spec.md' }), /no project named nope/);
   } finally { h.stop(); }
+});
+
+const WITH_SECRET = `${NO_TARGET}secrets: [API_KEY]\n`;
+const SPEC = '---\nsize: small\n---\n# Use the key\n\n## Acceptance criteria\n\n1. It works.\n   $ node check.js\n';
+const SET_IT = /secret API_KEY\b.*animus project secret set app API_KEY/;
+
+// Protects: criterion 4 at submit. Fails when: a spec is queued for a project whose base branch lists a secret with no value, or the refusal does not say how to set it, or the person's own value does not count.
+test('a submit is refused while a secret the base branch lists has no value, naming it and the command, and taken once the person sets their own', async () => {
+  const gh = github(WITH_SECRET);
+  const h = await helix(gh, never);
+  try {
+    await assert.rejects(h.submit(SPEC), SET_IT);
+    assert.deepEqual(h.store.list(), []);
+
+    await client.setSecret('app', 'API_KEY', 'ana-own-key-0123', true);
+    const queued = await h.submit(SPEC);
+    assert.equal(h.store.get(queued.id)?.title, 'Use the key');
+  } finally { h.stop(); }
+});
+
+// Protects: criterion 4 when a queued job starts. Fails when: a job starts though its base branch now lists a secret nobody set.
+test('a queued job whose base branch has since listed an unset secret ends as refused at start, naming it', async () => {
+  const gh = github();
+  const h = await helix(gh, never);
+  try {
+    writeFileSync(pauseFile(gh.dir), '');
+    const queued = await h.submit(SPEC);
+    gh.push(WITH_SECRET);
+    rmSync(pauseFile(gh.dir));
+    h.supervisor.wake();
+
+    const ended = await h.ended(queued.id);
+
+    assert.equal(ended.outcome, 'refused');
+    assert.match(ended.reason!, SET_IT);
+  } finally { h.stop(); }
+});
+
+// Protects: criterion 4 in the add check. Fails when: the check runs setup though a listed secret has no value, or fails without naming it and the command.
+test('the add check fails before setup while a secret its profile lists has no value, naming it and the command', () => {
+  const gh = github(`${WITH_SECRET}setup: echo should not run\n`);
+  writeFileSync(join(gh.dir, 'ana.env'), 'GH_TOKEN=github_pat_ana\n');
+  const store = openStore(join(gh.dir, 'helix.db'));
+  store.putPerson('ana', { token_sha256: 'x', env_file: join(gh.dir, 'ana.env') });
+  store.putProject({ name: 'app', url: gh.origin, dir: projectDir(gh.dir, 'app'), state: 'checking', added: '2026-11-19T00:00:00.000Z', added_by: 'ana' });
+  let setupRan = false;
+  try {
+    const ok = checkProject({ store, home: gh.dir, name: 'app', say: () => {}, setup: () => { setupRan = true; return { code: 0, output: '', gates: [] }; } });
+
+    assert.equal(ok, false);
+    assert.equal(setupRan, false);
+    assert.equal(store.project('app')?.state, 'failed');
+    assert.match(store.project('app')!.reason!, SET_IT);
+  } finally { store.close(); }
 });

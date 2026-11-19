@@ -81,6 +81,12 @@ export function secretsFor(home: string, project: string, person: string | undef
   return env;
 }
 
+/** Why a job of person's would not get the secret name, with the command that sets it; nothing when it would. */
+export function missingSecret(home: string, project: string, person: string | undefined, name: string): string | undefined {
+  if (secretsFor(home, project, person, [name])[name] !== undefined) return undefined;
+  return `secret ${name}, which the profile's secrets: lists, has no value on Helix for ${project}: animus project secret set ${project} ${name} keeps a shared one (whoever added ${project}, or the owner), or with --mine your own`;
+}
+
 /** The supervisor's secrets: by the names the base branch's profile lists, which fresh or image has just fetched. */
 export const jobSecrets = (home: string) => (job: HelixJob, repoDir: string) => secretsFor(home, job.repo, job.person, profileOnBase(repoDir)?.profile.secrets ?? []);
 

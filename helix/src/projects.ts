@@ -20,7 +20,7 @@ import { githubPush, type Runner } from './check.ts';
 import { checkName, credentialEnv, personEnv, type Config } from './config.ts';
 import { personDirs, runArgs, type ContainerConfig } from './container.ts';
 import { isOwner } from './owner.ts';
-import { forgetSecrets, secretsFor } from './secrets.ts';
+import { forgetSecrets, missingSecret, secretsFor } from './secrets.ts';
 import type { Project, Store } from './store.ts';
 import { Refused } from './supervisor.ts';
 
@@ -198,6 +198,10 @@ export function checkProject(opts: {
     say(`${PROFILE_PATH}: base ${profile.base}, gates ${Object.keys(profile.commands).join(', ') || 'none'}`);
     // As a job of the adder's would get them.
     given = secretsFor(home, name, project.added_by, profile.secrets);
+    for (const s of profile.secrets) {
+      const why = missingSecret(home, name, project.added_by, s);
+      if (why) return fail(`${why}; then add it again`);
+    }
 
     const fetched = git(['fetch', '--quiet', 'origin', profile.base], { cwd: dir, env: withToken });
     if (fetched.code !== 0) return fail(`its base branch ${profile.base} could not be fetched: ${fetched.out.split('\n').pop()}`);
