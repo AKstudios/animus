@@ -8,14 +8,17 @@ import { appendFileSync, existsSync, mkdirSync, readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { animusHome } from './log.ts';
 import { PLUGIN_ROOT } from './profiles.ts';
-import { createQueue, type Queue } from './queue.ts';
+import { earlierOf } from './after.ts';
+import { findPrByTitle, prState } from './pr.ts';
+import { createQueue, type Earlier, type Queue } from './queue.ts';
 import type { LocalJob, LocalQueue } from './local-queue.ts';
-import type { Reading } from './room.ts';
+import type { Reading, Room } from './room.ts';
 
 /** What `animus` is asked to do for a job: run it, or resume one that ran before. */
 export const animusArgs = (job: LocalJob): string[] => {
   if (job.animus_job) return ['resume', job.animus_job, ...(job.answer ? ['--answer', job.answer] : [])];
-  return ['run', job.spec, '--repo', job.repo, ...job.flags];
+  // Its earlier pull requests merged before it was queued: animus run does not look for them again.
+  return ['run', job.spec, '--repo', job.repo, ...(job.after?.length ? ['--after-merged'] : []), ...job.flags];
 };
 
 /** Where a job's output goes: the queue's own folder for it, since Animus's job folder is only made once the run says its id. */
@@ -41,7 +44,11 @@ export type LoopOptions = {
   /** What runs a job's process; `spawn` by default. */
   launch?: Launch;
   /** Slots and the room check's settings. */
-  config?: { slots: number; job_memory?: string; reserve_memory?: string };
+  config?: Room & { slots: number };
+  /** Where a waiting job's earlier pull requests stand; GitHub's, through gh, by default. */
+  earlier?: (job: LocalJob) => Promise<Earlier>;
+  /** Looks at waiting jobs every this many looks at the queue: about each minute by default. */
+  pollEvery?: number;
   machine?: () => Reading;
   /** Waits between looks at the queue; a timer by default. */
   sleep?: (ms: number) => Promise<void>;
@@ -50,6 +57,7 @@ export type LoopOptions = {
 };
 
 const LOOK_MS = 2000;
+const POLL_LOOKS = 30;
 
 /**
  * Runs the loop until nothing is left, and returns `done`; `held` when another loop has the lock and this one did nothing.
@@ -122,6 +130,7 @@ export async function runLoop(opts: LoopOptions): Promise<'done' | 'held'> {
 
   const queue: Queue<LocalJob> = createQueue<LocalJob>({
     store, config: { slots: 2, ...opts.config }, name: 'the loop', say, start,
+    earlier: opts.earlier ?? (async (job) => earlierOf({ repo: job.repo, files: job.after ?? [], lookup: prState, find: findPrByTitle })),
     end: (job) => store.save(job),
     ...(opts.machine ? { machine: opts.machine } : {}),
     kill(job) {
@@ -132,7 +141,8 @@ export async function runLoop(opts: LoopOptions): Promise<'done' | 'held'> {
   });
   // What the table calls running has no loop: queue it again, to resume.
   queue.begin();
-  for (;;) {
+  for (let looks = 0; ; looks += 1) {
+    if (looks % (opts.pollEvery ?? POLL_LOOKS) === 0) await queue.poll();
     queue.tick();
     if (store.releaseIfIdle()) return 'done';
     await sleep(LOOK_MS);

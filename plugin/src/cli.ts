@@ -18,7 +18,8 @@ import { describeRuns, describeTools, jobDir, loadState, readRuns, readTools, ty
 import { jobOf, onPath, runJob, uiJobOf } from './pipeline.ts';
 import { describeNumbers, numbers, refreshOutcomes } from './outcomes.ts';
 import { ghLogin, prFacts, publish, pushEvidence } from './pr.ts';
-import { personalFor, readSkillsFile, skillsForRole, snapshotSkills, whereToRun, type PersonalSkill, type Where } from './personal.ts';
+import { resolveAfter } from './after.ts';
+import { loopConfig, personalFor, readSkillsFile, skillsForRole, snapshotSkills, whereToRun, type PersonalSkill, type Where } from './personal.ts';
 import { accept, describeLessons, dismiss, readLessons } from './lessons.ts';
 import { runRetro } from './retro.ts';
 import { listenLocal, localServer } from './local-display.ts';
@@ -311,10 +312,12 @@ async function main(argv: string[]): Promise<number> {
       const spec = loadSpec(specFile);
       const { tier } = resolvePlan(loadFactory(), spec).implement;
       snapshotSkills(mine.skills);
+      const after = resolveAfter(repo, specFile, spec.after);
+      loopConfig();
       say(runsLine);
       const queue = openLocalQueue();
       try {
-        const job = enqueue(queue, { repo, spec: specFile, title: spec.title, tier, flags: [...(values.draft ? ['--draft'] : []), ...(values['dry-run'] ? ['--dry-run'] : []), ...(values.keep ? ['--keep'] : [])] });
+        const job = enqueue(queue, { repo, spec: specFile, title: spec.title, tier, after, flags: [...(values.draft ? ['--draft'] : []), ...(values['dry-run'] ? ['--dry-run'] : []), ...(values.keep ? ['--keep'] : [])] });
         ensureLoop(queue);
         console.log(`job ${job.id} is queued on this machine: ${job.title}\nfollow it with: animus status ${job.id}\nits output: ${logFile(job.id)}`);
       } finally { queue.close(); }
@@ -323,7 +326,7 @@ async function main(argv: string[]): Promise<number> {
     case 'loop': {
       // What `animus` starts to run the queue on this machine, detached; not a command people type.
       const queue = openLocalQueue();
-      try { await runLoop({ queue, version: animusVersion(), say: (line) => console.log(`${new Date().toISOString()} ${line}`) }); } finally { queue.close(); }
+      try { await runLoop({ queue, version: animusVersion(), config: loopConfig(), say: (line) => console.log(`${new Date().toISOString()} ${line}`) }); } finally { queue.close(); }
       return 0;
     }
     case 'plan': {

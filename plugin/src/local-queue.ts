@@ -18,6 +18,8 @@ export type LocalJob = QueueJob & {
   /** The spec file as given to `animus start`. */
   spec: string;
   title: string;
+  /** The earlier spec files it runs after, as absolute paths; it waits until each one's pull request merges. */
+  after?: string[];
   /** Options `animus run` is given as they were typed: --draft, --dry-run, --keep. */
   flags: string[];
   submitted: string;
@@ -90,10 +92,11 @@ export function openLocalQueue(home = animusHome()): LocalQueue {
   };
 }
 
-/** Puts a job in the queue, to start as soon as the loop has room for it. */
-export function enqueue(queue: LocalQueue, job: { repo: string; spec: string; title: string; tier?: Tier; flags?: string[] }): LocalJob {
+/** Puts a job in the queue, to start as soon as the loop has room for it; one with earlier specs waits for their pull requests to merge first. */
+export function enqueue(queue: LocalQueue, job: { repo: string; spec: string; title: string; tier?: Tier; flags?: string[]; after?: string[] }): LocalJob {
   const now = new Date().toISOString();
-  return queue.add({ state: 'queued', repo: job.repo, spec: job.spec, title: job.title, ...(job.tier ? { tier: job.tier } : {}), flags: job.flags ?? [], submitted: now, queued: now });
+  const after = job.after?.length ? job.after : undefined;
+  return queue.add({ state: after ? 'waiting' : 'queued', repo: job.repo, spec: job.spec, title: job.title, ...(after ? { after } : {}), ...(job.tier ? { tier: job.tier } : {}), flags: job.flags ?? [], submitted: now, queued: now });
 }
 
 /** Starts the loop as a process of its own, on every OS: no session, terminal or service manager keeps it. It runs with this process's environment and keeps no token. */
