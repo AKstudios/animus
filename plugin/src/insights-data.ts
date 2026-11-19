@@ -27,7 +27,7 @@ export function insightsData(scope: string, homes: readonly string[], now: numbe
       job: r.job, repo: r.repo, size: r.size, difficulty: r.difficulty, type: r.type, ended: r.ended, outcome: r.outcome, ...(r.cause ? { cause: r.cause } : {}),
       cost_usd: r.cost_usd, ms: r.ms?.total ?? 0, ...(r.pr ? { pr: r.pr } : {}), fix_rounds: r.fix_rounds ?? 0,
       gates: (r.gates ?? []).map((g) => ({ ok: g.ok, flaky: g.checks.filter((c) => c.flaky).map((c) => c.name) })),
-      agents: (r.agents ?? []).map((a) => ({ role: a.role, tier: a.tier, cost_usd: a.cost_usd, calls: a.tools?.calls ?? 0, errors: a.tools?.errors ?? 0 })),
+      agents: (r.agents ?? []).map((a) => ({ role: a.role, tier: a.tier, cost_usd: a.cost_usd, ...(a.tools ? { calls: a.tools.calls, errors: a.tools.errors } : {}) })),
       review: r.review ? { findings: r.review.findings, acted_on: r.review.acted_on } : null,
     })),
     outcomes: Object.fromEntries(Object.entries(outcomes).filter(([pr]) => prs.has(pr))),

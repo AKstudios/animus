@@ -160,3 +160,23 @@ test('the local display serves /insights-data from this machine\'s runs, with no
   server.close();
   assert.deepEqual([data.scope, data.runs.map((r) => r.job), html.status], ['factory', ['j1'], 200]);
 });
+
+// Protects: criterion 2. Fails when: a PR with an opening job and a fix counts twice in delivered/merged, or its cost is only one job's.
+test('a pull request with an opening job and a fix is one merged PR, with both jobs\' cost', () => {
+  const v = insightsView(page([run('j1', 3, { cost_usd: 2 }), run('j9', 1, { cost_usd: 1, pr: pr(1), type: 'fix' })], { [pr(1)]: merged() }));
+  const t = Object.fromEntries(v.tiles.map((x) => [x.label, [x.value, x.note]]));
+  assert.deepEqual([t['Merge rate'], t['Merged untouched'], t['Cost per merged PR']![0], t['Reverted or reworked']], [['100%', '1 of 1'], ['100%', 'no commit after the job'], '$3.00', ['0%', '0 of 1 · 30-day watch']]);
+});
+
+// Protects: criterion 3. Fails when: runs with no tool calls show as 0 calls, or a partly recorded role counts the others or hides how many.
+test('agents with no recorded tool calls say so, and a partly recorded one counts only its recorded runs', () => {
+  const a = (role: string, tier: string, cost_usd: number, tools: Partial<{ calls: number; errors: number }> = {}) => ({ role, tier, cost_usd, ...tools });
+  const v = insightsView(page([
+    run('j1', 1, { agents: [a('implementer', 'deep', 3), a('reviewer', 'opus', 1, { calls: 10, errors: 1 })] }),
+    run('j2', 2, { agents: [a('reviewer', 'opus', 1)] }),
+  ], {}));
+  assert.deepEqual(v.agents, [
+    { role: 'implementer', tier: 'deep', cost: '60%', calls: 'not recorded', failed: 'not recorded' },
+    { role: 'reviewer', tier: 'opus', cost: '40%', calls: '10 · 1 of 2 runs', failed: '10%' },
+  ]);
+});
