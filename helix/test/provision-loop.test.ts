@@ -7,9 +7,11 @@ import { test } from 'node:test';
 import { loadFactory } from '../../plugin/src/profiles.ts';
 import { fakeAgent, makeRepo, write, type Step } from '../../plugin/test/helpers.ts';
 import { hashToken } from '../src/config.ts';
+import { ImageFailed } from '../src/project-image.ts';
 import { projectDir, type SetupRun } from '../src/projects.ts';
 import { queueProvision } from '../src/provision.ts';
 import { runProvision } from '../src/provision-loop.ts';
+import { setSecret } from '../src/secrets.ts';
 import { openStore } from '../src/store.ts';
 import { supervise } from '../src/supervisor.ts';
 
@@ -36,11 +38,13 @@ function provisioning() {
   const published: { branch: string; body: string }[] = [];
   const run = (steps: Step[], over: Partial<Parameters<typeof runProvision>[0]> = {}) => {
     const { agent, calls } = fakeAgent(steps);
+    /** The image each session was given, in order. */
+    const images: (string | undefined)[] = [];
     const result = runProvision({
-      store, home, job, factory: loadFactory(), env: {}, session: (req) => agent(req), setup: needsCurl, say: () => {},
+      store, home, job, factory: loadFactory(), env: {}, session: (req, image) => { images.push(image); return agent(req); }, setup: needsCurl, say: () => {},
       publish: (p) => { published.push({ branch: p.branch, body: p.body }); return 'https://github.com/acme/app/pull/9'; }, ...over,
     });
-    return { result, calls };
+    return { result, calls, images };
   };
   /** What the job's branch holds beyond the base: the files it changed. */
   const changedOnBranch = () => git(project.dir, 'diff', '--name-only', 'origin/main', `animus/provision-${job.id}`).split('\n').filter(Boolean);
@@ -121,4 +125,46 @@ test('Helix starts a provision job on a failed project with the provision launch
     ended = p.store.get(p.job.id);
   }
   assert.deepEqual([ended?.state, ended?.outcome, ended?.pr], ['ended', 'pr', 'https://github.com/acme/app/pull/9']);
+});
+
+// Protects: a secret a gate prints never leaves the loop. Fails when: the failed check's output reaches the next session's prompt or the job's reason unmasked, as the add check's reason never does.
+test('a secret value in a failed gate\'s output is masked in the next prompt and in the job\'s reason', () => {
+  const p = provisioning();
+  const secret = 'npm_secret_value_123';
+  setSecret({ store: p.store, home: p.home, config: {} }, 'ana', 'app', { name: 'NPM_TOKEN', value: secret });
+  const leaks: SetupRun = () => ({ code: 0, output: '', gates: [{ name: 'test', command: 'npm test', ok: false, skipped: false, ms: 5, output: `401 for ${secret}` }] }) as ReturnType<SetupRun>;
+  const tries = (n: number): Step => (req) => { write(req.cwd, '.animus/animus.yaml', `commands:\n  test: npm test\nsecrets: [NPM_TOKEN]\n# try ${n}\n`); return answer('changed'); };
+  const { result, calls } = p.run([tries(1), tries(2)], { setup: leaks, maxAttempts: 2 });
+  assert.equal(result.outcome, 'failed');
+  assert.match(calls[1]!.prompt, /401 for \*\*\*/);
+  assert.match(result.reason!, /401 for \*\*\*/);
+  assert.ok(!calls[1]!.prompt.includes(secret) && !result.reason!.includes(secret));
+});
+
+// Protects: each attempt is followed by a build of the image from the job's branch. Fails when: the Dockerfile is read from the base branch, a failed build is not an attempt that fails with its output given to the next session, or a session does not run in the image the last attempt built.
+test('each attempt builds the image from the branch: a failed build fails the attempt, and the next session runs in the image last built', () => {
+  const p = provisioning();
+  const built: string[] = [];
+  const image = (dockerfile: string | undefined) => {
+    if (dockerfile === undefined) return 'animus-job:test';
+    if (!dockerfile.includes('curl')) throw new ImageFailed('the project image did not build from .animus/Dockerfile:\nE: unable to locate package curl');
+    built.push(dockerfile);
+    return 'animus-project:curl';
+  };
+  const setupImages: (string | undefined)[] = [];
+  // Passes once the image has curl and the profile says it is ready.
+  const setup: SetupRun = (worktree, _clone, _env, using) => {
+    setupImages.push(using);
+    return existsSync(join(worktree, '.animus/animus.yaml')) && readFileSync(join(worktree, '.animus/animus.yaml'), 'utf8').includes('ready') ? PASSES : NO_CURL;
+  };
+  const { result, calls, images } = p.run([
+    (req) => { write(req.cwd, '.animus/Dockerfile', DOCKERFILE); return answer('changed'); },
+    (req) => { write(req.cwd, '.animus/Dockerfile', `${DOCKERFILE}RUN apt-get install -y curl\n`); return answer('changed'); },
+    (req) => { write(req.cwd, '.animus/animus.yaml', 'commands:\n  test: curl --fail localhost\n# ready\n'); return answer('changed'); },
+  ], { image, setup });
+  assert.equal(result.outcome, 'pr');
+  assert.equal(built.length, 2, 'the Dockerfile of the branch was built after attempts 2 and 3');
+  assert.match(calls[1]!.prompt, /unable to locate package curl/, 'the second session is given the build\'s output');
+  assert.deepEqual(images, ['animus-job:test', undefined, 'animus-project:curl']);
+  assert.deepEqual(setupImages, ['animus-project:curl', 'animus-project:curl']);
 });

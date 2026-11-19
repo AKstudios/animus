@@ -91,21 +91,23 @@ export function runProvision(o: ProvisionOpts): ProvisionResult {
     const lines: string[] = [];
     let given: Record<string, string> = {};
     const sayIt = (line: string) => { const m = mask(line, Object.values(given)); lines.push(m); say(m); };
+    // A gate may print a secret: why the check failed goes into the next prompt and the job's reason, so it is masked as the add check's is.
+    const fail = (why: string) => ({ why: mask(why, Object.values(given)), proof: lines });
     remove(checkTree);
     git(clone, ['worktree', 'add', '--quiet', '--detach', checkTree, branch]);
     try {
       let profile;
-      try { profile = loadProfile(checkTree); } catch (err) { return { why: (err as Error).message, proof: lines }; }
+      try { profile = loadProfile(checkTree); } catch (err) { return fail((err as Error).message); }
       given = secretsFor(home, job.repo, job.person, profile.secrets);
       for (const s of profile.secrets) {
         const why = missingSecret(home, job.repo, job.person, s);
-        if (why) return { why, proof: lines };
+        if (why) return fail(why);
       }
       let image: string | undefined;
-      try { image = o.image?.(readDockerfile(checkTree, 'HEAD'), profile.base); } catch (err) { if (err instanceof ImageFailed) return { why: err.message, proof: lines }; throw err; }
+      try { image = o.image?.(readDockerfile(checkTree, 'HEAD'), profile.base); } catch (err) { if (err instanceof ImageFailed) return fail(err.message); throw err; }
       if (!profile.setup && !profile.installs.length && !Object.keys(profile.commands).length) { sayIt('the profile has no installs, setup or gates to try'); return { ...(image ? { image } : {}), proof: lines }; }
       const why = runEnvironment({ setup: o.setup, worktree: checkTree, clone, env: { ...o.env, ...given }, image, profile, on: branch, say: sayIt });
-      return { ...(why ? { why } : {}), ...(image ? { image } : {}), proof: lines };
+      return { ...(why ? { why: fail(why).why } : {}), ...(image ? { image } : {}), proof: lines };
     } finally { remove(checkTree); }
   };
 
