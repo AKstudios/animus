@@ -190,17 +190,19 @@ with the person's own token, so they show as that person with the app's badge.
   job, and `/animus cancel` cancels it. You still get your Slack DM thread.
 - `submit`, `discard`, `answer` and `cancel` from anyone but the draft's or
   job's person, or the owner, get a one-line reply that only they may.
-- `/animus fix <what to change>` on an open pull request a job opened gets a 👀
-  and queues a [fix](#fixes) with that text as its ask, as `animus fix` does.
-  Helix fetches the pull request's review bodies and inline comments made
-  since the last push of its latest job and gives them to the fix as
-  references. The fix comments on the pull request when it pushed (what it
-  changed, its cost and its job page), when it failed or was refused (the
+- A plain `/animus <what to change>` on an open pull request an Animus job
+  opened is a fix: it gets a 👀 and queues a [fix](#fixes) with that text as
+  its ask, as `animus start <pr> "<text>" --helix` does.
+  `/animus fix <what to change>` does the same. When a job on this Helix
+  pushed to the pull request, Helix fetches its review bodies and inline
+  comments made since the last push of its latest job and gives them to the
+  fix as references. The fix comments on the pull request when it pushed (what
+  it changed, its cost and its job page), when it failed or was refused (the
   reason) and when it needs input (the question), and on nothing in between;
   `/animus answer <text>` and `/animus cancel` there act on it, and you still
-  get your Slack DM thread. A plain `/animus <text>` on a pull request, a fix
-  from anyone but the job's person or the owner, one on a pull request no job
-  opened or that is merged or closed, or one while a fix is queued, running or
+  get your Slack DM thread. A fix from anyone but the pull request's author's
+  person or the owner, one on a pull request whose description holds no spec
+  block or that is merged or closed, or one while a fix is queued, running or
   waiting for an answer there (linked) gets a one-line reply and queues
   nothing.
 - A `/animus` comment more than 24 hours old when Helix first sees it (left
@@ -300,21 +302,40 @@ moves it to the release `stable` points at ([releases.md](releases.md)).
 
 ## Fixes
 
-`animus fix <pr> "<what to change>"` from a laptop with a Helix set up, or a
-`/animus fix <what to change>` comment on the pull request
-([GitHub comments](#github-comments)), submits a **fix** (described in [cli.md](cli.md)) to `POST /jobs/fix` when a job on this Helix opened the pull request, and
-prints where to watch it, as `animus submit` does. Helix checks the pull
-request: a job here must have opened it and a fix must not be queued, running
-or waiting for an answer on it (409, naming that fix). Only the person of the
-job that opened it, or the owner, may ask; anyone else gets a one-line 403.
+A fix runs where its session is: on the laptop whose job opened the pull
+request, and on Helix when a job here opened it or no session can be reached
+([cli.md](cli.md#fixing-a-pull-request)). `animus start <pr> "<text>"` from
+a laptop that has joined this Helix, when no job on that laptop opened the
+pull request (or with `--helix`), or a plain `/animus <text>` comment on the
+pull request ([GitHub comments](#github-comments)),
+submits a **fix** to `POST /jobs/fix` and prints where to watch it, as
+`animus submit` does. A comment reaches only Helix: a laptop never watches
+GitHub.
 
-The fix is a job of its own, queued like any other, that runs as the opener's
-job (their folder holds the worktree and the session it continues). Helix
-starts it only as an `animus fix` process, in a new container where
-containers are on; a container is never kept, and the session lives in the
-person's Claude config, so it resumes across containers. A fix is not
-admitted again: the process reads the spec of the job it continues. Its job
-page names and links the job it fixes.
+Helix fixes any open pull request an Animus job opened, wherever it ran, and
+tells one from GitHub itself: its description holds Animus's spec block and
+its author's GitHub login is a person on this Helix, the person the job opened
+it for. One without the spec block is refused with a one-line 400, one whose
+author is not a person here with a 403, and one merged or closed, or with a
+fix queued, running or waiting for an answer on it here, with a 409 naming
+that fix. Only the author's person, or the owner, may ask; anyone else gets a
+one-line 403.
+
+The fix is a job of its own, queued like any other, that runs as the author's
+person, whose token pushes to the branch. When a job on this Helix opened or
+last pushed to the pull request, the fix continues it: that job's folder holds
+the worktree, the session it resumes and the personal skills it uses.
+Otherwise it runs from the pull request alone: the spec from its description,
+the branch from GitHub and a fresh session, with the skills sent with the fix
+only when the author asked for it, and none otherwise. Helix keeps no person's
+personal skills between jobs. Helix starts it only as an `animus fix` process,
+in a new container where containers are on; a container is never kept, and the
+session lives in the person's Claude config, so it resumes across containers.
+A fix is not admitted again: the process reads the spec of the job it
+continues, or of the pull request. Its push is never forced, so one whose
+branch changed on GitHub while it ran pushes nothing and ends failed with "the
+branch changed while this fix ran: fix again". Its job page names and links
+the job it fixes.
 
 ## Lessons
 
@@ -441,7 +462,7 @@ the display's own request for a job page's data sends none.
 | `POST /lessons/<id>` | `action`: `accept` or `dismiss` (404 for an unknown id, 409 for one that cannot change that way); the lesson |
 | `GET /jobs` | The slots and your jobs; `?all`, every person's, for the owner only |
 | `POST /jobs` | Submit: `repo`, `spec`, and optionally `name`, `draft`, `skills`, `profile` (the checkout's profile text, to warn when it differs from the base branch's). The spec is admitted first: 400 with the list of problems when it is refused; the answer's `warnings` when it is admitted with any |
-| `POST /jobs/fix` | Submit a fix (`animus fix`): `repo`, `pr` (a number, `#number` or URL) and `ask`, and optionally `skills`. 404 when no job here opened the pull request, 403 for anyone but that job's person or the owner, 409 when a fix is queued, running or waiting for an answer; the answer is the job, as submit's |
+| `POST /jobs/fix` | Submit a fix (`animus start <pr>`): `repo`, `pr` (a number, `#number` or URL) and `ask`, and optionally `skills`. 400 when its description holds no spec block, 404 when GitHub has no such pull request, 403 when its author is not a person here or for anyone but the author's person or the owner, 409 when it is merged or closed or a fix is queued, running or waiting for an answer; the answer is the job, as submit's |
 | `GET /jobs/<id>` | One job, with the end of its log |
 | `POST /jobs/<id>/answer` | Answer its question (`answer`); it is queued again |
 | `POST /jobs/<id>/cancel` | Cancel your job, or anyone's for the owner |
