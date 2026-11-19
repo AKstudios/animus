@@ -12,7 +12,7 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, runGates, type CheckResult } from '../../plugin/src/gates.ts';
 import { githubUrl } from '../../plugin/src/git.ts';
-import { loadProfile, PROFILE_PATH, useJobEnv } from '../../plugin/src/profile.ts';
+import { loadProfile, mask, PROFILE_PATH, useJobEnv } from '../../plugin/src/profile.ts';
 import { failureExcerpt } from '../../plugin/src/proc.ts';
 import { ensureSetup } from '../../plugin/src/workspace.ts';
 import { readDockerfile } from './project-image.ts';
@@ -20,6 +20,7 @@ import { githubPush, type Runner } from './check.ts';
 import { checkName, credentialEnv, personEnv, type Config } from './config.ts';
 import { personDirs, runArgs, type ContainerConfig } from './container.ts';
 import { isOwner } from './owner.ts';
+import { forgetSecrets, secretsFor } from './secrets.ts';
 import type { Project, Store } from './store.ts';
 import { Refused } from './supervisor.ts';
 
@@ -63,7 +64,7 @@ export function projectView(store: Store, home: string, name: string): Project &
 
 /**
  * Deletes what Helix made for a project: each person's clone of it, its
- * check's folder, and its own clone when Helix made that too. A clone added
+ * check's folder, its secrets, and its own clone when Helix made that too. A clone added
  * on the machine (helix add-repo) is someone's own and stays.
  */
 export function forgetProject(home: string, project: Project): void {
@@ -71,6 +72,7 @@ export function forgetProject(home: string, project: Project): void {
   // A project added again under this name may be another repository: no clone of the old one may be found for it.
   if (existsSync(people)) for (const person of readdirSync(people)) rmSync(join(personDirs(home, person).repos, project.name), { recursive: true, force: true });
   rmSync(checkFolder(home, project.name), { recursive: true, force: true });
+  forgetSecrets(home, project.name);
   if (project.added_by && project.dir === projectDir(home, project.name)) rmSync(project.dir, { recursive: true, force: true });
 }
 
@@ -159,15 +161,18 @@ export function checkProject(opts: {
   /** With containers: the image setup and the gates run in, from the base branch's Dockerfile (project-image.ts projectImage). Throws why it cannot be had. */
   image?: (dockerfile: string | undefined, base: string) => string;
 }): boolean {
-  const { store, home, name, say } = opts;
+  const { store, home, name } = opts;
   const project = store.project(name);
   if (project?.state !== 'checking') return false;
+  // A gate may print a secret: what the check says, and why it failed, show it as ***.
+  let given: Record<string, string> = {};
+  const say = (line: string) => opts.say(mask(line, Object.values(given)));
   // Added again, or removed, while this ran: what is in the table now is not this check's to change.
   const settle = (to: Partial<Project>) => {
     const now = store.project(name);
     if (now?.state === 'checking' && now.added === project.added) store.putProject({ ...now, ...to });
   };
-  const fail = (why: string) => { say(`failed: ${why}`); settle({ state: 'failed', reason: why }); return false; };
+  const fail = (why: string) => { say(`failed: ${why}`); settle({ state: 'failed', reason: mask(why, Object.values(given)) }); return false; };
   const dir = project.dir;
   try {
     const env = personEnv(project.added_by ? store.person(project.added_by) : undefined);
@@ -191,6 +196,8 @@ export function checkProject(opts: {
         : `its default branch has no ${PROFILE_PATH}. Run animus init in a checkout of it, correct what it drafts, commit and push it, then add it again`);
     }
     say(`${PROFILE_PATH}: base ${profile.base}, gates ${Object.keys(profile.commands).join(', ') || 'none'}`);
+    // As a job of the adder's would get them.
+    given = secretsFor(home, name, project.added_by, profile.secrets);
 
     const fetched = git(['fetch', '--quiet', 'origin', profile.base], { cwd: dir, env: withToken });
     if (fetched.code !== 0) return fail(`its base branch ${profile.base} could not be fetched: ${fetched.out.split('\n').pop()}`);
@@ -206,7 +213,7 @@ export function checkProject(opts: {
       const added = git(['worktree', 'add', '--quiet', '--detach', worktree, `origin/${profile.base}`], { cwd: dir, env: {} });
       if (added.code !== 0) return fail(`could not make a worktree on ${profile.base}: ${added.out}`);
       say(`running the profile's installs and setup, then every gate, as a job would${profile.setup ? `: ${profile.setup}` : ''}`);
-      const r = opts.setup(worktree, dir, env, image);
+      const r = opts.setup(worktree, dir, { ...env, ...given }, image);
       git(['worktree', 'remove', '--force', worktree], { cwd: dir, env: {} });
       if (!r.gates) return fail(`setup did not pass, so every job would fail at it:\n${failureExcerpt(r.output, 30)}`);
       say('setup passed');

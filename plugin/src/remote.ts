@@ -94,6 +94,21 @@ export const projects = () => call<{ projects: RemoteProject[] }>('GET', '/proje
 export const project = (name: string) => call<RemoteProject>('GET', `/projects/${encodeURIComponent(name)}`);
 export const addProject = (p: { name: string; url: string }) => call<RemoteProject>('POST', '/projects', p);
 export const removeProject = (name: string) => call<RemoteProject>('DELETE', `/projects/${encodeURIComponent(name)}`);
+/** A project secret as Helix lists it: never its value. mine: the asker's own, which their jobs get before the shared one. */
+export type RemoteSecret = { name: string; scope: 'shared' | 'mine'; by: string };
+/** What setting one says back. masked: long enough to show as *** in a job's output. */
+export type SetSecret = { project: string; name: string; mine: boolean; masked: boolean };
+const secretsPath = (project: string) => `/projects/${encodeURIComponent(project)}/secrets`;
+export const secrets = (project: string) => call<{ secrets: RemoteSecret[] }>('GET', secretsPath(project));
+export const setSecret = (project: string, name: string, value: string, mine: boolean) => call<SetSecret>('POST', secretsPath(project), { name, value, mine });
+export const removeSecret = (project: string, name: string, mine: boolean) => call<{ project: string; name: string; mine: boolean }>('DELETE', `${secretsPath(project)}/${encodeURIComponent(name)}${mine ? '?mine' : ''}`);
+
+/** `animus project secret list`: one line per secret, never a value. */
+export function describeSecrets(project: string, list: readonly RemoteSecret[]): string {
+  if (!list.length) return `${project} has no secrets: animus project secret set ${project} <NAME>`;
+  const width = Math.max(...list.map((s) => s.name.length));
+  return list.map((s) => `${s.name.padEnd(width)}  ${s.scope === 'mine' ? 'yours ' : 'shared'}  set by ${s.by}`).join('\n');
+}
 
 /** `animus project list`: one line per project. */
 export function describeProjects(list: readonly RemoteProject[]): string {

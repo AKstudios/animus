@@ -9,6 +9,7 @@ import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } fr
 import { basename, dirname, isAbsolute, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { AnimusError } from '../../plugin/src/proc.ts';
+import { mask } from '../../plugin/src/profile.ts';
 import { specInBody } from '../../plugin/src/fix.ts';
 import { countUses } from '../../plugin/src/lessons.ts';
 import { animusHome, CANCELLED_MARKER, loadProgress, readRuns, type Cause, type Progress } from '../../plugin/src/log.ts';
@@ -149,6 +150,8 @@ export function supervise(opts: {
   admit?: (job: HelixJob, repoDir: string, env: Record<string, string>) => string | undefined;
   /** With containers, the image a job runs in, from its project's base branch as GitHub has it, with the job's environment (project-image.ts jobImageOf); build, when Docker does not have it yet. Throws why it cannot be had. */
   image?: (repoDir: string, env: Record<string, string>) => { image: string; build?: ImageBuild };
+  /** The project secrets a job gets, by the names its base branch lists (secrets.ts jobSecrets): into its environment only, never an image build's. */
+  secrets?: (job: HelixJob, repoDir: string) => Record<string, string>;
   /** Ends what a job leaves running outside its process tree (its container). */
   reap?: (id: number) => void;
   /** The Animus home a person's jobs write their state to, when it is not Helix's own. */
@@ -197,6 +200,7 @@ export function supervise(opts: {
     let launched: ReturnType<Launch>;
     let image: ReturnType<NonNullable<typeof opts.image>> | undefined;
     let cause: Cause | undefined;
+    let secrets: Record<string, string> = {};
     try {
       // Taken off since the job was queued: it never runs, and never with the machine's own logins in place of theirs.
       if (!person) throw new AnimusError(`${job.person} is no longer on Helix`);
@@ -222,14 +226,15 @@ export function supervise(opts: {
       cause = 'setup';
       image = opts.image?.(repoDir, jobEnv);
       cause = undefined;
-      launched = launch(job, repoDir, jobEnv, image?.image);
-      env = { ...process.env, ...jobEnv, ...launched.env };
+      secrets = opts.secrets?.(job, repoDir) ?? {};
+      launched = launch(job, repoDir, { ...jobEnv, ...secrets }, image?.image);
+      env = { ...process.env, ...jobEnv, ...secrets, ...launched.env };
     } catch (err) {
       saveAndTell({ ...job, state: 'ended', ended: now(), outcome: 'failed', ...(cause ? { cause } : {}), reason: (err as Error).message });
       say(`job ${job.id} did not start: ${(err as Error).message}`);
       return false;
     }
-    const spawnJob = (started?: string) => run(job, launched, env, launched.cwd ?? repoDir, started);
+    const spawnJob = (started?: string) => run(job, launched, env, launched.cwd ?? repoDir, Object.values(secrets), started);
     if (image?.build) buildFirst(job, image.image, image.build, spawnJob);
     else spawnJob();
     return true;
@@ -274,7 +279,7 @@ export function supervise(opts: {
   }
 
   /** Spawns a job's process and follows it to its end. started: when it began building its image, and was said to have started. */
-  function run(job: HelixJob, launched: ReturnType<Launch>, env: NodeJS.ProcessEnv, cwd: string, started?: string): void {
+  function run(job: HelixJob, launched: ReturnType<Launch>, env: NodeJS.ProcessEnv, cwd: string, secrets: string[], started?: string): void {
     const child = spawn(launched.command, launched.args, { cwd, env, detached: process.platform !== 'win32', stdio: ['ignore', 'pipe', 'pipe'] });
     children.set(job.id, child);
     const { answer: _used, ...rest } = job;
@@ -286,10 +291,17 @@ export function supervise(opts: {
     }
 
     let out = '';
+    // The log is written whole lines at a time, so a secret split across two chunks is still masked.
+    let pending = '';
+    const flush = () => { if (pending) appendFileSync(logFile(job.id), mask(pending, secrets)); pending = ''; };
     child.stdout!.on('data', (chunk: Buffer) => { out += chunk.toString(); });
     child.stderr!.on('data', (chunk: Buffer) => {
       const text = chunk.toString();
-      appendFileSync(logFile(job.id), text);
+      const all = pending + text;
+      const cut = all.lastIndexOf('\n') + 1;
+      pending = all.slice(0, cut);
+      flush();
+      pending = all.slice(cut);
       const id = /^job (\S+): /m.exec(text)?.[1];
       if (id && !running.animus_job && !queue.stopped()) {
         running = { ...running, animus_job: id };
@@ -305,6 +317,8 @@ export function supervise(opts: {
       if (current?.state === 'running') {
         let result: { outcome?: string; pr?: string; reason?: string; question?: string; cost_usd?: number } = {};
         try { result = JSON.parse(out) as typeof result; } catch { /* it died before it could say */ }
+        if (result.reason) result.reason = mask(result.reason, secrets);
+        if (result.question) result.question = mask(result.question, secrets);
         const { pid: _pid, ...kept } = current;
         saveAndTell({
           ...kept, state: 'ended', ended: now(), outcome: result.outcome ?? 'failed',
@@ -325,8 +339,9 @@ export function supervise(opts: {
       }
       queue.release(job.id);
     };
-    child.on('error', (err) => end(`could not start: ${err.message}`));
+    child.on('error', (err) => { flush(); end(`could not start: ${err.message}`); });
     child.on('close', (code, signal) => {
+      flush();
       // Animus says why on its last line when it refuses to start a job.
       const last = existsSync(logFile(job.id)) ? readFileSync(logFile(job.id), 'utf8').trimEnd().split('\n').pop() : undefined;
       end(`animus ended with ${signal ?? `exit ${code}`} and no result${last ? `: ${last.replace(/^(animus|helix): /, '')}` : ''}`);

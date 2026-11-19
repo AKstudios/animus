@@ -7,6 +7,7 @@ import { existsSync, readFileSync, rmSync } from 'node:fs';
 import { basename, join } from 'node:path';
 import type { CheckResult } from './gates.ts';
 import type { Plan } from './profiles.ts';
+import { maskSecrets } from './profile.ts';
 import { ANSI, git, AnimusError } from './proc.ts';
 import type { Finding, Review } from './review.ts';
 import type { Spec } from './spec.ts';
@@ -120,7 +121,7 @@ export function prBody(p: PrInput): string {
 
   const review = !p.review ? 'no review' : `${p.reviewRounds} review round(s): ${p.review.summary}`;
   out.push('## Run', '', `- Profile: ${p.plan.size}, ${p.plan.difficulty}, ${p.plan.type}`, `- Models: ${p.models}`, `- Gates: ${p.gateAttempts} run(s), sent back ${p.fixRounds} time(s)`, `- Review: ${cell(review)}`, ...(p.caughtUp ? [`- Caught up with ${p.caughtUp.branch} at ${p.caughtUp.commit}, merged in before the push`] : []), `- Cost: $${p.cost_usd.toFixed(2)} (API-equivalent)`, '', `Built by Animus, job \`${p.job}\`.`);
-  const body = out.join('\n');
+  const body = maskSecrets(out.join('\n'));
   // The spec rides along, so a fix can run from the pull request alone; fenced longer than any fence it holds.
   const fence = '`'.repeat(Math.max(3, ...[...p.spec.text.matchAll(/`+/g)].map((m) => m[0].length + 1)));
   const spec = `\n\n<details><summary>${SPEC_SUMMARY}</summary>\n\n${fence}md\n${p.spec.text.trim()}\n${fence}\n\n</details>`;

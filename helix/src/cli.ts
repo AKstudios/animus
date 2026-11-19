@@ -20,6 +20,7 @@ import { addPerson, addRepo, configFile, envFileVars, helixHome, identityEnv, im
 import { ensureSetup } from '../../plugin/src/workspace.ts';
 import { loadProfile } from '../../plugin/src/profile.ts';
 import { checkInChild, checkProject, failInterruptedChecks, forgetProject, setupAndGates, setupHere, setupInContainer } from './projects.ts';
+import { jobSecrets } from './secrets.ts';
 import { jobImageOf, projectImage } from './project-image.ts';
 import { INVITE_HOURS, invite, takeOff } from './join.ts';
 import { ask } from '../../plugin/src/join.ts';
@@ -198,7 +199,7 @@ function main(argv: string[]): number | undefined | Promise<number> {
       // A job's progress goes to its Slack DM thread, when there is a bot, and its milestones to the issue it came from.
       const notifiers = [...(slack ? [slackNotifier(slack, store, say, config)] : []), githubNotifier({ store, config, say })];
       // Without containers the job runs in Helix's clone of the project, which is brought up to date here; a container does it inside, before animus starts.
-      const supervisor = supervise({ store, config, home, preflight, prepare: beforeJob(store, config), admit: startAdmit, say, ...(config.container ? {} : { fresh: freshBase }), ...isolation, notify: (job) => { for (const tell of notifiers) tell(job); } });
+      const supervisor = supervise({ store, config, home, preflight, prepare: beforeJob(store, config), admit: startAdmit, secrets: jobSecrets(home), say, ...(config.container ? {} : { fresh: freshBase }), ...isolation, notify: (job) => { for (const tell of notifiers) tell(job); } });
       // Drafts start from Slack, when it runs, and from /animus comments on GitHub.
       // With containers, a draft runs in one of its own on a clone of the project's, with only the person's Claude sign-in.
       const contained = config.container && draftLaunch({ home, animusRoot: ROOT, image: imageName(animusVersion()), limits: config.container, uid: uid(), gid: gid() });

@@ -6,6 +6,7 @@ import { appendFileSync, existsSync, mkdirSync, readFileSync, renameSync, writeF
 import { homedir, hostname } from 'node:os';
 import { join } from 'node:path';
 import type { ToolCall, Tokens } from './agent.ts';
+import { maskSecrets } from './profile.ts';
 import type { Plan } from './profiles.ts';
 import type { Finding, Review } from './review.ts';
 import type { Slicing } from './slices.ts';
@@ -176,9 +177,12 @@ export type Progress = {
   pid?: number; host?: string;
 };
 
+/** A job's files are read by the display: no secret it was given is written into them. */
+const masked = (_key: string, v: unknown) => (typeof v === 'string' ? maskSecrets(v) : v);
+
 export function writeJson(file: string, value: unknown): void {
   mkdirSync(join(file, '..'), { recursive: true });
-  writeFileSync(`${file}.tmp`, `${JSON.stringify(value, null, 2)}\n`);
+  writeFileSync(`${file}.tmp`, `${JSON.stringify(value, masked, 2)}\n`);
   renameSync(`${file}.tmp`, file);
 }
 
@@ -212,7 +216,7 @@ export function loadProgress(job: string, home = animusHome()): Progress | undef
 
 export function appendRun(run: Run): void {
   mkdirSync(animusHome(), { recursive: true });
-  appendFileSync(runLog(), `${JSON.stringify(run)}\n`);
+  appendFileSync(runLog(), `${JSON.stringify(run, masked)}\n`);
 }
 
 /** The run log's lines; file is another Animus home's run log (a Helix person's). */

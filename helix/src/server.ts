@@ -3,7 +3,8 @@
 // private network only. Each of those carries a person's token; the queue
 // lists a person's own jobs, a job can be answered only by whoever submitted
 // it and cancelled by them or the owner, and a project removed only by whoever
-// added it or the owner (projects.ts).
+// added it or the owner (projects.ts). A project's secrets are listed, set
+// and removed at /projects/<name>/secrets[/<NAME>] (secrets.ts).
 // Lessons a retro proposed are read at GET /lessons and kept or dropped with
 // POST /lessons/<id>, with any person's token.
 // Joining (invite, join/device, join) carries a one-time code instead, and leave the
@@ -30,6 +31,7 @@ import { invite, inviteDetails, joinHelix, loginDevice, relogin, startDevice, St
 import { openPrs, type ListPrs } from './open-prs.ts';
 import { isOwner, requireOwner } from './owner.ts';
 import { addProject, checkInChild, projectView, removeProject, type StartCheck } from './projects.ts';
+import { listSecrets, removeSecret, setSecret } from './secrets.ts';
 import type { Transport } from './slack-api.ts';
 import { jobLinks, slackInvite } from './slack.ts';
 import type { Store } from './store.ts';
@@ -185,7 +187,7 @@ export function serve(opts: {
         const { cancelled, kept } = takeOff(person, store, config, opts.reap);
         return send(200, { name: person, cancelled: cancelled.map((j) => j.id), ...(kept ? { kept } : {}) });
       }
-      const [, root, id, action] = url.pathname.split('/');
+      const [, root, id, action, sub] = url.pathname.split('/');
       if (root === 'people' && id && !action && req.method === 'DELETE') {
         requireOwner(config, person, 'remove people');
         const name = decodeURIComponent(id);
@@ -216,6 +218,14 @@ export function serve(opts: {
         if (!name && req.method === 'POST') { const { dir: _dir, ...p } = addProject({ store, home, startCheck }, person, await body(req)); return send(202, p); }
         if (name && !action && req.method === 'GET') { const { dir: _dir, ...p } = projectView(store, home, name); return send(200, p); }
         if (name && !action && req.method === 'DELETE') { const { dir: _dir, ...p } = removeProject({ store, home, config }, person, name); return send(200, p); }
+        if (name && action === 'secrets' && !sub && req.method === 'GET') return send(200, { secrets: listSecrets({ store, home }, person, name) });
+        if (name && action === 'secrets' && !sub && req.method === 'POST') return send(200, setSecret({ store, home, config }, person, name, await body(req)));
+        if (name && action === 'secrets' && sub && req.method === 'DELETE') {
+          const secret = decodeURIComponent(sub);
+          const mine = url.searchParams.has('mine');
+          removeSecret({ store, home, config }, person, name, secret, mine);
+          return send(200, { project: name, name: secret, mine });
+        }
         return send(404, { error: `nothing at ${req.method} ${url.pathname}` });
       }
       if (root !== 'jobs') return send(404, { error: `nothing at ${url.pathname}` });
