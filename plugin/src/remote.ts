@@ -192,7 +192,7 @@ const how = (j: RemoteJob) => (j.state === 'ended' ? j.outcome ?? 'ended' : j.st
 /** `animus status`: one line per job, newest last. */
 export function describeJobs(list: readonly RemoteJob[]): string {
   if (!list.length) return 'no jobs';
-  const rows = list.map((j) => [String(j.id), j.person, j.repo, how(j), j.title, j.pr ?? j.question ?? j.reason?.split('\n')[0]?.slice(0, 60) ?? '']);
+  const rows = list.map((j) => [String(j.id), j.person, j.repo, how(j), j.title, j.pr ?? j.question ?? (j.state === 'waiting' ? j.waiting : undefined) ?? j.reason?.split('\n')[0]?.slice(0, 60) ?? '']);
   const widths = rows[0]!.map((_, i) => Math.max(...rows.map((row) => row[i]!.length)));
   return rows.map((row) => row.map((cell, i) => cell.padEnd(widths[i]!)).join('  ').trimEnd()).join('\n');
 }

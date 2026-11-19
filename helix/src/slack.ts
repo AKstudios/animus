@@ -182,7 +182,7 @@ function jobCommand(store: Store, supervisor: Jobs | undefined, owner: string, b
     const p = supervisor?.progress(job);
     if (p && job.started && p.at >= job.started) lines.push(`Stage ${p.stage}, ${p.who} working`);
   }
-  if (job.state === 'queued' && job.waiting) lines.push(`Waiting: ${job.waiting}`);
+  if ((job.state === 'queued' || job.state === 'waiting') && job.waiting) lines.push(`Waiting: ${job.waiting}`);
   if (job.state === 'ended') {
     lines.push(`Outcome: ${job.outcome}`);
     if (job.outcome === 'needs-input') lines.push(`Question: ${job.question}`);
@@ -196,7 +196,7 @@ function jobCommand(store: Store, supervisor: Jobs | undefined, owner: string, b
 
 /** /helix jobs: the person's jobs that are not over or wait for an answer, each with where to follow it. */
 function jobsCommand(store: Store, person: string): string {
-  const mine = [...store.inState('running'), ...store.inState('queued'), ...store.inState('ended').filter((j) => j.outcome === 'needs-input')].filter((j) => j.person === person);
+  const mine = [...store.inState('running'), ...store.inState('queued'), ...store.inState('waiting'), ...store.inState('ended').filter((j) => j.outcome === 'needs-input')].filter((j) => j.person === person);
   if (!mine.length) return 'You have no queued, running or waiting jobs.';
   return mine.map((j) => {
     const thread = store.slackThread(j.id);

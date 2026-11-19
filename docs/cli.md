@@ -138,7 +138,8 @@ warnings. A spec that is refused prints every problem, marked spec or profile
 and `animus start --helix` and `animus submit` are admitted by Helix against
 the base branch on GitHub ([helix.md](helix.md#admit)). `start --helix` warns
 when the checkout's profile differs from the base branch's. A spec with
-`after:` is refused on Helix with a pointer to `--local`.
+A spec with `after:` is accepted on Helix and waits there
+([helix.md](helix.md#waiting-jobs)).
 
 `--slices` also asks the planner how it would cut the spec. That is one
 read-only model session in the repository, so it costs a little.

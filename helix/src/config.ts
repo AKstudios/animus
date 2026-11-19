@@ -10,6 +10,7 @@ import { parse, stringify } from 'yaml';
 import { isRecord } from '../../plugin/src/profile.ts';
 import { TIERS, type Tier } from '../../plugin/src/profiles.ts';
 import { AnimusError, tryGit } from '../../plugin/src/proc.ts';
+import { parseMemory } from '../../plugin/src/room.ts';
 import type { Person, Store } from './store.ts';
 
 export type { Person } from './store.ts';
@@ -52,13 +53,7 @@ export type Config = {
 
 const DEFAULTS: Config = { host: '127.0.0.1', port: 7420, slots: 2, reserve_memory: '2g', job_memory: '4g', tier_limits: {} };
 
-const UNITS: Record<string, number> = { '': 1, b: 1, k: 1024, m: 1024 ** 2, g: 1024 ** 3, t: 1024 ** 4 };
-
-/** A memory size as container memory is written (`6g`, `512m`), in bytes; undefined when it is not one. */
-export function parseMemory(text: unknown): number | undefined {
-  const m = /^(\d+(?:\.\d+)?)([bkmgt]?)b?$/i.exec(String(text).trim());
-  return m && Number(m[1]) > 0 ? Number(m[1]) * UNITS[m[2]!.toLowerCase()]! : undefined;
-}
+export { parseMemory };
 
 /** What config.yaml held before people and projects moved to helix.db. */
 type Old = { repos?: Record<string, string>; people?: Record<string, Person> };

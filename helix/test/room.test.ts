@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
 import { loadConfig, parseMemory, type Config } from '../src/config.ts';
-import type { Reading } from '../src/room.ts';
+import type { Reading } from '../../plugin/src/room.ts';
 import { openStore } from '../src/store.ts';
 import { supervise, type Launch } from '../src/supervisor.ts';
 

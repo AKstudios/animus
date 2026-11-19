@@ -87,12 +87,13 @@ test('POST /jobs refuses with every problem, against the base branch on GitHub, 
   } finally { h.stop(); }
 });
 
-// Protects: criterion 5, after:. Fails when: a spec waiting on an earlier spec is queued on Helix, which cannot follow it.
-test('a spec with after: is refused on Helix with a pointer to --local', async () => {
+// Protects: waiting jobs. Fails when: Helix refuses a spec with after: at admit, so no job can wait there.
+test('a spec with after: is admitted on Helix and queued as waiting', async () => {
   const gh = github(WITH_TARGET);
   const h = await helix(gh, never);
   try {
-    await assert.rejects(h.submit(uiSpec('after: earlier.md\n')), /\[spec\] after: .*animus start --local/);
+    const queued = await h.submit(uiSpec('after: earlier.md\n'));
+    assert.equal(h.store.get(queued.id)?.state, 'waiting');
   } finally { h.stop(); }
 });
 
