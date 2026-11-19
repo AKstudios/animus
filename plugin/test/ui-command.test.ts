@@ -61,9 +61,12 @@ test('animus ui stops an older display that answers with its own process id, and
   const child = spawn(process.execPath, ['-e', "const s=require('http').createServer((q,r)=>r.end(JSON.stringify({local:true,jobs:[],version:'0.0.1',pid:process.pid}))).listen(0,'127.0.0.1',()=>console.log(process.pid+' '+s.address().port))"], { stdio: ['ignore', 'pipe', 'ignore'] });
   const [pid, port] = String(await once(child.stdout!, 'data').then(([b]) => b)).trim().split(' ').map(Number) as [number, number];
   writeFileSync(join(animusHome(), `ui-${port}.json`), JSON.stringify({ pid }));
-  const took = await claim(port);
-  assert.deepEqual(took, { port, reused: false });
-  await once(child, 'exit').catch(() => {});
+  // Listened for before the claim: the child can exit while the claim still waits for the port.
+  const exited = once(child, 'exit');
+  const server = localServer();
+  const took = await claimLocal(server, port, (m) => warnings.push(m));
+  server.close();
+  assert.deepEqual([took, (await exited)[1]], [{ port, reused: false }, 'SIGTERM']);
 });
 
 // Protects: criterion 5, a process id nobody noted is not killed. Fails when: it stops whatever a display says its pid is.
