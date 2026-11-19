@@ -99,6 +99,9 @@ export function folderParts(dir: string, runs: readonly Run[], answer?: string):
   if (gateFiles.length) page.gate_runs = gateFiles.length;
   const checks = gates ? parseGates(read(gates) ?? '') : [];
   if (checks.length) page.checks = checks;
+  if (gateFiles.length > 1) page.gate_list = gateFiles.map((f) => parseGates(read(f) ?? ''));
+  const body = read(join(dir, 'pr-body.md'));
+  if (body?.trim()) page.pr_body = body;
   const reviews = written(dir, /^review-\d+\.json$/).flatMap((f) => readJson<Review>(f) ?? []).filter((r) => Array.isArray(r.findings));
   if (reviews.length) page.reviews = reviews.map((r) => ({ summary: r.summary, findings: r.findings }));
   // The question it stopped on is in its state until a run reads the answer.

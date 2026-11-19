@@ -67,6 +67,10 @@ export type JobPage = {
   checks?: JobCheck[];
   /** How many times its gates ran: the job folder's gate run files. */
   gate_runs?: number;
+  /** Every gate run's checks, oldest first; the last is `checks`. */
+  gate_list?: JobCheck[][];
+  /** The description the pull request was opened with (the job folder's pr-body.md). */
+  pr_body?: string;
   /** Every review round, first to last. */
   reviews?: Pick<Review, 'summary' | 'findings'>[];
   /** Every question the job asked, with the answer it was given; the one it waits on has none. */
