@@ -7,8 +7,9 @@
 // there: no other person's credentials file, no Docker socket, no published
 // port. The container is removed when the job ends.
 import { spawnSync } from 'node:child_process';
-import { existsSync, mkdirSync, readdirSync } from 'node:fs';
+import { existsSync, mkdirSync, readdirSync, writeFileSync } from 'node:fs';
 import { basename, dirname, join } from 'node:path';
+import type { AgentRequest, AgentResult } from '../../plugin/src/agent.ts';
 import { GIVEN_FILE, lessonsFile } from '../../plugin/src/lessons.ts';
 import { AnimusError } from '../../plugin/src/proc.ts';
 import type { Config } from './config.ts';
@@ -106,9 +107,44 @@ export function originOf(repoDir: string): string {
   return url;
 }
 
+/** The containers of a provision job's session and check (sessionInContainer, setupInContainer): one runs at a time. */
+const provisionContainers = (id: number) => [`helix-session-${id}`, `helix-check-provision-${id}`];
+
 /** Ends a job's container, if there is one. Safe to call for one that is gone. */
 export function removeContainer(id: number): void {
-  spawnSync('docker', ['rm', '--force', containerName(id)], { stdio: 'ignore' });
+  spawnSync('docker', ['rm', '--force', containerName(id), ...provisionContainers(id)], { stdio: 'ignore' });
+}
+
+/**
+ * One agent session of a provision job (provision-loop.ts) in a container of
+ * the project's image: the job's folder (its worktree) and the clone it is
+ * made from, and the person's Claude config, with only their Claude sign-in
+ * in the environment, never a GitHub token. `helix provision-session` runs
+ * inside, from the request written beside the worktree.
+ */
+export function sessionInContainer(opts: { home: string; animusRoot: string; image: string; limits: ContainerConfig; uid: number; gid: number; job: Pick<HelixJob, 'id' | 'person'>; clone: string }) {
+  return (req: AgentRequest, image = opts.image): AgentResult => {
+    const person = personDirs(opts.home, opts.job.person);
+    makePersonDirs(person);
+    const folder = dirname(req.cwd);
+    const file = join(folder, 'session.json');
+    // The credentials go by name, as a job's do, and stay out of the file.
+    const { env = {}, ...request } = req;
+    writeFileSync(file, JSON.stringify(request));
+    const name = provisionContainers(opts.job.id)[0]!;
+    const args = runArgs({
+      name, image, limits: opts.limits, uid: opts.uid, gid: opts.gid,
+      mounts: [{ path: opts.animusRoot, readOnly: true }, { path: opts.clone }, { path: folder }, { path: person.claude }],
+      envNames: [...Object.keys(env).filter((n) => DRAFT_ENV.includes(n)), 'CLAUDE_CONFIG_DIR'].sort(), workdir: req.cwd,
+      command: ['node', '--disable-warning=ExperimentalWarning', join(opts.animusRoot, 'helix', 'src', 'cli.ts'), 'provision-session', file],
+    });
+    const r = spawnSync('docker', args, { encoding: 'utf8', maxBuffer: 256 * 1024 * 1024, timeout: req.timeoutMs, env: { ...process.env, ...env, CLAUDE_CONFIG_DIR: person.claude } });
+    if (r.error || r.status !== 0) spawnSync('docker', ['rm', '--force', name], { stdio: 'ignore' });
+    try { return JSON.parse(r.stdout.trim().split('\n').pop() ?? '') as AgentResult; } catch {
+      const why = r.error ? r.error.message : `exit ${r.status}: ${(r.stderr || r.stdout || '').trim().slice(-400)}`;
+      return { ok: false, status: why, text: '', provider: 'claude', model: '', cost_usd: 0, turns: 0, tokens: { input: 0, output: 0, cache_read: 0, cache_write: 0 }, ms: 0 };
+    }
+  };
 }
 
 /** Whether Docker answers and the image is there; why not, if not. */

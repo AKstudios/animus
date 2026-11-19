@@ -4,19 +4,20 @@ import { existsSync, readFileSync, rmSync, unwatchFile, watchFile, writeFileSync
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parseArgs } from 'node:util';
-import { claudeAgent } from '../../plugin/src/agent.ts';
+import { claudeAgent, type AgentRequest } from '../../plugin/src/agent.ts';
 import { loadFactory } from '../../plugin/src/profiles.ts';
 import { AnimusError, tryGit } from '../../plugin/src/proc.ts';
 import { CLEANUP_EVERY_MS, CLEANUP_FIRST_MS, helixCleanup } from './cleanup.ts';
 import { KEEP_DAYS } from '../../plugin/src/cleanup.ts';
 import { checkEnv, checkPerson, describeFindings, failing, githubPush, githubToken } from './check.ts';
 import { animusVersion } from '../../plugin/src/version.ts';
-import { containerLaunch, containerProblem, draftLaunch, imageName, personDirs, personHomes, removeContainer } from './container.ts';
+import { containerLaunch, containerProblem, draftLaunch, imageName, personDirs, personHomes, removeContainer, sessionInContainer } from './container.ts';
+import { runProvision } from './provision-loop.ts';
 import { draftRunner } from './drafts.ts';
 import { startAdmit, submissionAdmit } from './admit.ts';
 import { freshBase } from './fresh.ts';
 import { checkComments, commentWatcher, githubNotifier } from './github-comments.ts';
-import { addPerson, addRepo, configFile, envFileVars, helixHome, identityEnv, importRegistry, loadConfig, readyRepos, removeRepo } from './config.ts';
+import { addPerson, addRepo, configFile, envFileVars, helixHome, identityEnv, importRegistry, loadConfig, personEnv, readyRepos, removeRepo } from './config.ts';
 import { ensureSetup } from '../../plugin/src/workspace.ts';
 import { loadProfile } from '../../plugin/src/profile.ts';
 import { checkInChild, checkProject, failInterruptedChecks, forgetProject, setupAndGates, setupHere, setupInContainer } from './projects.ts';
@@ -348,6 +349,35 @@ function main(argv: string[]): number | undefined | Promise<number> {
         image: (dockerfile: string | undefined, base: string) => projectImage({ dockerfile, base, jobImage, say }),
       };
       return withStore((store) => (checkProject({ store, home: helixHome(), name, say, ...(contained || { setup: setupHere }) }) ? 0 : 1));
+    }
+    case 'provision': {
+      // Run by helix serve for a provision job: the loop's lines are the job's log, its last line on stdout the result the supervisor reads.
+      const { job, project } = withStore((store) => { const j = store.get(Number(positionals[0])); return { job: j, project: j && store.project(j.repo) }; });
+      if (!job?.provision) throw new AnimusError('usage: helix provision <id of a provision job>');
+      if (!project) throw new AnimusError(`Helix no longer has the project ${job.repo}`);
+      const config = loadConfig();
+      const factory = loadFactory();
+      const jobImage = imageName(animusVersion());
+      const say = (line: string) => console.error(line);
+      const clone = project.dir;
+      const contained = config.container && {
+        setup: setupInContainer({ animusRoot: ROOT, image: jobImage, limits: config.container, uid: uid(), gid: gid(), name: `provision-${job.id}` }),
+        image: (dockerfile: string | undefined, base: string) => projectImage({ dockerfile, base, jobImage, say }),
+        session: sessionInContainer({ home: helixHome(), animusRoot: ROOT, image: jobImage, limits: config.container, uid: uid(), gid: gid(), job, clone }),
+      };
+      return withStore((store) => {
+        // What the checks and the session are given by name: the adder's own variables, never Helix's.
+        const env = personEnv(store.person(job.person));
+        const result = runProvision({ store, home: helixHome(), job, factory, env, say, session: (req) => claudeAgent(factory)(req), setup: setupHere, ...contained });
+        console.log(JSON.stringify(result));
+        return 0;
+      });
+    }
+    case 'provision-session': {
+      // Run inside a provision job's container: one agent session from the request file beside the worktree; its result is the last line on stdout.
+      if (!positionals[0]) throw new AnimusError('usage: helix provision-session <request file>');
+      console.log(JSON.stringify(claudeAgent(loadFactory())(JSON.parse(readFileSync(positionals[0], 'utf8')) as AgentRequest)));
+      return 0;
     }
     case 'fresh-base': {
       // Run inside a job's container, before animus: the clone's base branch as GitHub has it, with the job's credentials from the environment.

@@ -29,6 +29,7 @@ export type Factory = {
   planner?: Run & { sizes: string[]; max_slices: number };
   drafter?: Run & { max_usd: number };
   retro?: Run & { max_usd: number };
+  provisioner?: Run & { max_usd: number };
   sizes: Record<string, SizeProfile>;
   difficulties: Record<string, DifficultyProfile>;
   types: Record<string, TypeProfile>;

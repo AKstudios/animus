@@ -129,6 +129,7 @@ The reviewer is independent in context but not in execution. It is a fresh sessi
 - **Failed after the fix rounds:** push the branch and open a draft PR with the failure report, so the work is not lost.
 - **Needs input:** the question goes back to the trigger. The answer resubmits the same job with its history, not a new one.
 - **Session dies mid-run:** the implementer commits at each working step, so a retry resumes from the last commit.
+- **The project's environment fails its add check** (image build, setup or a gate): Helix queues a **provision job**, a job in the queue like any other, for whoever added the project. A script runs up to five attempts or two hours, each an agent session that may change only `.animus/Dockerfile` and `.animus/animus.yaml`, then an image build and the add check on the job's branch; the script, not the agent, decides whether it passed. A pass ends in a pull request with the check's output as proof; the agent saying it is "not an environment problem", or running out of attempts, ends it failed with the reason. When the pull request merges, Helix runs the add check again by itself and the project becomes ready, or failed with no second provision job. See [helix.md](helix.md#provision-jobs).
 
 **After the PR opens**
 

@@ -51,6 +51,15 @@ retro:
   effort: medium
   max_usd: 2
 
+# The provisioner: one attempt of a provision job on Helix (helix/src/provision-loop.ts).
+# A session that edits the project's .animus/Dockerfile and .animus/animus.yaml in
+# a worktree; a script builds the image and runs the add check after it. It
+# stops at max_usd dollars.
+provisioner:
+  tier: standard
+  effort: medium
+  max_usd: 4
+
 sizes:
   trivial:
     looks_like: Typo, copy, config value, one or two files

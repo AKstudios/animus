@@ -37,6 +37,9 @@ function startsFromJobImage(dockerfile: string): boolean {
 /** A project image to build: this command, the Dockerfile on its stdin, stopped after timeout ms. */
 export type ImageBuild = { command: string; args: string[]; input: string; timeout: number };
 
+/** A Dockerfile that is refused or does not build: what a change to the Dockerfile can fix, unlike a machine with no Docker or no job image. */
+export class ImageFailed extends AnimusError {}
+
 /** Why a build failed, with the end of its output. */
 export const didNotBuild = (output: string): string => `the project image did not build from ${DOCKERFILE}:\n${failureExcerpt(output, 30)}`;
 
@@ -49,7 +52,7 @@ export const didNotBuild = (output: string): string => `the project image did no
 export function planProjectImage(opts: { dockerfile: string | undefined; jobImage: string; docker?: Docker }): { image: string; build?: ImageBuild } {
   const { dockerfile, jobImage } = opts;
   if (dockerfile === undefined) return { image: jobImage };
-  if (!startsFromJobImage(dockerfile)) throw new AnimusError(`${DOCKERFILE} must start with ARG ANIMUS_JOB then FROM $ANIMUS_JOB, so the project image is built on the job image Helix gives it`);
+  if (!startsFromJobImage(dockerfile)) throw new ImageFailed(`${DOCKERFILE} must start with ARG ANIMUS_JOB then FROM $ANIMUS_JOB, so the project image is built on the job image Helix gives it`);
   const run = opts.docker ?? realDocker;
   const inspect = (image: string) => run(['image', 'inspect', '--format', '{{.Id}}', image]);
   const job = inspect(jobImage);
@@ -77,7 +80,7 @@ export function projectImage(opts: { dockerfile: string | undefined; jobImage: s
   const output = `${r?.stdout ?? ''}${r?.stderr ?? ''}`.trimEnd();
   // shortcut: the build's output is said once it ends, not as it goes; stream it if people watch long builds.
   for (const line of output.split('\n').filter(Boolean)) say(`  ${line}`);
-  if (r?.status !== 0) throw new AnimusError(didNotBuild(output));
+  if (r?.status !== 0) throw new ImageFailed(didNotBuild(output));
   say(`built ${image}`);
   return image;
 }

@@ -291,13 +291,55 @@ its `affected`, whatever its `paths`. A gate that fails once and passes when
 run again counts as passed, as in a job. Only when all of it passes are jobs
 taken for it. A project that fails the check (a Dockerfile refused or not
 built, setup failing, or a gate failing, with the gate's name and the end
-of its output) says why and can be added again. A project already ready
+of its output) says why, queues a [provision job](#provision-jobs) when the
+environment is what failed, and can be added again. A project already ready
 before this check ran every gate stays ready; adding it again runs it.
 
 GitHub is the member list: anyone on Helix whose token may push to a project
 may submit for it. Only whoever added a project, or the owner, removes it
 over the API; `helix remove-repo` removes any. Removing one deletes the clones Helix and
 people's jobs made of it and its secrets, and keeps a clone added with `add-repo`.
+
+### Provision jobs
+
+An add check that fails in the image build, in setup or in a gate queues a
+**provision job** for whoever added the project: an agent changes the
+project's `.animus/Dockerfile` and `.animus/animus.yaml` until the check
+passes. A failed clone, a token that may not push, a missing or invalid
+profile or a missing secret queues none, since no file the job may change
+fixes them. `animus project list` and the add's output name the job.
+
+It is a job in the queue: it takes a slot, is admitted and started by the
+loop, shows on the display and can be cancelled. Its spec is Helix's, written
+from the failed check's output, and it runs on the adder's Claude and GitHub
+tokens. A project has at most one provision job queued or running, or one
+whose pull request is open; adding the project again meanwhile runs only the
+check and names what exists.
+
+Helix runs the loop itself on the machine (`helix provision`), because a
+job's container has no Docker. Each attempt is one agent session, in a
+container of the project's current image (the job image when it has no
+Dockerfile or its build fails), followed by Helix building the image and
+running the add check on the job's branch. The agent only edits files; the
+script decides whether the attempt passed. Each session after the first is
+given the earlier attempts' changes and the end of each failed build's or
+check's output. Whatever the profile protects, the job may change those two
+files and nothing else: an attempt that changes another file has its changes
+thrown away and counts as failed.
+
+- **A check that passes** ends the job in a pull request holding only the two
+  files, with the check's output as its proof.
+- **Five attempts, or two hours**, end it failed, with what each attempt
+  changed and how its check failed.
+- **The agent may end an attempt** with "not an environment problem" and a
+  reason; the job then ends failed with that reason and uses no further
+  attempts.
+
+Helix sees the pull request merge in its polling of open pull requests (the
+display's, each minute), then runs the add check on the base branch by
+itself. The project becomes ready, or failed with the check's reason and no
+second provision job. A pull request closed without merging only lets the
+next failed add queue another job.
 
 ### Project secrets
 
@@ -561,7 +603,7 @@ the display's own request for a job page's data sends none.
 | `POST /leave` | Take yourself off; refused for the owner |
 | `POST /people` | The owner only: invite `name`, optionally with `github` and `slack` |
 | `DELETE /people/<name>` | The owner only: take a person off, as `helix remove-person` does |
-| `GET /projects` | The projects |
+| `GET /projects` | The projects, each with `provision` (`{ job, state, pr? }`) while it has a [provision job](#provision-jobs) queued, running or with an open pull request |
 | `POST /projects` | Add a project; its check runs in the background (202) |
 | `GET /projects/<name>` | One project, with its check's log |
 | `DELETE /projects/<name>` | Remove a project you added, or any for the owner |

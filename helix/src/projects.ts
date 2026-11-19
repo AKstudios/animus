@@ -15,7 +15,8 @@ import { githubUrl } from '../../plugin/src/git.ts';
 import { loadProfile, mask, PROFILE_PATH, useJobEnv } from '../../plugin/src/profile.ts';
 import { failureExcerpt } from '../../plugin/src/proc.ts';
 import { ensureSetup } from '../../plugin/src/workspace.ts';
-import { readDockerfile } from './project-image.ts';
+import { ImageFailed, readDockerfile } from './project-image.ts';
+import { describeExisting, provisionOf, provisionView, queueProvision } from './provision.ts';
 import { githubPush, type Runner } from './check.ts';
 import { checkName, credentialEnv, personEnv, type Config } from './config.ts';
 import { personDirs, runArgs, type ContainerConfig } from './container.ts';
@@ -55,11 +56,11 @@ export function addProject(opts: { store: Store; home: string; startCheck: Start
 }
 
 /** `GET /projects/<name>`: the project and its check's log. */
-export function projectView(store: Store, home: string, name: string): Project & { log: string } {
+export function projectView(store: Store, home: string, name: string): Project & { log: string } & ReturnType<typeof provisionView> {
   const project = store.project(name);
   if (!project) throw new Refused(404, `Helix has no project named ${name}`);
   const file = checkLog(home, name);
-  return { ...project, log: existsSync(file) ? readFileSync(file, 'utf8') : '' };
+  return { ...project, log: existsSync(file) ? readFileSync(file, 'utf8') : '', ...provisionView(store, name) };
 }
 
 /**
@@ -152,6 +153,25 @@ const git = (args: string[], opts: { cwd?: string; env: Record<string, string> }
 };
 
 /**
+ * Runs the profile's installs and setup, then every gate, in a worktree on
+ * `on` (a branch's name, for what it says), as a job would; says what it finds.
+ * Why it failed, or nothing when it passed. The add check and a provision
+ * job's attempts both end here.
+ */
+export function runEnvironment(opts: { setup: SetupRun; worktree: string; clone: string; env: Record<string, string>; image: string | undefined; profile: { setup?: string }; on: string; say: (line: string) => void }): string | undefined {
+  const { say } = opts;
+  say(`running the profile's installs and setup, then every gate, as a job would${opts.profile.setup ? `: ${opts.profile.setup}` : ''}`);
+  const r = opts.setup(opts.worktree, opts.clone, opts.env, opts.image);
+  if (!r.gates) return `setup did not pass, so every job would fail at it:\n${failureExcerpt(r.output, 30)}`;
+  say('setup passed');
+  for (const line of describe(r.gates).split('\n').slice(0, r.gates.length)) say(`  ${line}`);
+  for (const g of r.gates.filter((g) => g.flaky)) say(`flaky: ${g.name} failed, then passed when run again`);
+  const failed = r.gates.filter((g) => !g.ok);
+  if (failed.length) return `its gates fail on ${opts.on}, so every job would fail at them:\n${describe(failed)}`;
+  return undefined;
+}
+
+/**
  * The check `helix check-project` runs. What it finds goes to say, line by
  * line, for the person waiting on `animus project add`. Moves the project to
  * ready or failed; whether it is ready.
@@ -172,7 +192,18 @@ export function checkProject(opts: {
     const now = store.project(name);
     if (now?.state === 'checking' && now.added === project.added) store.putProject({ ...now, ...to });
   };
-  const fail = (why: string) => { say(`failed: ${why}`); settle({ state: 'failed', reason: mask(why, Object.values(given)) }); return false; };
+  // fixable: the environment failed (image build, setup, a gate), which a provision job may fix; the project's adder gets one unless it has one already.
+  const fail = (why: string, fixable = false) => {
+    say(`failed: ${why}`);
+    if (project.after_provision && fixable) say(`this check followed the merge of provision job ${project.after_provision}: no second provision job is queued`);
+    else if (fixable && project.added_by && store.project(name)?.added === project.added) {
+      const have = provisionOf(store, name);
+      if (have) say(`${describeExisting(have)}: no second one is queued`);
+      else say(`queued provision job ${queueProvision({ store, home, project, why: mask(why, Object.values(given)) }).id} for ${project.added_by} to fix its environment`);
+    }
+    settle({ state: 'failed', reason: mask(why, Object.values(given)) });
+    return false;
+  };
   const dir = project.dir;
   try {
     const env = personEnv(project.added_by ? store.person(project.added_by) : undefined);
@@ -206,7 +237,8 @@ export function checkProject(opts: {
     const fetched = git(['fetch', '--quiet', 'origin', profile.base], { cwd: dir, env: withToken });
     if (fetched.code !== 0) return fail(`its base branch ${profile.base} could not be fetched: ${fetched.out.split('\n').pop()}`);
     // Only with containers: on one machine the machine is the environment, and the Dockerfile is not read.
-    const image = opts.image?.(readDockerfile(dir, `origin/${profile.base}`), profile.base);
+    let image: string | undefined;
+    try { image = opts.image?.(readDockerfile(dir, `origin/${profile.base}`), profile.base); } catch (err) { return fail((err as Error).message, err instanceof ImageFailed); }
 
     if (!profile.setup && !profile.installs.length && !Object.keys(profile.commands).length) {
       say('the profile has no installs, setup or gates to try');
@@ -216,15 +248,9 @@ export function checkProject(opts: {
       git(['worktree', 'prune'], { cwd: dir, env: {} });
       const added = git(['worktree', 'add', '--quiet', '--detach', worktree, `origin/${profile.base}`], { cwd: dir, env: {} });
       if (added.code !== 0) return fail(`could not make a worktree on ${profile.base}: ${added.out}`);
-      say(`running the profile's installs and setup, then every gate, as a job would${profile.setup ? `: ${profile.setup}` : ''}`);
-      const r = opts.setup(worktree, dir, { ...env, ...given }, image);
+      const why = runEnvironment({ setup: opts.setup, worktree, clone: dir, env: { ...env, ...given }, image, profile, on: profile.base, say });
       git(['worktree', 'remove', '--force', worktree], { cwd: dir, env: {} });
-      if (!r.gates) return fail(`setup did not pass, so every job would fail at it:\n${failureExcerpt(r.output, 30)}`);
-      say('setup passed');
-      for (const line of describe(r.gates).split('\n').slice(0, r.gates.length)) say(`  ${line}`);
-      for (const g of r.gates.filter((g) => g.flaky)) say(`flaky: ${g.name} failed, then passed when run again`);
-      const failed = r.gates.filter((g) => !g.ok);
-      if (failed.length) return fail(`its gates fail on ${profile.base}, so every job would fail at them:\n${describe(failed)}`);
+      if (why) return fail(why, true);
     }
     settle({ state: 'ready' });
     say(`${name} is ready: animus submit <spec.md> from a checkout of it`);

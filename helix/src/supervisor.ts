@@ -57,6 +57,12 @@ const animus: Launch = (job, repoDir) => ({
   args: ['--disable-warning=ExperimentalWarning', join(PLUGIN, 'src', 'cli.ts'), ...animusArgs(job, repoDir)],
 });
 
+/** A provision job is Helix's own loop (provision-loop.ts), not `animus run`: it builds images and runs the add check, which a job's container cannot. */
+const provisioning: Launch = (job) => ({
+  command: process.execPath,
+  args: ['--disable-warning=ExperimentalWarning', join(dirname(fileURLToPath(import.meta.url)), 'cli.ts'), 'provision', String(job.id)],
+});
+
 export { MAX_INTERRUPTIONS };
 
 /** Looks at a person's credentials before their job starts: why the job cannot run, or variables to add to it (the person's git identity). */
@@ -141,7 +147,9 @@ export function cancelJobsOf(store: Store, person: string, reap: (id: number) =>
 }
 
 export function supervise(opts: {
-  store: Store; config: Config; home: string; launch?: Launch; preflight?: Preflight; say?: (line: string) => void;
+  store: Store; config: Config; home: string; launch?: Launch;
+  /** How a provision job's process is started: `helix provision` on the machine itself, even when jobs run in containers. */
+  provision?: Launch; preflight?: Preflight; say?: (line: string) => void;
   /** Runs before each job, ahead of preflight, while the job holds its slot: a fresh GitHub token (github-app.ts beforeJob). Throws why the job cannot run. */
   prepare?: (person: string, repo: string) => Promise<void>;
   /** Brings the clone the job runs in up to date with its base branch on GitHub, with the job's environment; throws why it cannot. Left out with containers, which do it inside (container.ts jobCommand). */
@@ -166,7 +174,7 @@ export function supervise(opts: {
   findPull?: FindPull;
 }): Supervisor {
   const { store, config, home } = opts;
-  const launch = opts.launch ?? animus;
+  const launch: Launch = (job, ...rest) => (job.provision ? opts.provision ?? provisioning : opts.launch ?? animus)(job, ...rest);
   const say = opts.say ?? (() => {});
   const reap = opts.reap ?? (() => {});
   const notify = opts.notify ?? (() => {});
@@ -193,7 +201,8 @@ export function supervise(opts: {
   /** Starts a job's process; false when the job ended without one. */
   function start(job: HelixJob): boolean {
     const project = store.project(job.repo);
-    const repoDir = project?.state === 'ready' ? project.dir : '';
+    // A provision job is for a project whose add check failed: it has its clone and is not ready.
+    const repoDir = project && (project.state === 'ready' || (job.provision && project.state === 'failed')) ? project.dir : '';
     const person = store.person(job.person);
     mkdirSync(dirname(logFile(job.id)), { recursive: true });
     let env: NodeJS.ProcessEnv;
@@ -216,17 +225,20 @@ export function supervise(opts: {
       opts.fresh?.(repoDir, jobEnv);
       // A queued job is admitted again: the profile may have changed since it was submitted. A resumed one was admitted when it first started.
       // A fix has no spec of its own: the animus process reads the spec of the job it continues, or of its pull request.
-      const refused = job.animus_job || job.ask ? undefined : opts.admit?.(job, repoDir, jobEnv);
+      const refused = job.animus_job || job.ask || job.provision ? undefined : opts.admit?.(job, repoDir, jobEnv);
       if (refused) {
         saveAndTell({ ...job, state: 'ended', ended: now(), outcome: 'refused', reason: refused });
         say(`job ${job.id} was refused before it started: ${refused.split('\n')[0]}`);
         return false;
       }
       // Its project's image, from the base branch's Dockerfile: what goes wrong here is the job's setup.
-      cause = 'setup';
-      image = opts.image?.(repoDir, jobEnv);
-      cause = undefined;
-      secrets = opts.secrets?.(job, repoDir) ?? {};
+      // A provision job builds its own, from the Dockerfile it is changing, and gives the check's container its secrets itself.
+      if (!job.provision) {
+        cause = 'setup';
+        image = opts.image?.(repoDir, jobEnv);
+        cause = undefined;
+        secrets = opts.secrets?.(job, repoDir) ?? {};
+      }
       launched = launch(job, repoDir, { ...jobEnv, ...secrets }, image?.image);
       env = { ...process.env, ...jobEnv, ...secrets, ...launched.env };
     } catch (err) {

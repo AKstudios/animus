@@ -30,6 +30,7 @@ import { freshToken } from './github-app.ts';
 import { invite, inviteDetails, joinHelix, loginDevice, relogin, startDevice, StillWaiting, takeOff, verifyInChild, type JoinGitHub, type Verify } from './join.ts';
 import { openPrs, type ListPrs } from './open-prs.ts';
 import { isOwner, requireOwner } from './owner.ts';
+import { provisionEnded, provisionView } from './provision.ts';
 import { addProject, checkInChild, projectView, removeProject, type StartCheck } from './projects.ts';
 import { listSecrets, removeSecret, setSecret } from './secrets.ts';
 import type { Transport } from './slack-api.ts';
@@ -104,8 +105,10 @@ export function serve(opts: {
       throw err;
     }
   };
-  const prs = openPrs({ store, fresh: (person) => freshToken(store, config, person, opts.github?.urls), ...(opts.listPrs ? { list: opts.listPrs } : {}), ...(opts.listClosedPrs ? { listClosed: opts.listClosedPrs } : {}) });
-  return createServer((req, res) => {
+  const prs = openPrs({ store, fresh: (person) => freshToken(store, config, person, opts.github?.urls), ended: (job, merged) => provisionEnded({ store, startCheck }, job, merged), ...(opts.listPrs ? { list: opts.listPrs } : {}), ...(opts.listClosedPrs ? { listClosed: opts.listClosedPrs } : {}) });
+  // The display's own reads are not the only ones: a provision job's merge is seen within a minute with nobody looking.
+  const watching = setInterval(() => { prs.closed().catch(() => {}); }, 60_000).unref();
+  const server = createServer((req, res) => {
     const send = (status: number, value: unknown) => {
       res.writeHead(status, { 'content-type': 'application/json', 'helix-version': version });
       res.end(`${JSON.stringify(value)}\n`);
@@ -214,7 +217,7 @@ export function serve(opts: {
       }
       if (root === 'projects') {
         const name = id ? decodeURIComponent(id) : undefined;
-        if (!name && req.method === 'GET') return send(200, { projects: store.projects().map(({ dir: _dir, ...p }) => p) });
+        if (!name && req.method === 'GET') return send(200, { projects: store.projects().map(({ dir: _dir, ...p }) => ({ ...p, ...provisionView(store, p.name) })) });
         if (!name && req.method === 'POST') { const { dir: _dir, ...p } = addProject({ store, home, startCheck }, person, await body(req)); return send(202, p); }
         if (name && !action && req.method === 'GET') { const { dir: _dir, ...p } = projectView(store, home, name); return send(200, p); }
         if (name && !action && req.method === 'DELETE') { const { dir: _dir, ...p } = removeProject({ store, home, config }, person, name); return send(200, p); }
@@ -287,4 +290,6 @@ export function serve(opts: {
       return send(500, { error: `Helix failed on this request: ${(err instanceof Error ? err.message : String(err)).split('\n')[0] || 'unknown error'}` });
     });
   });
+  server.on('close', () => clearInterval(watching));
+  return server;
 }

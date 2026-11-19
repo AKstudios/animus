@@ -421,6 +421,7 @@ async function main(argv: string[]): Promise<number> {
         const p = await addProject(resolve(values.repo ?? cwd), { ...(name ? { name } : {}), say });
         if (p.state === 'ready') { console.log(`${p.name} is on Helix: animus submit <spec.md> from a checkout of it`); return 0; }
         console.log(`${p.name} was not taken: ${p.reason ?? 'its check failed'}`);
+        if (p.provision) console.log(`${helix.describeProvision(p.provision)}: animus project list says how it goes`);
         return 1;
       }
       if (sub === 'secret') {
