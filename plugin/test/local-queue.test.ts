@@ -441,3 +441,31 @@ test('animus doctor warns of variables this shell has that the loop was started 
   assert.doesNotMatch(warned[0]!.detail, /PWD|PATH/);
   assert.deepEqual(loopFindings({ PATH: '/bin' }, home), []);
 });
+
+// Protects: criterion 5, result, cancel and answer on this machine's jobs. Fails when the CLI sends them to Helix, loses the JSON, exits 0 for a job with no pull request, or leaves the queue as it was.
+test('animus result, cancel and answer act on this machine\'s queue', () => {
+  const home = newHome();
+  const queue = openLocalQueue(home);
+  const opened = ended(queue, { outcome: 'pr', pr: 'https://example.test/pr/7' });
+  const failed = ended(queue, { outcome: 'failed', reason: 'gates failed' });
+  const asks = ended(queue, { outcome: 'needs-input', question: 'Which table?' });
+  const waiting = enqueue(queue, spec).id;
+  queue.claim('1.0.0', process.ppid); // a loop is "running", so none is started
+  queue.close();
+
+  const pr = cli(home, 'result', String(opened));
+  const bad = cli(home, 'result', String(failed));
+  const cancelled = cli(home, 'cancel', String(waiting));
+  const answered = cli(home, 'answer', String(asks), 'the', 'orders', 'table');
+
+  assert.equal(pr.code, 0);
+  assert.deepEqual([JSON.parse(pr.out).state, JSON.parse(pr.out).outcome, JSON.parse(pr.out).pr], ['ended', 'pr', 'https://example.test/pr/7']);
+  assert.equal(bad.code, 1);
+  assert.equal(JSON.parse(bad.out).reason, 'gates failed');
+  assert.deepEqual([cancelled.code, cancelled.out.trim()], [0, `job ${waiting} is cancelled`]);
+  assert.equal(answered.code, 0);
+  const after = openLocalQueue(home);
+  assert.equal(after.get(waiting)!.state, 'cancelled');
+  assert.deepEqual([after.get(asks)!.state, after.get(asks)!.answer], ['queued', 'the orders table']);
+  after.close();
+});

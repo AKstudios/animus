@@ -266,3 +266,13 @@ test('a queue job that stopped in setup shows its project and its log once, unde
   assert.equal(page.log, 'job died-in-setup: Died\nsetup blew up\n');
   assert.equal(byQueueId, 200);
 });
+
+// Protects: criterion 3 and 6, a job queued again keeps its queue state on the display. Fails when: an answered job with a folder still shows as ended with its question, or loses the room reason.
+test('a job with a folder that is queued again shows as queued with its room reason', () => {
+  seed('answered', { outcome: 'needs-input' });
+  const queue = openLocalQueue();
+  const job = queue.add({ state: 'queued', animus_job: 'answered', repo: '/work/shop', spec: '/nope.md', title: 'Answered', flags: [], submitted: '2026-11-17T10:00:00.000Z', queued: '2026-11-17T11:00:00.000Z', waiting: 'only 1.0 GB is free; a job needs 4g' });
+  queue.close();
+  const shown = localJobs().filter((j) => j.id === 'answered' || j.id === String(job.id));
+  assert.deepEqual(shown.map((j) => [j.id, j.state, j.outcome, j.question, j.waiting]), [['answered', 'queued', undefined, undefined, 'only 1.0 GB is free; a job needs 4g']]);
+});

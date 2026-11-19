@@ -57,7 +57,9 @@ function jobOf(id: string, runs: readonly Run[], from?: LocalJob): DisplayJob | 
   if (!title && state) { try { title = /^# (.+)$/m.exec(readFileSync(state.spec, 'utf8'))?.[1]; } catch { /* the job's copy is gone */ } }
   const running = !state?.outcome && progress?.host === hostname() && progress.pid !== undefined && alive(progress.pid);
   const submitted = mine[0]?.started ?? progress?.at ?? statSync(jobDir(id)).mtime.toISOString();
-  return {
+  // Queued again to resume (answered, or the loop stopped): the queue's word is newer than the folder's.
+  const again = from && (from.state === 'queued' || from.state === 'waiting' || from.state === 'running') ? from : undefined;
+  const job: DisplayJob = {
     id, person: last?.submitter ?? '', repo: state ? basename(state.repo) : last ? basename(last.repo) : from ? basename(from.repo) : NO_PROJECT, title: title ?? id, submitted,
     state: state?.outcome ? 'ended' : running ? 'running' : 'stopped',
     ...(last?.started ? { started: last.started } : {}), ...(last?.ended ? { ended: last.ended } : {}),
@@ -69,6 +71,9 @@ function jobOf(id: string, runs: readonly Run[], from?: LocalJob): DisplayJob | 
     // `animus resume` needs state.json, which is saved only after the worktree is made.
     ...(!state?.outcome && !running ? state ? { resume: `animus resume ${id}` } : { reason: 'It stopped during setup, before it had a worktree, so there is nothing to resume. Run its spec again.' } : {}),
   };
+  if (!again) return job;
+  const { outcome: _o, question: _q, reason: _r, resume: _s, ended: _e, ...kept } = job;
+  return { ...kept, state: again.state, ...(again.queued ? { queued: again.queued } : {}), ...(again.started ? { started: again.started } : {}), ...(again.waiting ? { waiting: again.waiting } : {}) };
 }
 
 /** Every job this machine's Animus has a folder for, newest first. */
