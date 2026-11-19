@@ -65,10 +65,10 @@ job('drafts-from-slack', REPO.animus, 'Drafts from Slack', {
   outcome: 'pr', spec: SPEC('Drafts from Slack', criteria),
   extra: { slicing: { by: 'planner', slices: [{ title: 'Drafts in a DM', delivers: 'criterion 1' }, { title: 'Submit from a draft', delivers: 'criterion 2' }, { title: 'Manifest scopes', delivers: 'criterion 3' }] } as unknown as JobState['slicing'], slices_done: ['1', '2', '3'] },
 });
-const ag = (stage: string, role: string, tier: string, cost: number, calls: number, errors: number) => ({ stage, role, tier, effort: 'medium', model: tier, ok: true, status: 'ok', cost_usd: cost, turns: 10, tokens: { input: 0, output: 0, cache_read: 0, cache_write: 0 }, ms: 1000, tools: { calls, errors, by_tool: { Bash: calls - 2, Edit: 2 } } });
+const ag = (stage: string, role: string, tier: string, cost: number, calls: number, errors: number) => ({ stage, role, tier, effort: 'medium', model: tier === 'deep' ? 'claude-opus-5-5' : 'claude-sonnet-5-5', ok: true, status: 'ok', cost_usd: cost, turns: 10, tokens: { input: 0, output: 0, cache_read: 0, cache_write: 0 }, ms: 1000, tools: { calls, errors, by_tool: { Bash: calls - 2, Edit: 2 } } });
 ran('drafts-from-slack', REPO.animus, 'Drafts from Slack', 900, 41, 6.02, { outcome: 'pr', pr: 16, extra: {
   fix_rounds: 1, gates: [{ attempt: 1, ok: false, ms: 1000, checks: [{ name: 'test', ok: false, skipped: false, ms: 900, flaky: true }] }, { attempt: 2, ok: true, ms: 1000, checks: [] }],
-  agents: [ag('plan', 'planner', 'opus', 0.9, 14, 0), ag('implement', 'implementer', 'sonnet', 3.4, 62, 3), ag('implement', 'implementer', 'sonnet', 0.7, 18, 1), ag('review', 'reviewer', 'opus', 1.02, 20, 0)],
+  agents: [ag('plan', 'planner', 'deep', 0.9, 14, 0), ag('implement', 'implementer', 'standard', 3.4, 62, 3), ag('implement', 'implementer', 'standard', 0.7, 18, 1), ag('review', 'reviewer', 'deep', 1.02, 20, 0)],
   review: { rounds: 1, findings: 2, blockers: 1, acted_on: 1, open: 0, log: [{ round: 1, severity: 'blocker', file: 'helix/src/drafts.ts', line: 88, fate: 'fixed' }, { round: 1, severity: 'should-fix', file: 'helix/src/slack.ts', line: 212, fate: 'not-acted-on' }] },
 } as Partial<Run> });
 pr(REPO.animus, 16, 'drafts-from-slack', 'MERGED', 400);
@@ -99,7 +99,7 @@ ran('github-sign-in', REPO.animus, "Join Helix with GitHub's sign-in", 1500, 6, 
 // Two months of finished jobs for the Insights page: the last 30 days against the 30 before. Each is
 // [class, project, days ago, minutes, cost, how it ended, human commits, undone, first time through the gates, flaky check].
 const DAY_MIN = 1440;
-const agent = (role: string, tier: string, cost: number, calls: number, errors: number) => ({ stage: 'implement', role, tier, effort: 'medium', model: tier, ok: true, status: 'ok', cost_usd: cost, turns: 10, tokens: {}, ms: 1000, tools: { calls, errors, by_tool: {} } });
+const agent = (role: string, tier: string, cost: number, calls: number, errors: number) => ({ stage: 'implement', role, tier, effort: 'medium', model: tier === 'deep' ? 'claude-opus-5-5' : 'claude-sonnet-5-5', ok: true, status: 'ok', cost_usd: cost, turns: 10, tokens: {}, ms: 1000, tools: { calls, errors, by_tool: {} } });
 type Ended = 'merged' | 'open' | 'closed' | 'gates' | 'asked' | 'budget';
 const past: [string, string, number, number, number, Ended, number, boolean, boolean, string?][] = [
   ['small|trivial|fix', 'meal', 3, 4, 0.4, 'merged', 0, false, true], ['medium|routine|feature', 'animus', 5, 22, 3.1, 'merged', 0, false, true, 'test'],
@@ -120,7 +120,7 @@ past.forEach(([cls, proj, days, minutes, cost, end, humans, undone, first, flaky
     extra: {
       size, difficulty, type, fix_rounds: first ? 0 : 1, ...(delivered ? {} : { cause: end === 'asked' ? 'needs-input' : end === 'budget' ? 'budget' : 'gates' }),
       gates: [{ attempt: 1, ok: first || Boolean(flaky), ms: 1000, checks: [{ name: 'test', ok: first || Boolean(flaky), skipped: false, ms: 900, ...(flaky ? { flaky: true } : {}) }] }],
-      agents: [agent('implementer', 'sonnet', cost * 0.7, 60 + i, i % 4 === 0 ? 3 : 1), agent('reviewer', 'opus', cost * 0.3, 20 + i, 0)],
+      agents: [agent('implementer', 'standard', cost * 0.7, 60 + i, i % 4 === 0 ? 3 : 1), agent('reviewer', 'deep', cost * 0.3, 20 + i, 0)],
       review: delivered ? { rounds: 1, findings: 3, blockers: 0, acted_on: first ? 3 : 2, open: 0 } : null,
     } as Partial<Run>,
   });
