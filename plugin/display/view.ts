@@ -50,7 +50,7 @@ export type View = {
   empty?: { title: string; text: string; free: string; command: string };
   /** The local display: it has no slots or people to show. */
   local: boolean;
-  /** Whether the header links to the people pages: Helix has them, the local display does not. */
+  /** Whether the header links to the people pages: Helix and the local display both have them. */
   people: boolean;
   live: Live[]; noLive: string;
   headline: Headline;
@@ -106,9 +106,17 @@ const LISTED: Record<string, [string, Tone]> = {
   pr: ['PR', 'ink'], 'draft-pr': ['Draft PR', 'ink'], 'dry-run': ['Dry run', 'mute'], 'needs-input': ['Needs input', 'ask'], failed: ['Failed', 'fail'],
 };
 
+/** A person's page to link to, for a job that names one: Helix and the local display both have them. */
+const people = (person: string, _local?: boolean) => (person ? { personPage: personPage(person) } : {});
+
+/** Tokens as a glance reads them: 950, 12.3k, 1.24M. */
+export function tokens(n: number): string {
+  if (n < 1000) return String(n);
+  if (n < 1_000_000) return `${(n / 1000).toFixed(n < 10_000 ? 1 : 0)}k`;
+  return `${(n / 1_000_000).toFixed(n < 10_000_000 ? 2 : 1)}M`;
+}
+
 /** A row of a job in any state; a stopped one says how to carry on. */
-/** A person's page to link to: Helix has them, the local display does not. */
-const people = (person: string, local: boolean) => (local ? {} : { personPage: personPage(person) });
 
 export function recent(j: DisplayJob, local = false, closed?: DisplayClosed): Recent {
   const [tag, tone] = LISTED[j.state === 'ended' ? j.outcome ?? 'failed' : j.state] ?? ['ENDED', 'mute'];
@@ -145,7 +153,7 @@ export function view(d: Display, picked: string | null, now: number): View {
     const stage = j.progress ? d.stages.indexOf(j.progress.stage) : -1;
     return {
       id: j.id, page: jobPage(j.id), repo: j.repo, person: j.person, ...people(j.person, d.local === true), title: j.title,
-      by: [{ text: j.repo }, ...(j.person ? [{ text: j.person, ...(d.local ? {} : { page: personPage(j.person) }) }] : [])],
+      by: [{ text: j.repo }, ...(j.person ? [{ text: j.person, page: personPage(j.person) }] : [])],
       elapsed: j.started ? clock(now - Date.parse(j.started)) : '',
       stage,
       stageText: stage < 0 ? 'STARTING' : d.stages[stage]!.toUpperCase(),
@@ -235,6 +243,6 @@ export function view(d: Display, picked: string | null, now: number): View {
     prs,
     finished: ended.slice(0, FINISHED).map((j) => recent(j, d.local === true, closed.get(j.id))),
     local: d.local === true,
-    people: d.local !== true,
+    people: true,
   };
 }

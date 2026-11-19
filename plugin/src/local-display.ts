@@ -20,6 +20,9 @@ import { logFile } from './local-loop.ts';
 import { openLocalQueue, queueFile, type LocalJob } from './local-queue.ts';
 import { readOutcomes, type Outcomes } from './outcomes.ts';
 import { alive, animusHome, jobDir, loadProgress, loadState, readRuns, STAGES, type Run } from './log.ts';
+import { loadFactory } from './profiles.ts';
+import { personOf, profilesInfo, runTokens, usageOf } from './usage.ts';
+import { PERSON_JOBS, type PeoplePage, type PersonPage } from '../display/shape.ts';
 
 /** Job folders are named by Animus; only a plain name is taken as one. */
 const PLAIN = /^[A-Za-z0-9][\w.-]*$/;
@@ -56,16 +59,22 @@ function jobOf(id: string, runs: readonly Run[], from?: LocalJob): DisplayJob | 
   let title = last?.title;
   if (!title && state) { try { title = /^# (.+)$/m.exec(readFileSync(state.spec, 'utf8'))?.[1]; } catch { /* the job's copy is gone */ } }
   const running = !state?.outcome && progress?.host === hostname() && progress.pid !== undefined && alive(progress.pid);
-  const submitted = mine[0]?.started ?? progress?.at ?? statSync(jobDir(id)).mtime.toISOString();
+  const made = statSync(jobDir(id));
+  const submitted = mine[0]?.started ?? progress?.started ?? (made.birthtimeMs > 0 ? made.birthtime : made.mtime).toISOString();
+  // A running job has no run row for this attempt until it ends: its time so far is from when its process began.
+  const started = running ? progress?.started ?? (mine.length ? undefined : submitted) : last?.started;
+  const tokens = mine.reduce((n, r) => n + runTokens(r), 0);
   // Queued again to resume (answered, or the loop stopped): the queue's word is newer than the folder's.
   const again = from && (from.state === 'queued' || from.state === 'waiting' || from.state === 'running') ? from : undefined;
   const job: DisplayJob = {
-    id, person: last?.submitter ?? '', repo: state ? basename(state.repo) : last ? basename(last.repo) : from ? basename(from.repo) : NO_PROJECT, title: title ?? id, submitted,
+    // A job that has not ended yet is the machine's person's: the newest run says who that is.
+    id, person: personOf(last ?? runs.at(-1)), repo: state ? basename(state.repo) : last ? basename(last.repo) : from ? basename(from.repo) : NO_PROJECT, title: title ?? id, submitted,
     state: state?.outcome ? 'ended' : running ? 'running' : 'stopped',
-    ...(last?.started ? { started: last.started } : {}), ...(last?.ended ? { ended: last.ended } : {}),
+    ...(started ? { started } : {}), ...(last?.ended && !running ? { ended: last.ended } : {}),
+    ...(tokens ? { tokens } : {}),
     ...(state?.outcome ? { outcome: state.outcome } : {}), ...(last?.pr ? { pr: last.pr } : {}),
     ...(last?.reason ? { reason: last.reason } : {}), ...(state?.question ? { question: state.question } : {}),
-    ...(last ? { cost_usd: last.cost_usd } : {}),
+    ...(last && !running ? { cost_usd: last.cost_usd } : {}),
     ...(fix.has(id) ? { fix_rounds: fix.get(id)! } : {}),
     ...(running && progress ? { progress } : {}),
     // `animus resume` needs state.json, which is saved only after the worktree is made.
@@ -142,7 +151,39 @@ export function localJobPage(id: string): JobPage | undefined {
   const o = job.pr ? outcomes[job.pr] : undefined;
   const pr: Partial<JobPage> = o ? { pr_state: o.state.toLowerCase() as PrState, pr_opened: o.opened, ...(o.state === 'MERGED' ? { pr_merged: o.closed ?? o.checked } : {}) } : {};
   const lessons = lessonsCiting(id);
-  return { at: new Date().toISOString(), stages: STAGES, job, ...pr, ...(o ? { after: afterOf(o) } : {}), ...(lessons.length ? { lessons } : {}), ...(spec !== undefined ? { spec } : {}), log: q ? readLog(q.id) : '', ...(folder ? folderParts(jobDir(id), runs.filter((r) => r.job === id)) : {}) };
+  return { at: new Date().toISOString(), stages: STAGES, job, ...pr, ...profiles(), ...(o ? { after: afterOf(o) } : {}), ...(lessons.length ? { lessons } : {}), ...(spec !== undefined ? { spec } : {}), log: q ? readLog(q.id) : '', ...(folder ? folderParts(jobDir(id), runs.filter((r) => r.job === id)) : {}) };
+}
+
+/** What every label means, for the job page; nothing when the profiles do not read. */
+export function profiles(): { profiles?: ReturnType<typeof profilesInfo> } {
+  try { return { profiles: profilesInfo(loadFactory()) }; } catch { return {}; }
+}
+
+/** The people list: everyone this machine's run log names, with their numbers. */
+export function localPeople(): PeoplePage {
+  const jobs = localJobs();
+  const names = [...new Set(jobs.map((j) => j.person).filter(Boolean))];
+  return { at: new Date().toISOString(), people: names.map((name) => {
+    const mine = jobs.filter((j) => j.person === name);
+    // Their newest job here, by when it was submitted, is the last thing they did.
+    const last = mine.reduce<string | undefined>((at, j) => (!at || j.submitted > at ? j.submitted : at), undefined);
+    return { name, jobs: mine.length, prs: mine.filter((j) => j.pr).length, spent: mine.reduce((n, j) => n + (j.cost_usd ?? 0), 0), ...(last ? { last: { at: last, kind: 'submitted' } } : {}) };
+  }) };
+}
+
+/** One person's page: their jobs here, newest first, and what their runs used; nothing for a name the run log does not know. */
+export function localPerson(name: string, before?: string): PersonPage | undefined {
+  const row = localPeople().people.find((p) => p.name === name);
+  if (!row) return undefined;
+  const mine = localJobs().filter((j) => j.person === name);
+  const older = mine.filter((j) => before === undefined || j.submitted < before);
+  return {
+    at: new Date().toISOString(), ...row,
+    jobList: older.slice(0, PERSON_JOBS).map(({ id, title, repo, state, submitted, outcome, pr, cost_usd, tokens }) => ({ id, title, repo, state, submitted, ...(outcome ? { outcome } : {}), ...(pr ? { pr } : {}), ...(cost_usd !== undefined ? { cost_usd } : {}), ...(tokens ? { tokens } : {}) })),
+    more: older.length > PERSON_JOBS,
+    activity: [],
+    usage: usageOf(readRuns().filter((r) => personOf(r) === name), Date.now()),
+  };
 }
 
 /** Listens on the first free port from `port` up, on 127.0.0.1 only. */
@@ -175,9 +216,14 @@ export function localServer(): Server {
       if (!RESULTS.includes(result as Result)) return send(400, { error: `result is one of ${RESULTS.join(', ')}` });
       return send(200, localJobList({ result: result as Result, project: url.searchParams.get('project') ?? '' }, url.searchParams.get('before') ?? undefined));
     }
+    if (url.pathname === '/people/page-data') return send(200, localPeople());
     const [, root, id, action, ...rest] = url.pathname.split('/');
     let name = '';
     try { name = decodeURIComponent(id ?? ''); } catch { /* does not decode: no such job */ }
+    if (root === 'people' && action === 'page-data' && !rest.length) {
+      const page = localPerson(name, url.searchParams.get('before') ?? undefined);
+      return page ? send(200, page) : send(404, { error: `no person ${name}` });
+    }
     if (root === 'jobs' && action === 'page-data' && !rest.length) {
       const page = localJobPage(name);
       return page ? send(200, page) : send(404, { error: `no job ${name}` });

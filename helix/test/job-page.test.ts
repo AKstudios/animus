@@ -4,7 +4,7 @@ import type { AddressInfo } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
-import { atEnd, jobView } from '../../plugin/display/job-view.ts';
+import { atEnd, jobView, when } from '../../plugin/display/job-view.ts';
 import type { DisplayJob, JobPage } from '../../plugin/display/shape.ts';
 import { gateReport, type CheckResult } from '../../plugin/src/gates.ts';
 import type { JobState, Run } from '../../plugin/src/log.ts';
@@ -111,7 +111,7 @@ test('a job page shows the job\'s facts, spec, stages and slices, checks with a 
   assert.deepEqual(v.facts, [
     { k: 'project', v: 'app' }, { k: 'person', v: 'ana', page: '/people/ana' }, { k: 'state', v: 'ended' }, { k: 'outcome', v: 'draft pull request' },
     { k: 'PR', v: '#4', href: 'https://github.com/o/app/pull/4' }, { k: 'cost', v: '$3.40' },
-    { k: 'submitted', v: '2026-11-17 10:00 UTC' }, { k: 'started', v: '2026-11-17 10:05 UTC' }, { k: 'ended', v: '2026-11-17 10:40 UTC' }, { k: 'took', v: '35m' },
+    { k: 'submitted', v: `${when('2026-11-17T10:00:00Z')}` }, { k: 'started', v: `${when('2026-11-17T10:05:00Z')}` }, { k: 'ended', v: `${when('2026-11-17T10:40:00Z')}` }, { k: 'took', v: '35m' },
   ]);
   assert.equal(v.reason, 'the gates still fail');
   assert.equal(v.spec, '# Export to PDF\n\nAs submitted.\n');
@@ -121,8 +121,8 @@ test('a job page shows the job\'s facts, spec, stages and slices, checks with a 
     { name: 'gates', took: '1m', on: false }, { name: 'review', took: '2m', on: false }, { name: 'evidence', took: '0s', on: false }, { name: 'pr', took: '9s', on: false },
   ]);
   assert.deepEqual(v.slices, [
-    { title: 'Export a page', delivers: 'One page exports to PDF.', done: true },
-    { title: 'Export a book', delivers: 'A whole book exports.', done: false },
+    { title: 'Export a page', delivers: 'One page exports to PDF.', done: true, state: 'done' },
+    { title: 'Export a book', delivers: 'A whole book exports.', done: false, state: 'left' },
   ]);
   assert.deepEqual(v.checks, [
     { name: 'typecheck', command: 'npm run typecheck', tag: '✓', tone: 'ink', detail: '1.2s' },
@@ -152,7 +152,7 @@ test('a queued job\'s page shows its spec and facts, and says it has no stages, 
   const job = h.add({ state: 'queued', person: 'ana', repo: 'app', title: 'Later', draft: false, submitted: '2026-11-17T11:59:00Z' }, '# Later\n', '');
   const v = jobView(await h.page(job.id), NOW);
   h.stop();
-  assert.deepEqual(v.facts, [{ k: 'project', v: 'app' }, { k: 'person', v: 'ana', page: '/people/ana' }, { k: 'state', v: 'queued' }, { k: 'submitted', v: '2026-11-17 11:59 UTC' }]);
+  assert.deepEqual(v.facts, [{ k: 'project', v: 'app' }, { k: 'person', v: 'ana', page: '/people/ana' }, { k: 'state', v: 'queued' }, { k: 'submitted', v: `${when('2026-11-17T11:59:00Z')}` }]);
   assert.equal(v.spec, '# Later\n');
   assert.deepEqual([v.stages.map((s) => s.took), v.slices, v.checks, v.reviews, v.questions, v.log, v.follow], [['', '', '', '', '', '', ''], [], [], [], [], '', true]);
 });
@@ -169,8 +169,8 @@ test('a merged job page leads with its tag and line, four numbers and a bar of e
     reviews: [{ summary: 'ok', findings: [] }], slices: [{ title: 'a', delivers: '', done: true }, { title: 'b', delivers: '', done: false }],
   });
   const v = jobView(p, NOW, false, { job: 9, number: 4, merged: true, at: '2026-11-17T12:00:30Z' });
-  assert.deepEqual([v.tag, v.line], [{ text: 'Merged #4', tone: 'merged' }, 'app · ana · started 2026-11-17 10:05 UTC · merged after 1h 20m']);
-  assert.deepEqual(v.numbers, [{ k: 'time taken', v: '35m' }, { k: 'cost', v: '$3.40' }, { k: 'fix rounds · 3 gate runs', v: '–' }, { k: 'slices passed', v: '1 of 2' }]);
+  assert.deepEqual([v.tag, v.line], [{ text: 'Merged #4', tone: 'merged' }, `app · ana · started ${when('2026-11-17T10:05:00Z')} · merged after 1h 20m`]);
+  assert.deepEqual(v.numbers, [{ k: 'time taken', v: '35m' }, { k: 'cost', v: '$3.40' }, { k: 'fix rounds · 3 gate runs', v: '–' }, { k: 'slices passed', v: '1 of 2' }, { k: 'tokens', v: '–' }]);
   assert.deepEqual(v.bar, [
     { name: 'plan', took: '2m', pct: 20, at: 0, label: 'plan', on: false },
     { name: 'implement', took: '6m', pct: 60, at: 20, label: 'implement · 2 slices', on: false },
@@ -180,12 +180,15 @@ test('a merged job page leads with its tag and line, four numbers and a bar of e
 });
 
 // Protects: criterion 4's side panels and chips. Fails when: the third number, the Agents shares, the after-the-job rows, the watch, the lessons, the flaky chip, a finding's fate or the tool calls are wrong.
+/** An agent session's fields that a test does not care about. */
+const session = { model: '', effort: '', ok: true, ms: 0, turns: 0, errors: 0, tokens: { input: 0, output: 0, cache_read: 0, cache_write: 0 } };
+
 test('a merged job page tells its fix rounds, agents, what happened after, the watch, lessons, flaky checks, finding fates and tool calls', () => {
   const p = page({ state: 'ended', outcome: 'pr', pr: 'https://github.com/o/app/pull/4', cost_usd: 4, started: '2026-11-17T10:05:00Z', ended: '2026-11-17T10:40:30Z' }, {
     gate_runs: 3, reviews: [{ summary: 'x', findings: [{ severity: 'blocker', file: 'a.ts', line: 1, problem: 'p', fix: 'f' }, { severity: 'note', problem: 'n', fix: '' }] }],
     run: {
       fix_rounds: 2, gates: [{ flaky: ['test'] }, { flaky: ['test'] }, { flaky: [] }],
-      agents: [{ role: 'plan', tier: 'fast', cost_usd: 1, calls: 4, errors: 0 }, { role: 'implement', tier: 'strong', cost_usd: 3, calls: 20, errors: 2 }],
+      agents: [{ ...session, stage: 'plan', role: 'plan', tier: 'fast', cost_usd: 1, calls: 4, errors: 0 }, { ...session, stage: 'implement', role: 'implement', tier: 'strong', cost_usd: 3, calls: 20, errors: 2 }],
       findings: [{ round: 1, severity: 'blocker', fate: 'fixed' }, { round: 1, severity: 'note', fate: 'not-acted-on' }],
       tools: { calls: 24, errors: 2, text: 'implement  Bash ×12' },
     },
@@ -238,7 +241,7 @@ test('a job page has a trail, a Pull request panel with its branch and times, th
   const v = jobView(p, NOW);
   assert.deepEqual(v.trail, { project: 'app', job: 'the-job-1a2b' });
   assert.deepEqual(v.pr, { number: '#4', href: 'https://github.com/o/app/pull/4', state: 'merged', tone: 'merged', rows: [
-    { k: 'branch', v: 'animus/the-job-1a2b' }, { k: 'opened', v: '2026-11-17 10:41 UTC' }, { k: 'merged', v: '2026-11-17 12:00 UTC' },
+    { k: 'branch', v: 'animus/the-job-1a2b' }, { k: 'opened', v: `${when('2026-11-17T10:41:00Z')}` }, { k: 'merged', v: `${when('2026-11-17T12:00:00Z')}` },
   ] });
   assert.deepEqual(v.labels, [{ k: 'size', v: 'medium' }, { k: 'difficulty', v: 'hard' }, { k: 'type', v: 'feature' }]);
   assert.deepEqual(v.notes, { criteria: '0 of 0 proven', checks: '1 failed on the last run', review: '2 rounds · 2 findings' });
@@ -250,7 +253,7 @@ test('a job page has a trail, a Pull request panel with its branch and times, th
 test('a running job\'s page marks the stage it is on, counts how long it has run, and follows its log', () => {
   const v = jobView(page({ started: '2026-11-17T11:47:30Z', progress: { stage: 'gates', who: 'gates · attempt 1', at: '2026-11-17T11:59:00Z' } }, { log: 'gates, run 1' }), NOW);
   assert.deepEqual(v.stages.filter((s) => s.on).map((s) => s.name), ['gates']);
-  assert.deepEqual(v.facts.slice(-2), [{ k: 'started', v: '2026-11-17 11:47 UTC' }, { k: 'running for', v: '12:30' }]);
+  assert.deepEqual(v.facts.slice(-2), [{ k: 'started', v: `${when('2026-11-17T11:47:00Z')}` }, { k: 'running for', v: '12:30' }]);
   assert.deepEqual([v.log, v.follow], ['gates, run 1', true]);
 });
 
@@ -352,4 +355,74 @@ test('a listed screenshot that links outside the job\'s folder is not served', {
   const res = await fetch(new URL(`/jobs/${job.id}/shots/build/home.png`, h.url), { headers: { authorization: 'Bearer ben-token' } });
   h.stop();
   assert.equal(res.status, 404);
+});
+
+// Protects: criterion 5, times in the viewer's zone with the year only when it is not this one. Fails when: the year is shown for this year or left off another.
+test('a time reads as month, day and time, with the year only when it is not this one', () => {
+  const now = Date.parse('2026-11-17T12:00:00Z');
+  const [thisYear, other] = [when('2026-06-17T12:00:00Z', now), when('2025-06-17T12:00:00Z', now)];
+  assert.match(thisYear, /^Jun 1[67], \d{1,2}:00\s?[AP]M$/);
+  assert.ok(!thisYear.includes('2026') && other.includes('2025'), `${thisYear} | ${other}`);
+});
+
+// Protects: criterion 6, slices first with where each one is. Fails when: the working slice is not the first one not passed, or a slice of an ended job still reads as to come.
+test('a slice is passed, the one being worked on while the job runs, to come, or left once the job ended', () => {
+  const slices = [{ title: 'a', delivers: '', done: true }, { title: 'b', delivers: '', done: false }, { title: 'c', delivers: '', done: false }];
+  assert.deepEqual(jobView(page({ state: 'running' }, { slices }), NOW).slices.map((s) => s.state), ['done', 'now', 'next']);
+  assert.deepEqual(jobView(page({ state: 'ended', outcome: 'failed' }, { slices }), NOW).slices.map((s) => s.state), ['done', 'left', 'left']);
+});
+
+// Protects: criterion 7, a check that is not a criterion's is drawn like one. Fails when: its output is lost from its row or a flaky check is not a note.
+test('a check that is not a criterion keeps its command and output for a row, and a flaky one is a note', () => {
+  const v = jobView(page({ state: 'ended' }, { checks: [{ name: 'lint', command: 'npm run lint', status: 'fail', detail: '1s', output: 'bad' }], run: { fix_rounds: 0, gates: [{ flaky: ['test'] }], agents: [], findings: [], tools: { calls: 0, errors: 0, text: '' } } }), NOW);
+  assert.deepEqual(v.pills, [{ name: 'lint', command: 'npm run lint', tag: '✗', tone: 'fail', output: 'bad' }]);
+  assert.deepEqual(v.flaky, ['test was flaky once']);
+});
+
+// Protects: criteria 8 and 9, the opened time bar and tokens. Fails when: a session is placed outside its stage's part of the bar, a stage's sessions or tokens are wrong, or cache tokens are left out.
+test('the time bar opens into each stage and each agent session placed inside its stage\'s part, with tokens', () => {
+  const t = (input: number, output: number, cache_read: number, cache_write: number) => ({ input, output, cache_read, cache_write });
+  const p = page({ state: 'ended', outcome: 'pr', started: '2026-11-17T10:00:00Z', ended: '2026-11-17T10:10:00Z' }, {
+    ms: { plan: 120_000, implement: 360_000, review: 120_000 },
+    run: { fix_rounds: 0, gates: [], findings: [], tools: { calls: 0, errors: 0, text: '' }, agents: [
+      { ...session, stage: 'implement', role: 'implement', model: 'sonnet', tier: 'standard', effort: 'high', ms: 90_000, turns: 3, calls: 5, cost_usd: 1, tokens: t(100, 200, 300, 400) },
+      { ...session, stage: 'implement', role: 'implement', model: 'sonnet', tier: 'standard', effort: 'high', ms: 90_000, turns: 1, calls: 2, cost_usd: 0.5, tokens: t(1, 1, 1, 1) },
+      { ...session, stage: 'review', role: 'review', model: 'opus', tier: 'deep', effort: '', ms: 60_000, turns: 2, calls: 0, cost_usd: 2, tokens: t(10, 0, 0, 0) },
+    ] },
+  });
+  const v = jobView(p, NOW);
+  assert.deepEqual(v.timeline.stages, [
+    { name: 'plan', took: '2m', share: '20%', sessions: 0, tokens: '–', cost: '–' },
+    { name: 'implement', took: '6m', share: '60%', sessions: 2, tokens: '1.0k', cost: '$1.50' },
+    { name: 'review', took: '2m', share: '20%', sessions: 1, tokens: '10', cost: '$2.00' },
+  ]);
+  // implement's part is 20–80% and its two 90 s sessions are a quarter of its 6 minutes each, one after the other; review's is 80–100% and its session is half of it.
+  assert.deepEqual(v.timeline.sessions.map((s) => [s.name, s.at, s.pct]), [['implement · sonnet', 20, 15], ['implement · sonnet', 35, 15], ['review · opus', 80, 10]]);
+  assert.deepEqual(v.timeline.sessions[0]!.detail, 'in 100 · out 200 · cache read 300 · cache written 400 · 3 turns · 5 tool calls');
+  assert.deepEqual([v.timeline.sessions[0]!.tier, v.timeline.sessions[0]!.effort, v.timeline.sessions[0]!.tokens], ['standard', 'high', '1.0k']);
+  assert.deepEqual(v.numbers.at(-1), { k: 'tokens', v: '1.0k' });
+  assert.match(v.agents[0]!.calls, /tokens$/);
+});
+
+// Protects: criterion 9 on a job page without a run, as the local display sends it. Fails when: the job's own token count is not shown.
+test('a job page with no agent sessions shows the job\'s own token count', () => {
+  assert.deepEqual(jobView(page({ state: 'ended', tokens: 2_500_000 }), NOW).numbers.at(-1), { k: 'tokens', v: '2.50M' });
+});
+
+// Protects: criterion 11, the Labels explainer. Fails when: the job's own labels or the agents it ran are not marked, or a page sent no profiles has one.
+test('the labels explainer says what each label runs, marks the job\'s own, and is left out without profiles', () => {
+  const profiles = {
+    provider: 'claude', models: { fast: 'haiku', standard: 'sonnet' }, planner: { tier: 'fast', effort: 'low', sizes: ['medium'] },
+    sizes: [{ name: 'small', looks_like: 'one file' }, { name: 'medium', review: 'standard' }],
+    difficulties: [{ name: 'routine', tier: 'standard', effort: 'medium' }], types: [{ name: 'feature', reviewer: 'bugs', evidence: ['screenshots'] }, { name: 'fix', prove: 'fails-on-base' }],
+  };
+  const spec = '---\nsize: medium\ndifficulty: routine\ntype: fix\n---\n# T\n';
+  const agents = [{ ...session, stage: 'implement', role: 'implement', model: 'sonnet', tier: 'standard', cost_usd: 1, calls: 0, errors: 0 }];
+  const e = jobView(page({ state: 'ended' }, { spec, profiles, run: { fix_rounds: 0, gates: [], findings: [], tools: { calls: 0, errors: 0, text: '' }, agents } }), NOW).explain!;
+  assert.equal(e.models, 'fast = haiku · standard = sonnet');
+  assert.deepEqual(e.groups.map((g) => [g.title, g.rows.filter((r) => r.on).map((r) => r.name)]), [['Size', ['medium']], ['Difficulty', ['routine']], ['Type', ['fix']]]);
+  assert.equal(e.groups[0]!.rows[1]!.runs, 'planner haiku (fast, low effort) · review sonnet (standard)');
+  assert.deepEqual(e.groups[2]!.rows.map((r) => r.runs), ['reviewer bugs · evidence screenshots', 'its tests must fail on the base first']);
+  assert.deepEqual(e.used, ['implement · sonnet (standard)']);
+  assert.equal(jobView(page({}), NOW).explain, undefined);
 });

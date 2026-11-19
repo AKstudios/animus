@@ -3,9 +3,9 @@
 // (pages.ts). The overview needs no sign-in; a job page needs the person's
 // token, sent with each request for its data.
 // It only reads. Sent to the browser with its types stripped (helix/src/ui.ts).
-import { forgetToken, insightsNotice, jobNotice, jobsNotice, keepToken, peopleNotice, personNotice, readToken, route, takeToken } from './pages.ts';
+import { forgetToken, insightsNotice, jobNotice, jobsNotice, keepToken, originOf, peopleNotice, personNotice, readToken, route, takeToken, type Origin } from './pages.ts';
 import { atEnd, jobView, type JobPageView } from './job-view.ts';
-import { keepOlder, peopleView, personView } from './people-view.ts';
+import { keepOlder, peopleView, personView, type UsageView } from './people-view.ts';
 import { insightsView, scopeOf } from './insights-view.ts';
 import { filterOf, jobListView, queryOf, RESULTS, type JobRow } from './job-list.ts';
 import type { Display, InsightsPage, JobListPage, JobPage, PeoplePage, PersonPage } from './shape.ts';
@@ -24,6 +24,20 @@ const storage = () => window.localStorage;
 // A token in the address is kept, and taken out of it before anything reads the hash.
 if (takeToken(location.hash, storage)) history.replaceState(null, '', location.pathname + location.search);
 const at = route(location.pathname);
+
+/**
+ * Where a job or person page was opened from, so its back link goes there:
+ * kept for the tab under the page's path, so a reload keeps it too.
+ */
+const from: Origin | undefined = (() => {
+  const key = `helix-from:${location.pathname}`;
+  const seen = originOf(document.referrer, location.origin, location.pathname);
+  try {
+    if (seen) { window.sessionStorage.setItem(key, JSON.stringify(seen)); return seen; }
+    const kept = window.sessionStorage.getItem(key);
+    return kept ? (JSON.parse(kept) as Origin) : undefined;
+  } catch { return seen; }
+})();
 
 const state: {
   display?: Display;
@@ -45,6 +59,8 @@ const state: {
   /** On the Insights page: its data for the address's scope, and how Helix last answered for it. */
   insights?: InsightsPage;
   insightsStatus?: number;
+  /** The screenshot open in the viewer, by its place in the job's list. */
+  shot?: number;
   /** Helix's clock minus this browser's, in ms. */
   skew: number;
   offline: boolean;
@@ -106,7 +122,7 @@ function header(v: View | undefined): string {
   return `<header class="head">
     <div class="brand">${LOGO}<div class="machine">${esc(v?.name ?? 'Helix')}</div></div>
     <nav class="tabs" aria-label="Pages">
-      ${[['Overview', '/', 'overview'], ['Jobs', '/jobs', 'jobs'], ['Insights', '/insights', 'insights'], ...(v?.people === false ? [] : [['People', '/people', 'people']])].map(([name, href, key]) => `<a href="${href}"${at.page === key || (key === 'jobs' && at.page === 'job') ? ' aria-current="page"' : ''}>${name}</a>`).join('')}
+      ${[['Overview', '/', 'overview'], ['Jobs', '/jobs', 'jobs'], ['Insights', '/insights', 'insights'], ...(v?.people === false ? [] : [['People', '/people', 'people']])].map(([name, href, key]) => `<a href="${href}"${at.page === key || (at.page === 'job' && key === (from?.page === 'overview' ? 'overview' : from?.page === 'people' ? 'people' : 'jobs')) ? ' aria-current="page"' : ''}>${name}</a>`).join('')}
     </nav>
     <div class="stats">
       ${v?.local ? `<div><span class="k">running</span> <span class="b">${v.running}</span></div>`
@@ -147,11 +163,15 @@ const track = (v: View, j: Live) => `<span class="track" aria-hidden="true">${Ar
 /** A person named on a job, linking to their page. */
 const who = (j: { person: string; personPage?: string }) => (j.personPage ? `<a href="${esc(j.personPage)}">${esc(j.person)}</a>` : esc(j.person));
 
+const CLOCK = '<svg class="ico" viewBox="0 0 16 16" fill="none" aria-hidden="true"><circle cx="8" cy="8" r="6.25" stroke="currentColor" stroke-width="1.5"></circle><path d="M8 4.5V8l2.5 1.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"></path></svg>';
+const PERSON = '<svg class="ico" viewBox="0 0 16 16" fill="none" aria-hidden="true"><circle cx="8" cy="5.5" r="2.75" stroke="currentColor" stroke-width="1.5"></circle><path d="M2.75 14c.6-2.6 2.7-4 5.25-4s4.65 1.4 5.25 4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"></path></svg>';
+
+/** A working job: what it is and where it is, then who submitted it and how long it has run. */
 const card = (v: View, j: Live) => `<article class="card" data-key="j-${j.id}">
-  <div class="card-top"><span><span class="b">${ref(j.id)}</span> <span class="mute">${j.by.map((b) => (b.page ? `<a href="${esc(b.page)}">${esc(b.text)}</a>` : esc(b.text))).join(' · ')}</span></span><span class="elapsed">${j.elapsed}</span></div>
+  <div class="card-top">${ref(j.id) ? `<span class="b">${ref(j.id)}</span>` : ''}<span class="mute">${esc(j.repo)}</span></div>
   <a class="card-title" href="${esc(j.page)}">${esc(j.title)}</a>
-  <div class="card-stage">${track(v, j)}<div class="card-step"><span class="stage-name">${esc(j.stageText)}</span><span class="mute">${esc(j.stepText)}</span></div></div>
-  <div class="card-feed"><div class="mute">${esc(j.who)}</div>${j.now ? `<div class="now">&gt; ${esc(j.now)}<span class="cursor">_</span></div>` : ''}</div>
+  <div class="card-stage">${track(v, j)}<div class="card-step"><span class="stage-name">${esc(j.stageText)}</span><span class="mute">${esc(j.who)}</span></div></div>
+  <div class="card-foot"><span class="by">${PERSON}${j.person ? who(j) : '<span class="mute">unknown</span>'}</span><span class="elapsed" title="Time elapsed">${CLOCK}${j.elapsed || '–'}</span></div>
 </article>`;
 
 const row = (v: View, j: Live) => `<div class="row" data-key="j-${j.id}">
@@ -178,7 +198,7 @@ const recent = (j: Recent) => `<div class="done-row" data-key="j-${j.id}">
 
 const openPr = (p: Pr) => `<div class="done-row" data-key="pr-${esc(p.href)}">
   <a class="tag tone-${p.draft ? 'mute' : 'open'}" href="${esc(p.href)}" target="_blank" rel="noopener noreferrer">${esc(p.tag)}</a>
-  <a class="title" href="${esc(p.page)}">${esc(p.title)}</a><span class="by">#${p.id} · ${esc(p.repo)} · ${who(p)}</span>
+  <a class="title" href="${esc(p.page)}">${esc(p.title)}</a><span class="by">${[ref(p.id), esc(p.repo), who(p)].filter(Boolean).join(' · ')}</span>
 </div>`;
 
 const section = (name: string, title: string, body: string, pulse = false, more = '') => `<section class="section ${name}">
@@ -217,7 +237,7 @@ function main(v: View): string {
   </main>`;
 }
 
-const back = (href: string, name: string) => `<a class="back" href="${href}">&larr; ${name}</a>`;
+const back = (href: string, name: string) => `<a class="back" href="${esc(href)}">&larr; ${esc(name)}</a>`;
 
 const signIn = `<form class="sign-in" data-sign-in>
   <label for="token" class="label">Helix token</label>
@@ -228,34 +248,56 @@ const signIn = `<form class="sign-in" data-sign-in>
 const pre = (text: string, attrs = '') => `<pre class="text"${attrs}>${esc(text)}</pre>`;
 const none = (text: string) => `<div class="none">${esc(text)}</div>`;
 
+const SPIN = '<svg class="spin" viewBox="0 0 16 16" fill="none" aria-label="working on it"><circle cx="8" cy="8" r="6" stroke="currentColor" stroke-opacity="0.25" stroke-width="2"></circle><path d="M14 8a6 6 0 0 0-6-6" stroke="currentColor" stroke-width="2" stroke-linecap="round"></path></svg>';
+
+/** A section whose body folds away under its heading. */
+const foldSection = (name: string, title: string, body: string, open = true) => `<details class="section fold-section ${name}" data-key="fs-${name}"${open ? ' open' : ''}><summary class="section-head"><h2>${title}</h2><span class="chev" aria-hidden="true"></span></summary>${body}</details>`;
+
 function jobSections(v: JobPageView): string {
   // Each stage is its own nested svg so its name is clipped to its part; the CSP allows no style attribute, so widths are percentages in attributes.
-  const stages = v.bar.length ? `<svg class="timebar" role="img" aria-label="Where the time went">${v.bar.map((s) => `<svg x="${s.at}%" width="${s.pct}%" height="28"><rect class="st-${esc(s.name)}" width="100%" height="28"/>${s.label ? `<text x="8" y="18">${esc(s.label)}</text>` : ''}</svg>`).join('')}</svg>
+  const bar = v.bar.length ? `<svg class="timebar" role="img" aria-label="Where the time went">${v.bar.map((s) => `<svg x="${s.at}%" width="${s.pct}%" height="28"><rect class="st-${esc(s.name)}" width="100%" height="28"/>${s.label ? `<text x="8" y="18">${esc(s.label)}</text>` : ''}</svg>`).join('')}</svg>
     <div class="timekey">${v.bar.map((s) => `<span class="${s.on ? 'on' : ''}"><i class="st-${esc(s.name)}"></i>${esc(s.name)} <code>${s.on ? 'now' : esc(s.took)}</code></span>`).join('')}</div>` : '';
+  const t = v.timeline;
+  const stageRows = t.stages.map((s) => `<tr><td><i class="st-${esc(s.name)}"></i>${esc(s.name)}</td><td class="num">${esc(s.took)}</td><td class="num">${esc(s.share)}</td><td class="num">${s.sessions || '–'}</td><td class="num">${esc(s.tokens)}</td><td class="num">${esc(s.cost)}</td></tr>`).join('');
+  const sessions = t.sessions.map((a, i) => `<div class="sess" data-key="sess-${i}">
+    <div class="sess-head"><span class="sess-name">${esc(a.name)}${a.ok ? '' : ' <span class="tone-fail">· ended badly</span>'}</span><span class="mono mute">${esc(a.took)} · ${esc(a.tokens)} tokens · ${esc(a.cost)}</span></div>
+    <svg class="sess-bar" aria-hidden="true"><rect class="rail" width="100%" height="100%"/><rect class="st-${esc(a.stage)}" x="${a.at}%" width="${Math.max(a.pct, 0.4)}%" height="100%"/></svg>
+    <div class="sess-detail">${esc(a.stage)} · ${esc(a.tier)}${a.effort ? `, ${esc(a.effort)} effort` : ''} · ${esc(a.detail)}</div>
+  </div>`).join('');
+  const detail = `<div class="timeline">
+    <div class="scroll"><table class="grid"><thead><tr><th>Stage</th><th class="num">Took</th><th class="num">Share</th><th class="num">Sessions</th><th class="num">Tokens</th><th class="num">Cost</th></tr></thead><tbody>${stageRows}</tbody></table></div>
+    ${sessions ? `<h3>Agent sessions <span class="count">in the order they ran, on the same bar</span></h3><div class="sessions">${sessions}</div>` : none('No agent session has ended yet.')}
+  </div>`;
+  // Closed, the heading and the bar are its summary, so the bar shows and a click on it opens the detail.
+  const stages = bar ? `<details class="section fold-section stages" data-key="fs-stages"><summary><div class="section-head"><h2>Where the time went</h2><span class="hint">agents and tokens</span><span class="chev" aria-hidden="true"></span></div><div class="timebar-wrap">${bar}</div></summary>${detail}</details>`
+    : section('stages', 'Where the time went', none('No stage has taken time yet.'));
   const fold = (name: string, title: string, body: string, open = false) => `<details class="fold ${name}" data-key="fold-${name}"${open ? ' open' : ''}><summary>${title}</summary>${body}</details>`;
   const mark = (tone: string, tag: string) => `<span class="mark tone-${tone}" aria-label="${tone === 'fail' ? 'failed' : tone === 'ink' ? 'passed' : esc(tag)}">${esc(tag)}</span>`;
-  const criteria = v.criteria.map((c) => `<div class="criterion">${mark(c.tone, c.tag)}<div class="what"><p>${esc(c.text)}</p>${c.command ? `<code>${esc(c.command)}</code>` : ''}</div>${c.output ? `<details class="out"><summary>output</summary>${pre(c.output)}</details>` : ''}</div>`).join('');
-  const pills = v.pills.map((c) => c.output ? `<details class="chip"><summary>${mark(c.tone, c.tag)}${esc(c.name)}</summary>${pre(c.output)}</details>` : `<span class="chip" title="${esc(c.command)}">${mark(c.tone, c.tag)}${esc(c.name)}</span>`).join('');
-  const chips = pills + v.flaky.map((f) => `<span class="chip mute">${esc(f)}</span>`).join('');
+  const output = (text?: string) => (text !== undefined ? `<details class="out"><summary>output</summary>${pre(text)}</details>` : '');
+  const criteria = v.criteria.map((c) => `<div class="criterion">${mark(c.tone, c.tag)}<div class="what"><p>${esc(c.text)}</p>${c.command ? `<code>${esc(c.command)}</code>` : ''}</div>${output(c.output)}</div>`).join('');
+  // A check is drawn as a criterion is: its mark, its name and command, and its output folded under it.
+  const checks = v.pills.map((c) => `<div class="criterion">${mark(c.tone, c.tag)}<div class="what"><p class="mono">${esc(c.name)}</p>${c.command ? `<code>${esc(c.command)}</code>` : ''}</div>${output(c.output)}</div>`).join('');
+  const flaky = v.flaky.length ? `<p class="note">${v.flaky.map(esc).join(' · ')}</p>` : '';
   const note = (text: string) => (text ? ` <span class="count">${esc(text)}</span>` : '');
-  const slices = v.slices.length ? `<ol class="slices">${v.slices.map((s) => `<li${s.done ? ' class="done"' : ''}><span class="b">${esc(s.title)}</span> <span class="mute">${s.done ? 'done' : ''}</span><div class="mute">${esc(s.delivers)}</div></li>`).join('')}</ol>` : '';
+  const icon = (st: string) => (st === 'done' ? '<span class="mark tone-ink" aria-label="passed">✓</span>' : st === 'now' ? SPIN : st === 'left' ? '<span class="mark tone-mute" aria-label="not reached">–</span>' : '<span class="dot" aria-label="to come"></span>');
+  const slices = v.slices.map((s, i) => `<div class="criterion slice ${s.state}" data-key="sl-${i}">${icon(s.state)}<div class="what"><p><span class="b">${esc(s.title)}</span>${s.state === 'now' ? ' <span class="tone-acc">working on it</span>' : ''}</p>${s.delivers ? `<span class="mute">${esc(s.delivers)}</span>` : ''}</div></div>`).join('');
   const reviews = v.reviews.map((r) => `<div class="round"><div class="label">${esc(r.title)}</div><p>${esc(r.summary)}</p>
     ${r.findings.map((f) => `<div class="finding"><span class="tag tone-${f.tone}">${esc(f.tag)}${f.fate ? ` · ${esc(f.fate)}` : ''}</span>${f.where ? `<code>${esc(f.where)}</code>` : ''}<p>${esc(f.problem)}</p>${f.fix ? `<p class="mute">${esc(f.fix)}</p>` : ''}</div>`).join('') || none('No findings.')}</div>`).join('');
-  const shots = v.shots.map((s) => {
+  const shots = v.shots.map((s, i) => {
     const src = shotUrls.get(shotKey(s.src));
-    return `<figure class="shot" data-key="s-${esc(s.src)}">${src ? `<img src="${esc(src)}" alt="${esc(s.name)}">` : none('Loading…')}<figcaption>${esc(s.name)}</figcaption></figure>`;
+    return `<figure class="shot" data-key="s-${esc(s.src)}">${src ? `<button type="button" class="shot-open" data-shot="${i}" aria-label="Open ${esc(s.name)}"><img src="${esc(src)}" alt="${esc(s.name)}"></button>` : none('Loading…')}<figcaption>${esc(s.name)}</figcaption></figure>`;
   }).join('');
   const questions = v.questions.map((q) => `<div class="qa"><p><span class="label">Asked</span> ${esc(q.question)}</p><p${q.answered ? '' : ' class="tone-ask"'}><span class="label">Answer</span> ${esc(q.answer)}</p></div>`).join('');
   return [
     v.reason ? `<pre class="text why">${esc(v.reason)}</pre>` : '',
     `<div class="numbers">${v.numbers.map((n) => `<div><code class="num">${esc(n.v)}</code><span class="mute">${esc(n.k)}</span></div>`).join('')}</div>`,
-    section('stages', 'Where the time went', stages || none('No stage has taken time yet.')),
-    criteria ? section('criteria', `Acceptance criteria${note(v.notes.criteria)}`, `<div class="list">${criteria}</div>`) : '',
-    section('checks', `Checks${note(v.notes.checks)}`, chips ? `<div class="chips">${chips}</div>` : none(criteria ? 'No other checks.' : 'No checks have run yet.')),
+    slices ? section('slice-list', `Slices${note(`${v.slices.filter((s) => s.done).length} of ${v.slices.length} passed`)}`, `<div class="list">${slices}</div>`) : '',
+    stages,
+    criteria ? foldSection('criteria', `Acceptance criteria${note(v.notes.criteria)}`, `<div class="list">${criteria}</div>`) : '',
+    section('checks', `Checks${note(v.notes.checks)}`, (checks ? `<div class="list">${checks}</div>` : none(criteria ? 'No other checks.' : 'No checks have run yet.')) + flaky),
     section('review', `Review${note(v.notes.review)}`, reviews || none('Not reviewed yet.')),
-    shots ? section('screenshots', 'Screenshots', `<div class="shots">${shots}</div>`) : '',
+    shots ? section('screenshots', `Screenshots${note(`${v.shots.length} · click one to enlarge`)}`, `<div class="shots">${shots}</div>`) : '',
     `<div class="folds">${[
-      slices ? fold('slices', `Slices${note(`${v.slices.filter((s) => s.done).length} of ${v.slices.length}`)}`, slices) : '',
       fold('spec', 'Spec', v.spec ? pre(v.spec) : none('Helix no longer has the spec.')),
       fold('log', 'Log', v.log ? pre(v.log, ' data-log') : none(v.noLog), v.follow),
       v.tools ? fold('tools', `Tool calls${note(v.tools.summary)}`, pre(v.tools.text)) : '',
@@ -264,12 +306,32 @@ function jobSections(v: JobPageView): string {
   ].join('');
 }
 
+/** The screenshot viewer over the page: the one open, the way to the others, and every one as a thumbnail. */
+function lightbox(v: JobPageView): string {
+  const i = state.shot;
+  if (i === undefined || !v.shots[i]) return '';
+  const s = v.shots[i]!;
+  const src = shotUrls.get(shotKey(s.src));
+  const many = v.shots.length > 1;
+  return `<div class="lightbox" data-key="lightbox" role="dialog" aria-modal="true" aria-label="Screenshot ${i + 1} of ${v.shots.length}" data-lb="close">
+    <div class="lb-top"><span class="mono">${esc(s.name)} <span class="mute">· ${i + 1} of ${v.shots.length}</span></span>${src ? `<a class="lb-btn" href="${esc(src)}" target="_blank" rel="noopener">Open full size ↗</a>` : ''}<button type="button" class="lb-btn" data-lb="close" aria-label="Close">✕</button></div>
+    <div class="lb-stage">${many ? '<button type="button" class="lb-nav" data-lb="prev" aria-label="Previous screenshot">‹</button>' : ''}${src ? `<img src="${esc(src)}" alt="${esc(s.name)}">` : none('Loading…')}${many ? '<button type="button" class="lb-nav" data-lb="next" aria-label="Next screenshot">›</button>' : ''}</div>
+    ${many ? `<div class="lb-strip">${v.shots.map((x, n) => { const u = shotUrls.get(shotKey(x.src)); return `<button type="button" class="lb-thumb"${n === i ? ' aria-current="true"' : ''} data-shot="${n}" aria-label="${esc(x.name)}">${u ? `<img src="${esc(u)}" alt="">` : ''}</button>`; }).join('')}</div>` : ''}
+  </div>`;
+}
+
 /** The panels beside a job page's main column: its pull request and its labels. */
 function jobSide(v: JobPageView): string {
   const rows = (r: { k: string; v: string }[]) => r.map((x) => `<div class="kv"><span class="mute">${esc(x.k)}</span><span>${esc(x.v)}</span></div>`).join('');
   const pr = v.pr ? `<section class="panel pr"><h2>Pull request</h2>
     <div class="kv"><span>${esc(v.pr.number)}</span>${v.pr.href ? `<a class="tone-${v.pr.tone}" href="${esc(v.pr.href)}" target="_blank" rel="noopener noreferrer">${esc(v.pr.state)} ↗</a>` : `<span class="tone-${v.pr.tone}">${esc(v.pr.state)}</span>`}</div>${rows(v.pr.rows)}</section>` : '';
-  const labels = v.labels.length ? `<section class="panel labels"><h2>Labels</h2>${rows(v.labels)}</section>` : '';
+  const e = v.explain;
+  const explain = e ? `<details class="info" data-key="info-labels"><summary aria-label="What the labels mean">i</summary><div class="pop">
+    <p class="pop-models"><span class="mute">Models</span> ${esc(e.models)}</p>
+    ${e.groups.map((g) => `<div class="pop-group"><div class="label">${esc(g.title)}</div>${g.rows.map((r) => `<div class="pop-row${r.on ? ' on' : ''}"><span class="pop-name">${esc(r.name)}${r.on ? ' <span class="pop-this">this job</span>' : ''}</span><span class="pop-runs">${esc(r.runs)}</span>${r.text ? `<span class="pop-text mute">${esc(r.text)}</span>` : ''}</div>`).join('')}</div>`).join('')}
+    ${e.used.length ? `<div class="pop-group"><div class="label">Agents this job ran</div>${e.used.map((u) => `<div class="pop-row on"><span class="pop-name">${esc(u)}</span></div>`).join('')}</div>` : ''}
+  </div></details>` : '';
+  const labels = v.labels.length ? `<section class="panel labels"><h2>Labels${explain}</h2>${rows(v.labels)}</section>` : '';
   // Each agent's bar is its share of the cost, in a colour by rank (a class, since the CSP allows no style attribute).
   const agents = v.agents.length ? `<section class="panel agents"><h2>Agents</h2>${v.agents.map((a, i) => `<div class="agent"><span>${esc(a.name)}</span><span class="mono mute">${esc(a.cost)}</span><svg class="bar a${Math.min(i, 3)}" aria-hidden="true"><rect width="${a.pct}%" height="100%"/></svg><span class="calls">${esc(a.calls)}</span></div>`).join('')}</section>` : '';
   const taught = v.taught.length ? `<section class="panel learn"><h2>What this run taught</h2><ul>${v.taught.map((l) => `<li>${esc(l.text)} <span class="mute">${esc(l.state)}</span></li>`).join('')}</ul><span class="mute note">Lessons from the retro that cite this job. One is kept only when you accept it.</span></section>` : '';
@@ -280,11 +342,12 @@ function jobMain(id: number | string, now: number, local: boolean): string {
   const notice = jobNotice(id, readToken(storage) !== null, state.jobStatus, local);
   const v = state.job?.job.id === id ? jobView(state.job, now, local, state.display?.closed?.find((c) => c.job === id)) : undefined;
   const fixes = v?.facts.find((f) => f.k === 'fixes');
-  const lead = v && !notice ? `<div class="tag-row"><span class="tag tone-${v.tag.tone}">${esc(v.tag.text)}</span><span class="mute">${ref(id) ? `${ref(id)} · ` : ''}${esc(v.line)}${fixes?.page ? ` · fixes <a href="${esc(fixes.page)}">${esc(fixes.v)}</a>` : ''}</span></div>` : '';
+  const lead = v && !notice ? `<div class="tag-row"><span class="tag tone-${v.tag.tone}">${esc(v.tag.text)}</span><span class="mute">${ref(id) ? `${ref(id)} · ` : ''}${v.lineParts.map((x) => (x.page ? `<a href="${esc(x.page)}">${esc(x.text)}</a>` : esc(x.text))).join(' · ')}${fixes?.page ? ` · fixes <a href="${esc(fixes.page)}">${esc(fixes.v)}</a>` : ''}</span></div>` : '';
   const scope = `<div class="scope"><div><h1>${esc(v?.title ?? `Job ${ref(id) || id}`)}</h1>${lead}</div></div>`;
   const body = notice ? `<div class="none boxed">${esc(notice.text)}</div>${notice.signIn ? signIn : ''}` : v ? jobSections(v) : '';
-  const trail = v && !notice ? `<nav class="crumb" aria-label="Trail"><a href="/jobs">Jobs</a> / ${esc(v.trail.project)} / <code>${esc(v.trail.job)}</code></nav>` : back('/jobs', 'Jobs');
-  return `<main class="main">${trail}${scope}${body}</main>${v && !notice ? jobSide(v) : ''}`;
+  const to = from ?? { name: 'Jobs', href: '/jobs' };
+  const trail = v && !notice ? `<nav class="crumb" aria-label="Trail"><a class="crumb-back" href="${esc(to.href)}">&larr; ${esc(to.name)}</a> / ${esc(v.trail.project)} / <code>${esc(v.trail.job)}</code></nav>` : back(to.href, to.name);
+  return `<main class="main">${trail}${scope}${body}</main>${v && !notice ? jobSide(v) : ''}${v && !notice ? lightbox(v) : ''}`;
 }
 
 function peopleList(local: boolean): string {
@@ -305,16 +368,27 @@ function personSections(name: string, local: boolean): string {
   const facts = `<div class="facts">${v.facts.map((f) => `<div><span class="mute">${esc(f.k)}</span> ${esc(f.v)}</div>`).join('')}</div>`;
   const jobs = v.jobs.map((j) => `<div class="done-row" data-key="j-${j.id}">
     ${j.href ? `<a class="tag" href="${esc(j.href)}" target="_blank" rel="noopener noreferrer">${esc(j.tag)}</a>` : `<span class="tag">${esc(j.tag)}</span>`}
-    <a class="title" href="${esc(j.page)}">${esc(j.title)}</a><span class="by">#${j.id} · ${esc(j.repo)} · ${esc(j.submitted)}</span></div>`).join('');
+    <a class="title" href="${esc(j.page)}">${esc(j.title)}</a><span class="by">${[ref(j.id), esc(j.repo), esc(j.submitted), esc(j.used)].filter(Boolean).join(' · ')}</span></div>`).join('');
   const activity = v.activity.map((a, i) => `<div class="done-row" data-key="a-${i}"><span class="by">${esc(a.when)}</span>${a.page ? `<a class="title" href="${esc(a.page)}">${esc(a.text)}</a>` : `<span class="title">${esc(a.text)}</span>`}${a.note ? `<span class="reason">${esc(a.note)}</span>` : ''}</div>`).join('');
   return [
     v.left ? `<div class="none boxed">${esc(v.left)}</div>` : '', facts,
+    v.usage ? section('usage', 'Usage', usage(v.usage)) : '',
     section('jobs', 'Jobs', (jobs || none('No job yet.')) + (v.more ? '<button type="button" class="more" data-more>Show more</button>' : '')),
-    section('activity', 'Activity', activity || none('Nothing kept yet.')),
+    activity || !local ? section('activity', 'Activity', activity || none('Nothing kept yet.')) : '',
   ].join('');
 }
 
-const peopleMain = (local: boolean, name?: string) => `<main class="main">${name ? back('/people', 'People') : ''}
+/** A person's usage: totals, how the tokens split, cost by day, and by model and role. */
+function usage(u: UsageView): string {
+  const tiles = `<div class="numbers">${u.totals.map((t) => `<div><code class="num">${esc(t.v)}</code><span class="mute">${esc(t.k)}</span></div>`).join('')}</div>`;
+  const split = `<div class="split">${u.split.map((x) => `<div><span class="mute">${esc(x.k)}</span> <code>${esc(x.v)}</code> <span class="mute">${x.pct}%</span></div>`).join('')}</div>`;
+  const n = u.days.length;
+  const days = `<div class="days"><svg class="day-bars" viewBox="0 0 ${n * 10} 60" preserveAspectRatio="none" role="img" aria-label="Cost by day, last ${n} days">${u.days.map((d, i) => `<rect x="${i * 10 + 1}" y="${60 - Math.max(d.pct * 0.6, d.pct ? 1 : 0)}" width="8" height="${Math.max(d.pct * 0.6, d.pct ? 1 : 0)}"><title>${esc(d.label)}: ${esc(d.cost)} · ${esc(d.tokens)} tokens</title></rect>`).join('')}</svg><div class="day-axis mute"><span>${esc(u.days[0]?.label ?? '')}</span><span>${esc(u.days.at(-1)?.label ?? '')}</span></div></div>`;
+  const table = (title: string, rows: UsageView['models']) => `<div class="scroll"><table class="grid"><thead><tr><th>${title}</th><th class="num">Sessions</th><th class="num">Tokens</th><th class="num">Cost</th><th class="num">Share</th></tr></thead><tbody>${rows.map((r) => `<tr><td>${esc(r.name)}</td><td class="num">${esc(r.sessions)}</td><td class="num">${esc(r.tokens)}</td><td class="num">${esc(r.cost)}</td><td class="num">${r.pct}%</td></tr>`).join('')}</tbody></table></div>`;
+  return `${tiles}${split}<div class="label">Cost by day</div>${days}<div class="two">${u.models.length ? table('Model', u.models) : ''}${u.roles.length ? table('Role', u.roles) : ''}</div>`;
+}
+
+const peopleMain = (local: boolean, name?: string) => `<main class="main">${name ? back(from?.href ?? '/people', from?.name ?? 'People') : ''}
   <div class="scope"><div><h1>${esc(name ?? 'People')}</h1></div></div>
   ${name ? personSections(name, local) : peopleList(local)}
 </main>`;
@@ -334,14 +408,14 @@ function jobsMain(local: boolean): string {
   const now = (state.offline && state.heard ? state.heard.getTime() : Date.now()) + state.skew;
   const lv = state.list ? jobListView({ ...state.list, jobs: [...state.list.jobs, ...state.listOlder] }, local, now) : undefined;
   const t = lv?.totals;
-  const sum = t ? `<div class="sum"><div><b>${t.jobs}</b><span class="mute">jobs</span></div><div><b>${t.merged}</b><span class="mute">merged · ${t.mergedShare}</span></div><div><b>${t.failed}</b><span class="mute">failed</span></div><div><b class="mono">${t.spent}</b><span class="mute">spent</span></div><div><b class="mono">${t.perMerged}</b><span class="mute">per merged PR</span></div></div>` : '';
+  const sum = t ? `<div class="sum"><div><b>${t.jobs}</b><span class="mute">jobs</span></div><div><b>${t.merged}</b><span class="mute">merged · ${t.mergedShare}</span></div><div><b>${t.failed}</b><span class="mute">failed</span></div><div><b class="mono">${t.spent}</b><span class="mute">spent</span></div><div><b class="mono">${t.tokens}</b><span class="mute">tokens</span></div><div><b class="mono">${t.perMerged}</b><span class="mute">per merged PR</span></div></div>` : '';
   const tr = (r: JobRow) => `<div class="tr" data-key="j-${r.id}">
     ${r.href ? `<a class="tag tone-${r.tone}" href="${esc(r.href)}" target="_blank" rel="noopener noreferrer">${esc(r.tag)}</a>` : `<span class="tag tone-${r.tone}">${esc(r.tag)}</span>`}
     <span class="job"><a class="title" href="${esc(r.page)}">${esc(r.title)}</a>${r.why ? `<span class="why tone-${r.tone === 'fail' || r.tone === 'ask' ? r.tone : 'mute'}">${esc(r.why)}</span>` : ''}</span>
     <span class="mute">${esc(r.repo)}</span>${local ? '' : `<span class="mute">${who(r)}</span>`}
-    <span class="n">${esc(r.took)}</span><span class="n">${esc(r.fixes)}</span><span class="n cost">${esc(r.cost)}</span><span class="n">${esc(r.toMerge)}</span>
+    <span class="n">${esc(r.took)}</span><span class="n">${esc(r.fixes)}</span><span class="n cost">${esc(r.cost)}</span><span class="n">${esc(r.tokens)}</span><span class="n">${esc(r.toMerge)}</span>
   </div>`;
-  const table = lv ? `<div class="tbl${local ? ' local' : ''}"><div class="tr th"><span>Result</span><span>Job</span><span>Project</span>${local ? '' : '<span>Person</span>'}<span class="n">Took</span><span class="n">Fix rounds</span><span class="n cost">Cost</span><span class="n">To merge</span></div>${
+  const table = lv ? `<div class="tbl${local ? ' local' : ''}"><div class="tr th"><span>Result</span><span>Job</span><span>Project</span>${local ? '' : '<span>Person</span>'}<span class="n">Took</span><span class="n">Fix rounds</span><span class="n cost">Cost</span><span class="n">Tokens</span><span class="n">To merge</span></div>${
     lv.rows.map((r, i) => `${lv.days.filter((d) => d.at === i).map((d) => `<div class="day">${esc(d.heading)}</div>`).join('')}${tr(r)}`).join('')}</div>` : '';
   const body = notice ? `<div class="none boxed">${esc(notice)}</div>${local ? '' : signIn}` : state.list
     ? `${sum}${lv!.rows.length ? table : none('No job matches.')}${state.listMore ? '<button type="button" class="more" data-more>Show more</button>' : ''}` : '';
@@ -454,20 +528,21 @@ const auth = (token: string | null): Record<string, string> => (token ? { author
 /** The people list's data, with the token as it is kept now; a token Helix refuses is forgotten. */
 async function readPeople(): Promise<void> {
   const token = readToken(storage);
-  if (!token) return;
-  const res = await fetch('/people/page-data', { cache: 'no-store', headers: { authorization: `Bearer ${token}` } });
+  if (!token && !state.display?.local) return;
+  const res = await fetch('/people/page-data', { cache: 'no-store', headers: auth(token) });
   state.peopleStatus = res.status;
-  if (res.status === 401) forgetToken(storage);
+  if (res.status === 401 && token) forgetToken(storage);
   if (res.ok) state.people = (await res.json()) as PeoplePage;
 }
 
 /** A person's page data, with the token as it is kept now; `before` reads the jobs older than that one. A token Helix refuses is forgotten. */
-async function readPerson(name: string, before?: number): Promise<void> {
+async function readPerson(name: string, before?: number | string): Promise<void> {
   const token = readToken(storage);
-  if (!token) return;
-  const res = await fetch(`/people/${encodeURIComponent(name)}/page-data${before ? `?before=${before}` : ''}`, { cache: 'no-store', headers: { authorization: `Bearer ${token}` } });
+  // The local display needs no token; Helix's people pages do.
+  if (!token && !state.display?.local) return;
+  const res = await fetch(`/people/${encodeURIComponent(name)}/page-data${before !== undefined ? `?before=${encodeURIComponent(before)}` : ''}`, { cache: 'no-store', headers: auth(token) });
   if (before === undefined) state.personStatus = res.status;
-  if (res.status === 401) forgetToken(storage);
+  if (res.status === 401 && token) forgetToken(storage);
   if (!res.ok) return;
   const data = (await res.json()) as PersonPage;
   if (before === undefined) {
@@ -571,7 +646,17 @@ root.addEventListener('click', (event) => {
   }
   if ((event.target as Element).closest('[data-more]') && at.page === 'people' && at.name && state.person) {
     const last = [...state.person.jobList, ...state.older.jobs].at(-1);
-    void readPerson(at.name, last?.id).then(draw);
+    // Helix pages by job number, the local display by when the job was submitted.
+    void readPerson(at.name, typeof last?.id === 'number' ? last.id : last?.submitted).then(draw);
+    return;
+  }
+  const shot = (event.target as Element).closest('[data-shot]');
+  if (shot) { openShot(Number(shot.getAttribute('data-shot'))); return; }
+  const lb = (event.target as Element).closest('[data-lb]');
+  // A click on the dark around the screenshot closes it; one on the screenshot itself does not.
+  if (lb && (lb.getAttribute('data-lb') !== 'close' || lb === event.target || lb.tagName === 'BUTTON')) {
+    const act = lb.getAttribute('data-lb');
+    if (act === 'close') openShot(undefined); else stepShot(act === 'next' ? 1 : -1);
     return;
   }
   const button = (event.target as Element).closest('[data-pick]');
@@ -580,6 +665,29 @@ root.addEventListener('click', (event) => {
   // Picking the project that is already picked goes back to all of them.
   history.replaceState(null, '', id && id !== picked() ? `#${encodeURIComponent(id)}` : location.pathname + location.search);
   draw();
+});
+
+/** Opens the screenshot viewer at a shot, or closes it; the page under it does not scroll while it is open. */
+function openShot(i: number | undefined): void {
+  state.shot = i;
+  document.documentElement.toggleAttribute('data-lightbox', i !== undefined);
+  draw();
+  if (i !== undefined) (root.querySelector('.lightbox [data-lb="close"].lb-btn') as HTMLElement | null)?.focus();
+}
+
+function stepShot(by: number): void {
+  const n = state.job?.shots?.files.length ?? 0;
+  if (state.shot === undefined || !n) return;
+  openShot((state.shot + by + n) % n);
+}
+
+window.addEventListener('keydown', (event) => {
+  if (state.shot === undefined) return;
+  if (event.key === 'Escape') openShot(undefined);
+  else if (event.key === 'ArrowRight') stepShot(1);
+  else if (event.key === 'ArrowLeft') stepShot(-1);
+  else return;
+  event.preventDefault();
 });
 
 window.addEventListener('hashchange', draw);

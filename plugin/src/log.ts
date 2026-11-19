@@ -70,6 +70,8 @@ export type Run = {
   job: string;
   repo: string;
   submitter: string;
+  /** The submitter's git user name, where it has one: what the display shows instead of an address. */
+  submitter_name?: string;
   trigger: string;
   /** The job this one is a fix of: the one before it on the same pull request. */
   fix_of?: string;
@@ -168,6 +170,8 @@ export type Stage = (typeof STAGES)[number];
 /** Where a running job is, for whoever watches it: the stage, and who or what is doing it. */
 export type Progress = {
   stage: Stage; who: string; at: string;
+  /** When this process began writing progress: how long a running job has run, before its run row exists. */
+  started?: string;
   /** The `animus run` process and machine writing it: a job is running only where that process is alive. */
   pid?: number; host?: string;
 };
@@ -189,7 +193,11 @@ export function loadState(job: string, home = animusHome()): JobState | undefine
 }
 
 export function saveProgress(job: string, stage: Stage, who: string): void {
-  writeJson(join(jobDir(job), 'progress.json'), { stage, who, at: new Date().toISOString(), pid: process.pid, host: hostname() } satisfies Progress);
+  const at = new Date().toISOString();
+  // The same process keeps the time it began; a resumed job's new process starts its own.
+  const before = loadProgress(job);
+  const started = before?.pid === process.pid && before.host === hostname() && before.started ? before.started : at;
+  writeJson(join(jobDir(job), 'progress.json'), { stage, who, at, started, pid: process.pid, host: hostname() } satisfies Progress);
 }
 
 /** True for a live process; EPERM means it exists under another user. */
