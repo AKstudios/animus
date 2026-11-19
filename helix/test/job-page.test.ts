@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { mkdirSync, mkdtempSync, symlinkSync, utimesSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, symlinkSync, utimesSync, writeFileSync } from 'node:fs';
 import type { AddressInfo } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -425,4 +425,28 @@ test('the labels explainer says what each label runs, marks the job\'s own, and 
   assert.deepEqual(e.groups[2]!.rows.map((r) => r.runs), ['reviewer bugs · evidence screenshots', 'its tests must fail on the base first']);
   assert.deepEqual(e.used, ['implement · sonnet (standard)']);
   assert.equal(jobView(page({}), NOW).explain, undefined);
+});
+
+// Protects: criterion 6, the dialog opens with this job's labels, one plain sentence each, from the profile's tables. Fails when: the sentences are fixed copy, miss a label, or name the wrong tier.
+test('the labels dialog starts with one plain sentence for each of this job\'s labels', () => {
+  const profiles = {
+    provider: 'claude', models: { standard: 'sonnet', deep: 'opus' }, planner: { tier: 'fast', effort: 'low', sizes: ['medium'] },
+    sizes: [{ name: 'medium' }], difficulties: [{ name: 'hard', tier: 'deep', effort: 'high' }], types: [{ name: 'ui', reviewer: 'ui-reviewer', evidence: ['screenshots'] }],
+  };
+  const spec = '---\nsize: medium\ndifficulty: hard\ntype: ui\n---\n# T\n';
+  assert.deepEqual(jobView(page({}, { spec, profiles }), NOW).explain!.mine, [
+    { k: 'size', v: 'medium', text: 'a planner cuts the work into slices' },
+    { k: 'difficulty', v: 'hard', text: 'a deep-tier model (opus) implements each slice, at high effort' },
+    { k: 'type', v: 'ui', text: 'a UI reviewer checks screenshots of the pages' },
+  ]);
+});
+
+// Protects: criterion 6, the dialog closes with ×, Escape and a click outside, and the full table is folded. Fails when: one way of closing it, or the folding, is gone from the page.
+test('the labels dialog markup has its three ways to close and the folded table', () => {
+  const app = readFileSync(join(import.meta.dirname, '..', '..', 'plugin', 'display', 'app.ts'), 'utf8');
+  assert.match(app, /role="dialog"[^`]*aria-labelledby="labels-title"/);
+  assert.match(app, /data-labels="close" aria-label="Close">×/);
+  assert.match(app, /class="overlay"[^>]*data-labels="close"/);
+  assert.match(app, /state\.labels && event\.key === 'Escape'/);
+  assert.match(app, /<details class="all-labels">/);
 });

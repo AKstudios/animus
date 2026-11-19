@@ -7,9 +7,9 @@
 // machine's loopback is the person whose jobs these are, and there are no
 // people pages.
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
-import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import type { AddressInfo } from 'node:net';
-import { hostname, userInfo } from 'node:os';
+import { homedir, hostname, userInfo } from 'node:os';
 import { basename, join } from 'node:path';
 import { listJobs, RESULTS, type JobFilter, type Result } from '../display/job-list.ts';
 import type { Display, DisplayJob, JobListPage, JobPage, ListJob, PrState } from '../display/shape.ts';
@@ -17,12 +17,13 @@ import { asset, CSP } from './assets.ts';
 import { afterOf, fixRounds, insightsData, lessonsCiting } from './insights-data.ts';
 import { folderParts, read, shotFile } from './job-folder.ts';
 import { logFile } from './local-loop.ts';
-import { openLocalQueue, queueFile, type LocalJob } from './local-queue.ts';
+import { newerThan, openLocalQueue, queueFile, type LocalJob } from './local-queue.ts';
 import { readOutcomes, type Outcomes } from './outcomes.ts';
 import { tryGit } from './proc.ts';
 import { alive, animusHome, jobDir, loadProgress, loadState, readRuns, STAGES, type Run } from './log.ts';
 import { loadFactory } from './profiles.ts';
-import { personOf, profilesInfo, runTokens, usageOf } from './usage.ts';
+import { animusVersion } from './version.ts';
+import { personNamer, profilesInfo, runTokens, usageOf } from './usage.ts';
 import { PERSON_JOBS, type PeoplePage, type PersonPage } from '../display/shape.ts';
 
 /** Job folders are named by Animus; only a plain name is taken as one. */
@@ -31,11 +32,23 @@ const PLAIN = /^[A-Za-z0-9][\w.-]*$/;
 /** The project of a job that has no state and no run row: it never got far enough to name one. */
 const NO_PROJECT = 'unknown project';
 
-/** A person's name from their address: what is before the @. */
-const nameOf = (submitter: string): string => submitter.split('@')[0]!;
+type Who = { submitter: string; submitter_name?: string };
 
-/** Who runs a job here, by name: the repository's git user, else the user's login. */
-const runnerOf = (repo: string): string => tryGit(repo, ['config', 'user.name']) ?? nameOf(tryGit(repo, ['config', 'user.email']) ?? userInfo().username);
+let machine: { name?: string; email?: string } | undefined;
+/** This machine's git name and email, looked up once, when the display starts. */
+export function gitIdentity(): { name?: string; email?: string } {
+  machine ??= { name: tryGit(homedir(), ['config', 'user.name'])?.trim(), email: tryGit(homedir(), ['config', 'user.email'])?.trim() };
+  return machine;
+}
+
+/** Who started a job that has no run row yet, from its own files: its state, else its checkout's git user. */
+const startedBy = (state: { repo: string; submitter?: string; submitter_name?: string } | undefined, repo?: string): Who | undefined => {
+  if (state?.submitter) return { submitter: state.submitter, ...(state.submitter_name ? { submitter_name: state.submitter_name } : {}) };
+  const dir = state?.repo ?? repo;
+  if (!dir) return undefined;
+  const name = tryGit(dir, ['config', 'user.name'])?.trim();
+  return { submitter: tryGit(dir, ['config', 'user.email']) ?? userInfo().username, ...(name ? { submitter_name: name } : {}) };
+};
 
 /** This machine's queue (local-queue.ts), newest last; none when it has never had one. */
 function queued(): LocalJob[] {
@@ -47,16 +60,16 @@ function queued(): LocalJob[] {
 const readLog = (id: number): string => { try { return readFileSync(logFile(id), 'utf8'); } catch { return ''; } };
 
 /** A job of the queue, shown as it stands there: not yet a folder of its own, or one that ended without making it. */
-function queuedJob(q: LocalJob): DisplayJob {
+function queuedJob(q: LocalJob, name: (r: Who | undefined) => string): DisplayJob {
   return {
-    id: q.id, person: '', repo: basename(q.repo), title: q.title, submitted: q.submitted, state: q.state,
+    id: q.id, person: name(startedBy(undefined, q.repo)), repo: basename(q.repo), title: q.title, submitted: q.submitted, state: q.state,
     ...(q.queued ? { queued: q.queued } : {}), ...(q.started ? { started: q.started } : {}), ...(q.ended ? { ended: q.ended } : {}),
     ...(q.waiting ? { waiting: q.waiting } : {}), ...(q.outcome ? { outcome: q.outcome } : {}), ...(q.pr ? { pr: q.pr } : {}),
     ...(q.reason ? { reason: q.reason } : {}), ...(q.question ? { question: q.question } : {}), ...(q.cost_usd !== undefined ? { cost_usd: q.cost_usd } : {}),
   };
 }
 
-function jobOf(id: string, runs: readonly Run[], from?: LocalJob): DisplayJob | undefined {
+function jobOf(id: string, runs: readonly Run[], name: (r: Who | undefined) => string, from?: LocalJob): DisplayJob | undefined {
   const state = loadState(id);
   const progress = loadProgress(id);
   if (!state && !progress) return undefined;
@@ -76,8 +89,8 @@ function jobOf(id: string, runs: readonly Run[], from?: LocalJob): DisplayJob | 
   // Queued again to resume (answered, or the loop stopped): the queue's word is newer than the folder's.
   const again = from && (from.state === 'queued' || from.state === 'waiting' || from.state === 'running') ? from : undefined;
   const job: DisplayJob = {
-    // A job that has not ended yet is the machine's person's: the newest run says who that is.
-    id, person: running && state && !runs.length ? runnerOf(state.repo) : personOf(last ?? runs.at(-1)), repo: state ? basename(state.repo) : last ? basename(last.repo) : from ? basename(from.repo) : NO_PROJECT, title: title ?? id, submitted,
+    // A job with no run row yet is its own starter's, from its own files: never another job's row.
+    id, person: name(last ?? startedBy(state)), repo: state ? basename(state.repo) : last ? basename(last.repo) : from ? basename(from.repo) : NO_PROJECT, title: title ?? id, submitted,
     state: state?.outcome ? 'ended' : running ? 'running' : 'stopped',
     ...(started ? { started } : {}), ...(last?.ended && !running ? { ended: last.ended } : {}),
     ...(tokens ? { tokens } : {}),
@@ -101,10 +114,11 @@ export function localJobs(): DisplayJob[] {
   try { names = readdirSync(join(animusHome(), 'jobs')); } catch { /* no jobs yet */ }
   const runs = readRuns();
   const queue = queued();
-  const folders = names.filter((n) => PLAIN.test(n)).flatMap((id) => jobOf(id, runs, queue.find((q) => q.animus_job === id)) ?? []);
+  const name = personNamer(runs, gitIdentity());
+  const folders = names.filter((n) => PLAIN.test(n)).flatMap((id) => jobOf(id, runs, name, queue.find((q) => q.animus_job === id)) ?? []);
   // A queue job whose folder is shown is that folder's job; the rest show as the queue has them.
   const shown = new Set(folders.map((j) => j.id));
-  const rest = queue.filter((q) => !q.animus_job || !shown.has(q.animus_job)).map(queuedJob);
+  const rest = queue.filter((q) => !q.animus_job || !shown.has(q.animus_job)).map((q) => queuedJob(q, name));
   return [...folders, ...rest].sort((a, b) => (a.submitted < b.submitted ? 1 : -1));
 }
 
@@ -127,7 +141,7 @@ export function localDisplay(): Display {
       ? [{ job: j.id, repo: j.repo, person: j.person, number: n, title: j.title, url: j.pr, draft: j.outcome === 'draft-pr', created: j.ended ?? j.submitted }] : [];
   });
   return {
-    name: hostname(), at: new Date().toISOString(), local: true,
+    name: hostname(), at: new Date().toISOString(), local: true, version: animusVersion(), pid: process.pid,
     // Nothing is queued on a laptop and nothing limits how many jobs run: the display shows no slots.
     slots: jobs.filter((j) => j.state === 'running').length, stages: STAGES,
     repos: [...new Set(jobs.map((j) => j.repo))].map((name) => ({ name })),
@@ -152,8 +166,9 @@ export function localJobPage(id: string): JobPage | undefined {
   const queue = queued();
   // A number is a queue job's id; anything else is a job folder, which may be a queue job's.
   const q = /^\d+$/.test(id) ? queue.find((j) => j.id === Number(id)) : queue.find((j) => j.animus_job === id);
-  const folder = PLAIN.test(id) ? jobOf(id, runs, q) : undefined;
-  const job = folder ?? (q ? queuedJob(q) : undefined);
+  const name = personNamer(runs, gitIdentity());
+  const folder = PLAIN.test(id) ? jobOf(id, runs, name, q) : undefined;
+  const job = folder ?? (q ? queuedJob(q, name) : undefined);
   if (!job) return undefined;
   const spec = read(folder ? loadState(id)?.spec ?? join(jobDir(id), 'spec.md') : q!.spec);
   let outcomes: Outcomes = {};
@@ -185,6 +200,8 @@ export function localPeople(): PeoplePage {
 export function localPerson(name: string, before?: string): PersonPage | undefined {
   const row = localPeople().people.find((p) => p.name === name);
   if (!row) return undefined;
+  const runs = readRuns();
+  const who = personNamer(runs, gitIdentity());
   const mine = localJobs().filter((j) => j.person === name);
   const older = mine.filter((j) => before === undefined || j.submitted < before);
   return {
@@ -192,8 +209,57 @@ export function localPerson(name: string, before?: string): PersonPage | undefin
     jobList: older.slice(0, PERSON_JOBS).map(({ id, title, repo, state, submitted, outcome, pr, cost_usd, tokens }) => ({ id, title, repo, state, submitted, ...(outcome ? { outcome } : {}), ...(pr ? { pr } : {}), ...(cost_usd !== undefined ? { cost_usd } : {}), ...(tokens ? { tokens } : {}) })),
     more: older.length > PERSON_JOBS,
     activity: [],
-    usage: usageOf(readRuns().filter((r) => personOf(r) === name), Date.now()),
+    usage: usageOf(runs.filter((r) => who(r) === name), Date.now()),
   };
+}
+
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+/** Where a display notes its port, process id and version, so a newer `animus ui` knows whose process it is. */
+const noteFile = (port: number) => join(animusHome(), `ui-${port}.json`);
+
+/** What an Animus display answers on a port, or nothing for a port nothing or another program holds. */
+async function displayOn(port: number): Promise<Partial<Display> | undefined> {
+  try {
+    const res = await fetch(`http://127.0.0.1:${port}/display`, { signal: AbortSignal.timeout(2_000) });
+    const d = (await res.json()) as Partial<Display>;
+    return res.ok && d.local === true && Array.isArray(d.jobs) ? d : undefined;
+  } catch { return undefined; }
+}
+
+/** The pid a display noted for this port, if it noted one. */
+function notedPid(port: number): number | undefined {
+  try { return (JSON.parse(readFileSync(noteFile(port), 'utf8')) as { pid?: number }).pid; } catch { return undefined; }
+}
+
+/**
+ * Takes a port for the display from `start` up. An Animus display already there
+ * of this version is reused; an older one that names its process id (the one
+ * it noted) is stopped and its port taken; one that names no version is passed
+ * over with a warning; anything else is passed over. Returns the port and
+ * whether it is an existing display's.
+ */
+export async function claimLocal(server: Server, start: number, warn: (message: string) => void): Promise<{ port: number; reused: boolean }> {
+  const version = animusVersion();
+  for (let port = start; port < 65535; port++) {
+    const shown = await displayOn(port);
+    if (shown?.version === version) return { port, reused: true };
+    if (shown && !shown.version) { warn(`An older Animus display is on 127.0.0.1:${port}; stop it (it was started before ${version})`); continue; }
+    if (shown?.version && shown.pid && shown.pid === notedPid(port) && newerThan(version, shown.version)) {
+      try { process.kill(shown.pid); } catch { /* gone already */ }
+      for (let i = 0; i < 20 && await displayOn(port); i++) await sleep(150);
+    } else if (shown) continue;
+    try {
+      await new Promise<void>((ok, fail) => { server.once('error', fail); server.listen(port, '127.0.0.1', () => { server.removeListener('error', fail); ok(); }); });
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code === 'EADDRINUSE') continue;
+      throw err;
+    }
+    writeFileSync(noteFile(port), JSON.stringify({ port, pid: process.pid, version }));
+    server.once('close', () => rmSync(noteFile(port), { force: true }));
+    return { port, reused: false };
+  }
+  throw new Error('no free port for the display');
 }
 
 /** Listens on the first free port from `port` up, on 127.0.0.1 only. */

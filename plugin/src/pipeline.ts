@@ -280,7 +280,7 @@ async function runJobWith(opts: RunOptions, deps: Deps, live: { run?: Run; start
   const answers = [...(before?.answers ?? []), ...(prior?.question && opts.resume?.answer ? [{ question: prior.question, answer: opts.resume.answer }] : [])];
   // A fix carries on from the session of the job it continues, and from that job's list of fixes.
   const state: JobState = {
-    job, repo, spec: specCopy, ...(source ? { source } : {}), workspace: ws, plan, ...(before?.session ? { session: before.session } : {}), ...(before?.context !== undefined ? { context: before.context } : {}), ...(answers.length ? { answers } : {}),
+    job, repo, spec: specCopy, submitter: run.submitter, ...(run.submitter_name ? { submitter_name: run.submitter_name } : {}), ...(source ? { source } : {}), workspace: ws, plan, ...(before?.session ? { session: before.session } : {}), ...(before?.context !== undefined ? { context: before.context } : {}), ...(answers.length ? { answers } : {}),
     ...(prior?.slicing ? { slicing: prior.slicing, sliced_by: prior.sliced_by ?? 'script', slices_done: prior.slices_done ?? [] } : {}),
     ...(fix ? { fix_of: fix.of, ask: fix.ask, ...(fix.pr ? { pr: fix.pr } : {}), ...(fixStart ? { fix_start: fixStart } : {}) } : {}), ...(inherited?.fixes ? { fixes: inherited.fixes } : {}), ...(inherited?.closes ? { closes: inherited.closes } : {}),
   };

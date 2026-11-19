@@ -27,6 +27,19 @@ export function personOf(r: Pick<Run, 'submitter' | 'submitter_name'> | undefine
   return r.submitter.includes('@') ? r.submitter.split('@')[0]! : r.submitter;
 }
 
+/**
+ * The one function that names a person on this machine. A record without a
+ * name takes it from another record with the same email that has one; else,
+ * for the machine's git email, git's user.name; else the part before the @.
+ */
+export function personNamer(runs: readonly Pick<Run, 'submitter' | 'submitter_name'>[], git: { name?: string; email?: string } = {}): (r: Pick<Run, 'submitter' | 'submitter_name'> | undefined) => string {
+  const key = (email: string) => email.trim().toLowerCase();
+  const named = new Map<string, string>();
+  for (const r of runs) if (r.submitter_name?.trim()) named.set(key(r.submitter), r.submitter_name.trim());
+  if (git.name?.trim() && git.email) named.set(key(git.email), named.get(key(git.email)) ?? git.name.trim());
+  return (r) => (r ? named.get(key(r.submitter)) ?? personOf(r) : '');
+}
+
 /** What these runs used; `now` in ms sets the days charted. */
 export function usageOf(runs: readonly Run[], now: number): Usage {
   const tokens: TokenCount = { input: 0, output: 0, cache_read: 0, cache_write: 0 };

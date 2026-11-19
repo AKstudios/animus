@@ -44,6 +44,8 @@ const state: {
   /** On a job page: its data, and how Helix last answered for it. */
   job?: JobPage;
   jobStatus?: number;
+  /** The job page's labels dialog is open. */
+  labels?: boolean;
   /** On the people list: its data, and how Helix last answered for it. */
   people?: PeoplePage;
   peopleStatus?: number;
@@ -214,13 +216,13 @@ function main(v: View): string {
   const scope = `<div class="scope">
     <div>${v.sel ? `<div class="project-title">${esc(v.title)}</div>` : ''}<h1 class="headline">${h.needs ? `<span class="needs">${esc(h.needs)}</span> ` : ''}${esc(h.rest)}</h1>
       ${h.last ? `<div class="last">${esc(h.last.when)} · <span class="tag tone-${h.last.tone}">${esc(h.last.tag)}</span></div>` : ''}</div>
-    ${v.sel ? `<div class="facts" data-key="facts-${esc(v.sel.id)}">
+  </div>
+  ${v.sel ? `<div class="facts" data-key="facts-${esc(v.sel.id)}">
       ${v.sel.base ? `<div><span class="mute">base</span> ${esc(v.sel.base)}</div>` : ''}
       ${v.sel.gates ? `<div><span class="mute">gates</span> ${esc(v.sel.gates)}</div>` : ''}
       <div><span class="mute">PRs opened</span> ${v.sel.prs}</div>
       <div><span class="mute">spent</span> ${v.sel.spent}</div>
-    </div>` : ''}
-  </div>`;
+    </div>` : ''}`;
   if (v.empty) {
     return `<main class="main">${scope}<div class="empty">
       ${v.idle ? SYNC : EMPTY_MARK}<h2>${esc(v.empty.title)}</h2><p>${esc(v.empty.text)}</p>
@@ -329,12 +331,16 @@ function jobSide(v: JobPageView): string {
   const pr = v.pr ? `<section class="panel pr"><h2>Pull request</h2>
     <div class="kv"><span>${esc(v.pr.number)}</span>${v.pr.href ? `<a class="tone-${v.pr.tone}" href="${esc(v.pr.href)}" target="_blank" rel="noopener noreferrer">${esc(v.pr.state)} ↗</a>` : `<span class="tone-${v.pr.tone}">${esc(v.pr.state)}</span>`}</div>${rows(v.pr.rows)}</section>` : '';
   const e = v.explain;
-  const explain = e ? `<details class="info" data-key="info-labels"><summary aria-label="What the labels mean">i</summary><div class="pop">
+  const explain = e ? `<button type="button" class="info" data-labels="open" aria-label="What the labels mean" aria-haspopup="dialog">i</button>` : '';
+  const dialog = e && state.labels ? `<div class="overlay" data-key="labels-dialog" data-labels="close"><div class="dialog" role="dialog" aria-modal="true" aria-labelledby="labels-title">
+    <div class="dialog-top"><h2 id="labels-title">What this job's labels mean</h2><button type="button" class="lb-btn" data-labels="close" aria-label="Close">×</button></div>
+    ${e.mine.map((m) => `<p class="mean"><span class="pop-name">${esc(m.k)}: ${esc(m.v)}</span> ${esc(m.text)}.</p>`).join('')}
+    <details class="all-labels"><summary>Every size, difficulty and type</summary>
     <p class="pop-models"><span class="mute">Models</span> ${esc(e.models)}</p>
     ${e.groups.map((g) => `<div class="pop-group"><div class="label">${esc(g.title)}</div>${g.rows.map((r) => `<div class="pop-row${r.on ? ' on' : ''}"><span class="pop-name">${esc(r.name)}${r.on ? ' <span class="pop-this">this job</span>' : ''}</span><span class="pop-runs">${esc(r.runs)}</span>${r.text ? `<span class="pop-text mute">${esc(r.text)}</span>` : ''}</div>`).join('')}</div>`).join('')}
     ${e.used.length ? `<div class="pop-group"><div class="label">Agents this job ran</div>${e.used.map((u) => `<div class="pop-row on"><span class="pop-name">${esc(u)}</span></div>`).join('')}</div>` : ''}
-  </div></details>` : '';
-  const labels = v.labels.length ? `<section class="panel labels"><h2>Labels${explain}</h2>${rows(v.labels)}</section>` : '';
+  </details></div></div>` : '';
+  const labels = v.labels.length ? `<section class="panel labels"><h2>Labels${explain}</h2>${rows(v.labels)}${dialog}</section>` : '';
   // Each agent's bar is its share of the cost, in a colour by rank (a class, since the CSP allows no style attribute).
   const agents = v.agents.length ? `<section class="panel agents"><h2>Agents</h2>${v.agents.map((a, i) => `<div class="agent"><span>${esc(a.name)}</span><span class="mono mute">${esc(a.cost)}</span><svg class="bar a${Math.min(i, 3)}" aria-hidden="true"><rect width="${a.pct}%" height="100%"/></svg><span class="calls">${esc(a.calls)}</span></div>`).join('')}</section>` : '';
   const taught = v.taught.length ? `<section class="panel learn"><h2>What this run taught</h2><ul>${v.taught.map((l) => `<li>${esc(l.text)} <span class="mute">${esc(l.state)}</span></li>`).join('')}</ul><span class="mute note">Lessons from the retro that cite this job. One is kept only when you accept it.</span></section>` : '';
@@ -436,7 +442,7 @@ function insightsMain(local: boolean, now: number): string {
   if (!state.insights) return '';
   const v = insightsView(state.insights, now);
   const scopes = `<nav class="segmented" aria-label="Scope" data-key="scopes">${v.scopes.map((s) => `<a href="${esc(s.href)}"${s.on ? ' aria-current="true"' : ''}>${esc(s.name)}</a>`).join('')}</nav>`;
-  const top = `<div class="scope">${title}${scopes}</div>`;
+  const top = `${head}${scopes}`;
   if (v.none) return `<main class="main">${top}${none('No job ended in the last 30 days.')}</main>`;
   const tiles = `<div class="tiles">${v.tiles.map((t) => `<div class="tile" data-key="t-${esc(t.label)}"><span class="mute">${esc(t.label)}</span><b>${esc(t.value)}</b><span class="note${t.change ? tone(t.change.tone) : ''}">${t.change ? `${esc(t.change.text)} · ` : ''}${esc(t.note)}</span></div>`).join('')}</div>`;
   const classes = `<div class="scroll"><table class="grid"><thead><tr><th>Class</th><th class="num">Jobs</th><th class="num">Merged</th><th class="num">First pass</th><th class="num">$ / merged</th></tr></thead><tbody>${v.classes.map((c) => `<tr data-key="c-${esc(c.name)}"><td>${esc(c.name)}</td><td class="num">${esc(c.jobs)}</td><td class="num">${esc(c.merged)}</td><td class="num">${esc(c.firstPass)}</td><td class="num">${esc(c.perMerged)}</td></tr>`).join('')}</tbody></table></div>`;
@@ -531,9 +537,9 @@ const auth = (token: string | null): Record<string, string> => (token ? { author
 /** The people list's data, with the token as it is kept now; a token Helix refuses is forgotten. */
 async function readPeople(): Promise<void> {
   const token = readToken(storage);
-  if (!token && !state.display?.local) return;
+  // Asked all the same without a token, as a job is: the first load does not wait for /display to say whether this is the local display.
   const res = await fetch('/people/page-data', { cache: 'no-store', headers: auth(token) });
-  state.peopleStatus = res.status;
+  state.peopleStatus = res.status === 401 && !token ? undefined : res.status;
   if (res.status === 401 && token) forgetToken(storage);
   if (res.ok) state.people = (await res.json()) as PeoplePage;
 }
@@ -541,10 +547,8 @@ async function readPeople(): Promise<void> {
 /** A person's page data, with the token as it is kept now; `before` reads the jobs older than that one. A token Helix refuses is forgotten. */
 async function readPerson(name: string, before?: number | string): Promise<void> {
   const token = readToken(storage);
-  // The local display needs no token; Helix's people pages do.
-  if (!token && !state.display?.local) return;
   const res = await fetch(`/people/${encodeURIComponent(name)}/page-data${before !== undefined ? `?before=${encodeURIComponent(before)}` : ''}`, { cache: 'no-store', headers: auth(token) });
-  if (before === undefined) state.personStatus = res.status;
+  if (before === undefined) state.personStatus = res.status === 401 && !token ? undefined : res.status;
   if (res.status === 401 && token) forgetToken(storage);
   if (!res.ok) return;
   const data = (await res.json()) as PersonPage;
@@ -653,6 +657,14 @@ root.addEventListener('click', (event) => {
     void readPerson(at.name, typeof last?.id === 'number' ? last.id : last?.submitted).then(draw);
     return;
   }
+  const dlg = (event.target as Element).closest('[data-labels]');
+  // × and the backdrop close it; a click inside the dialog does not.
+  if (dlg && (dlg.getAttribute('data-labels') === 'open' || dlg === event.target || dlg.tagName === 'BUTTON')) {
+    state.labels = dlg.getAttribute('data-labels') === 'open';
+    draw();
+    (root.querySelector(state.labels ? '.dialog .lb-btn' : '.info') as HTMLElement | null)?.focus();
+    return;
+  }
   const shot = (event.target as Element).closest('[data-shot]');
   if (shot) { openShot(Number(shot.getAttribute('data-shot'))); return; }
   const lb = (event.target as Element).closest('[data-lb]');
@@ -685,6 +697,7 @@ function stepShot(by: number): void {
 }
 
 window.addEventListener('keydown', (event) => {
+  if (state.labels && event.key === 'Escape') { state.labels = false; draw(); (root.querySelector('.info') as HTMLElement | null)?.focus(); event.preventDefault(); return; }
   if (state.shot === undefined) return;
   if (event.key === 'Escape') openShot(undefined);
   else if (event.key === 'ArrowRight') stepShot(1);

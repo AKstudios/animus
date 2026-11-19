@@ -148,3 +148,11 @@ test('the back link names the Helix page the viewer came from, with its filters,
   assert.deepEqual([from(`${o}/`)?.name, from(`${o}/insights`)?.name, from(`${o}/people`)?.name, from(`${o}/people/ana`)?.name, from(`${o}/jobs/9`)?.name], ['Overview', 'Insights', 'People', 'ana', 'Job #9']);
   assert.deepEqual([from(''), from('not a url'), from('https://other.test/jobs'), from(`${o}/jobs/7`)], [undefined, undefined, undefined, undefined]);
 });
+
+// Protects: criterion 1, every page's h1 has its row to itself. Fails when: the overview's facts or Insights' scope switcher goes back inside the heading's row.
+test('the overview facts and the Insights scope switcher sit below the heading row', () => {
+  const app = readFileSync(join(DISPLAY, 'app.ts'), 'utf8');
+  assert.match(app, /<\/div>\n  <\/div>\n  \$\{v\.sel \? `<div class="facts"/);
+  assert.match(app, /const top = `\$\{head\}\$\{scopes\}`;/);
+  for (const row of app.match(/<div class="scope">.*?<\/h1>/gs) ?? []) assert.doesNotMatch(row, /facts|segmented/);
+});

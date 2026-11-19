@@ -82,12 +82,23 @@
       <div class="kvr"><span>merged</span><span>Wed 18 Nov 14:35</span></div>
     </div>
     <div class="box">
-      <h3>Labels</h3>
+      <h3>Labels <button type="button" class="info" aria-label="What the labels mean" aria-haspopup="dialog" style="width:18px;height:18px;padding:0;border-radius:50%;border:1px solid #888;background:none;font:italic 600 11px/1 Georgia,serif">i</button></h3>
       <div class="kvr"><span>size</span><span>medium</span></div>
       <div class="kvr"><span>difficulty</span><span>routine</span></div>
       <div class="kvr"><span>type</span><span>feature</span></div>
     </div>
   </aside>
+</div>
+
+<!-- The Labels panel's dialog, open: one plain sentence for each of this job's labels, then the full table folded. It closes with ×, Escape and a click outside. -->
+<div style="position:fixed;inset:0;display:none;align-items:center;justify-content:center;background:rgba(5,8,10,.55)" role="presentation">
+  <div role="dialog" aria-modal="true" aria-labelledby="labels-title" style="width:min(520px,100%);padding:16px 18px;background:#fff;border-radius:12px">
+    <div style="display:flex;justify-content:space-between"><h2 id="labels-title" style="font-size:16px">What this job's labels mean</h2><button type="button" aria-label="Close">×</button></div>
+    <p><b>size: medium</b> a planner cuts the work into slices.</p>
+    <p><b>difficulty: routine</b> a standard-tier model (sonnet) implements each slice, at medium effort.</p>
+    <p><b>type: feature</b> a bugs reviewer reviews the change.</p>
+    <details><summary>Every size, difficulty and type</summary></details>
+  </div>
 </div>
 
 <nav class="tabbar"><a href="overview.html">Overview</a><a class="on" href="jobs.html">Jobs</a><a href="#">People</a></nav>
