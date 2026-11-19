@@ -99,6 +99,17 @@ person asked on it, and updates that same pull request. Not a gate's fix
 round, which is a retry inside one job.
 _Avoid_: Follow-up, revision, amendment
 
+**Finding**:
+Something a review says is wrong with a job's change, graded as a blocker,
+a should-fix or a note. Only a blocker sends the work back inside the job.
+_Avoid_: Comment, remark, issue (a should-fix issue is the GitHub issue, not the finding)
+
+**Should-fix issue**:
+The GitHub issue Animus opens for one should-fix finding when the job's pull
+request opens, labelled `should-fix`, for a person to settle by hand or by
+asking a fix for it.
+_Avoid_: Follow-up, ticket, todo
+
 **Project image**:
 The image a project's jobs run in on Helix, built from the project's own
 Dockerfile on top of the job image every project starts from.
