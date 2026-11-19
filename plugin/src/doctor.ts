@@ -5,6 +5,7 @@ import { accessSync, constants, existsSync, mkdirSync, readFileSync } from 'node
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { animusHome } from './log.ts';
+import { openLocalQueue, queueFile } from './local-queue.ts';
 import { onPath } from './pipeline.ts';
 import { personalConfig, personalFor, snapshotSkills } from './personal.ts';
 import { PROFILE_PATH, loadProfile } from './profile.ts';
@@ -59,6 +60,29 @@ export function gitFindings(read: (key: string) => string): Finding[] {
   return found;
 }
 
+// Set by the shell on its own, differing from one terminal to the next; no job needs them.
+const SHELL_ONLY = new Set(['_', 'PWD', 'OLDPWD', 'SHLVL']);
+
+/** Variables the shell has that the loop, started from another environment, does not: what a job there would not see. */
+export function missingInLoop(loopEnv: readonly string[], shell: Record<string, string | undefined>): string[] {
+  const has = new Set(loopEnv);
+  return Object.keys(shell).filter((name) => !has.has(name) && !SHELL_ONLY.has(name)).sort();
+}
+
+/** The loop's environment against this shell's: a variable set after the loop started (a token, a proxy) does not reach its jobs until it restarts. */
+export function loopFindings(shell: Record<string, string | undefined>, home = animusHome()): Finding[] {
+  if (!existsSync(queueFile(home))) return [];
+  const queue = openLocalQueue(home);
+  try {
+    const loop = queue.loop();
+    if (!loop) return [];
+    const missing = missingInLoop(loop.env, shell);
+    if (!missing.length) return [];
+    const shown = missing.length > 8 ? `${missing.slice(0, 8).join(', ')} and ${missing.length - 8} more` : missing.join(', ');
+    return [{ level: 'warn', what: 'loop environment', detail: `the loop on this machine (pid ${loop.pid}) started without ${shown}, which this shell has; its jobs do not see them. They run with the environment of the animus that started the loop: restart it once its jobs end (it exits when nothing is left)` }];
+  } finally { queue.close(); }
+}
+
 /** helixUrl: a Helix being joined, which this machine has no token for yet. */
 export async function doctor(cwd: string, env = process.env, opts: { helixUrl?: string } = {}): Promise<Finding[]> {
   const found: Finding[] = [];
@@ -92,6 +116,7 @@ export async function doctor(cwd: string, env = process.env, opts: { helixUrl?: 
 
   const read = (key: string) => out('git', ['config', '--global', '--get', key]).text;
   found.push(...gitFindings(read));
+  found.push(...loopFindings(env));
 
   const top = out('git', ['rev-parse', '--show-toplevel'], cwd);
   if (top.ok) {

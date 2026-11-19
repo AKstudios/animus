@@ -11,7 +11,7 @@ import { PLUGIN_ROOT } from './profiles.ts';
 import { earlierOf } from './after.ts';
 import { findPrByTitle, prState } from './pr.ts';
 import { createQueue, type Earlier, type Queue } from './queue.ts';
-import type { LocalJob, LocalQueue } from './local-queue.ts';
+import { newerThan, type LocalJob, type LocalQueue } from './local-queue.ts';
 import type { Reading, Room } from './room.ts';
 
 /** What `animus` is asked to do for a job: run it, or resume one that ran before. */
@@ -54,6 +54,8 @@ export type LoopOptions = {
   sleep?: (ms: number) => Promise<void>;
   say?: (line: string) => void;
   home?: string;
+  /** The process this loop is, kept in the lock; this process by default. */
+  pid?: number;
 };
 
 const LOOK_MS = 2000;
@@ -70,7 +72,17 @@ export async function runLoop(opts: LoopOptions): Promise<'done' | 'held'> {
   const home = opts.home ?? animusHome();
   const children = new Map<number, ChildProcess>();
   const now = () => new Date().toISOString();
-  if (!store.claim(opts.version)) return 'held';
+  const pid = opts.pid ?? process.pid;
+  // Names only: the lock says what this loop runs with, so `animus doctor` can say what a later shell has that it lacks.
+  const env = Object.keys(process.env);
+  while (!store.claim(opts.version, pid, env)) {
+    const holder = store.loop();
+    // A loop of the same or a newer release has the lock: this one has nothing to do.
+    if (holder && !newerThan(opts.version, holder.version)) return 'held';
+    // An older one: it starts nothing more and leaves once its running jobs end (as `helix upgrade` waits for Helix's); then this one takes over.
+    if (holder && store.drain()) say(`waiting for the loop of ${holder.version} to finish its running jobs`);
+    await sleep(LOOK_MS);
+  }
 
   /** Starts a job's process; false when the job ended without one. */
   function start(job: LocalJob): boolean {
@@ -129,7 +141,7 @@ export async function runLoop(opts: LoopOptions): Promise<'done' | 'held'> {
   }
 
   const queue: Queue<LocalJob> = createQueue<LocalJob>({
-    store, config: { slots: 2, ...opts.config }, name: 'the loop', say, start,
+    store, config: { slots: 2, ...opts.config }, name: 'the loop', say, start, paused: store.draining,
     earlier: opts.earlier ?? (async (job) => earlierOf({ repo: job.repo, files: job.after ?? [], lookup: prState, find: findPrByTitle })),
     end: (job) => store.save(job),
     ...(opts.machine ? { machine: opts.machine } : {}),
@@ -144,7 +156,7 @@ export async function runLoop(opts: LoopOptions): Promise<'done' | 'held'> {
   for (let looks = 0; ; looks += 1) {
     if (looks % (opts.pollEvery ?? POLL_LOOKS) === 0) await queue.poll();
     queue.tick();
-    if (store.releaseIfIdle()) return 'done';
+    if (store.releaseIfIdle(pid)) return 'done';
     await sleep(LOOK_MS);
   }
 }

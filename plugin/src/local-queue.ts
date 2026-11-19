@@ -9,7 +9,9 @@ import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { alive, animusHome } from './log.ts';
 import { PLUGIN_ROOT, type Tier } from './profiles.ts';
+import { animusVersion } from './version.ts';
 import type { QueueJob, QueueStore } from './queue.ts';
+import { atLeast, parseVersion } from './semver.ts';
 
 /** A job on this machine: what the queue needs, and what `animus run` is started with. */
 export type LocalJob = QueueJob & {
@@ -27,8 +29,15 @@ export type LocalJob = QueueJob & {
   cost_usd?: number;
 };
 
-/** The loop that holds the lock: its process, machine, release and when it took it. */
-export type LoopLock = { pid: number; host: string; version: string; started: string };
+/**
+ * The loop that holds the lock: its process, machine, release and when it took it.
+ * drain: a newer `animus` asked it to start nothing more and exit once its running jobs end.
+ * env: the names (never the values) of the variables it runs with, for `animus doctor`.
+ */
+export type LoopLock = { pid: number; host: string; version: string; started: string; drain: boolean; env: string[] };
+
+/** Whether release `a` is newer than release `b`; false when either is not a version. */
+export const newerThan = (a: string, b: string) => { const x = parseVersion(a), y = parseVersion(b); return Boolean(x && y) && !atLeast(b, a) && atLeast(a, b); };
 
 export type LocalQueue = QueueStore<LocalJob> & {
   add(job: Omit<LocalJob, 'id'>): LocalJob;
@@ -38,9 +47,13 @@ export type LocalQueue = QueueStore<LocalJob> & {
   /** The loop that holds the lock, if its process is alive here. */
   loop(): LoopLock | undefined;
   /** Takes the lock for this process; false when another loop holds it. Two callers at once cannot both win. */
-  claim(version: string, pid?: number): boolean;
-  /** Gives up the lock if no work is left, in one step with the check, so a job added just before is not left with no loop; whether it was given up. */
+  claim(version: string, pid?: number, env?: string[]): boolean;
+  /** Gives up the lock if no work is left, or if it is draining and no job is running, in one step with the check, so a job added just before is not left with no loop; whether it was given up. */
   releaseIfIdle(pid?: number): boolean;
+  /** Asks the loop that holds the lock to start nothing more; true when this call asked, false when it had been asked or none holds it. */
+  drain(): boolean;
+  /** Whether the loop that holds the lock was asked to start nothing more. */
+  draining(): boolean;
   /** When the person last looked at what needs them (`animus status`), if ever. */
   seen(): string | undefined;
   markSeen(at: string): void;
@@ -55,13 +68,20 @@ export function openLocalQueue(home = animusHome()): LocalQueue {
   // Every `animus` command opens the queue beside the loop: wait for each other's writes.
   db.exec('pragma busy_timeout = 5000');
   db.exec('create table if not exists jobs (id integer primary key autoincrement, state text not null, data text not null)');
-  db.exec('create table if not exists loop (id integer primary key check (id = 1), pid integer not null, host text not null, version text not null, started text not null)');
+  db.exec("create table if not exists loop (id integer primary key check (id = 1), pid integer not null, host text not null, version text not null, started text not null, drain integer not null default 0, env text not null default '[]')");
+  // A queue.db made before the loop recorded these has neither column.
+  const columns = (db.prepare('pragma table_info(loop)').all() as { name: string }[]).map((c) => c.name);
+  if (!columns.includes('drain')) db.exec('alter table loop add column drain integer not null default 0');
+  if (!columns.includes('env')) db.exec("alter table loop add column env text not null default '[]'");
   db.exec('create table if not exists seen (id integer primary key check (id = 1), at text not null)');
   const row = (r: unknown): LocalJob => {
     const { id, state, data } = r as { id: number; state: LocalJob['state']; data: string };
     return { ...(JSON.parse(data) as LocalJob), id, state };
   };
-  const lock = (): LoopLock | undefined => db.prepare('select pid, host, version, started from loop where id = 1').get() as LoopLock | undefined;
+  const lock = (): LoopLock | undefined => {
+    const l = db.prepare('select pid, host, version, started, drain, env from loop where id = 1').get() as (Omit<LoopLock, 'drain' | 'env'> & { drain: number; env: string }) | undefined;
+    return l && { ...l, drain: l.drain === 1, env: JSON.parse(l.env) as string[] };
+  };
   // A pid from before the machine last started names nothing of ours now, and may name something else.
   const holds = (l: LoopLock) => l.host === hostname() && Date.parse(l.started) > Date.now() - uptime() * 1000 && alive(l.pid);
   const hasWork = () => db.prepare("select 1 from jobs where state in ('queued', 'waiting', 'running') limit 1").get() !== undefined;
@@ -81,17 +101,26 @@ export function openLocalQueue(home = animusHome()): LocalQueue {
     save(job) { db.prepare('update jobs set state = ?, data = ? where id = ?').run(job.state, JSON.stringify(job), job.id); },
     hasWork,
     loop: () => { const l = lock(); return l && holds(l) ? l : undefined; },
-    claim: (version, pid = process.pid) => exclusive(() => {
+    claim: (version, pid = process.pid, env = []) => exclusive(() => {
       const l = lock();
       if (l && l.pid !== pid && holds(l)) return false;
-      db.prepare('insert or replace into loop (id, pid, host, version, started) values (1, ?, ?, ?, ?)').run(pid, hostname(), version, new Date().toISOString());
+      db.prepare('insert or replace into loop (id, pid, host, version, started, drain, env) values (1, ?, ?, ?, ?, 0, ?)').run(pid, hostname(), version, new Date().toISOString(), JSON.stringify(env));
       return true;
     }),
     releaseIfIdle: (pid = process.pid) => exclusive(() => {
-      if (hasWork()) return false;
+      const l = lock();
+      const handOver = l?.pid === pid && l.drain && db.prepare("select 1 from jobs where state = 'running' limit 1").get() === undefined;
+      if (hasWork() && !handOver) return false;
       db.prepare('delete from loop where id = 1 and pid = ?').run(pid);
       return true;
     }),
+    drain: () => exclusive(() => {
+      const l = lock();
+      if (!l || !holds(l) || l.drain) return false;
+      db.prepare('update loop set drain = 1 where id = 1').run();
+      return true;
+    }),
+    draining: () => lock()?.drain === true,
     seen: () => (db.prepare('select at from seen where id = 1').get() as { at: string } | undefined)?.at,
     markSeen(at) { db.prepare('insert or replace into seen (id, at) values (1, ?)').run(at); },
     close: () => db.close(),
@@ -117,10 +146,14 @@ function spawnLoop(): void {
 /**
  * Makes sure a loop runs while work is left: `idle` when there is none, `running` when one holds the lock, `started` when it started one.
  * Two callers at once may both start a process; the lock lets one loop run, and the other exits at once.
+ * A loop of an older release is asked to start nothing more (as `helix upgrade` drains Helix) and a loop of this release is started: it waits for the old one's running jobs (runLoop), so no command here blocks on them.
+ * `version` is this release.
  */
-export function ensureLoop(queue: LocalQueue, start: () => void = spawnLoop): 'idle' | 'running' | 'started' {
+export function ensureLoop(queue: LocalQueue, start: () => void = spawnLoop, version = animusVersion()): 'idle' | 'running' | 'started' {
   if (!queue.hasWork()) return 'idle';
-  if (queue.loop()) return 'running';
-  start();
-  return 'started';
+  const loop = queue.loop();
+  if (!loop) { start(); return 'started'; }
+  // Only the caller that sets the flag starts the successor; the others find it on its way.
+  if (newerThan(version, loop.version) && queue.drain()) { start(); return 'started'; }
+  return 'running';
 }

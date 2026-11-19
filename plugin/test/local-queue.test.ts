@@ -7,6 +7,7 @@ import { join } from 'node:path';
 import { test } from 'node:test';
 import './helpers.ts';
 import { earlierOf } from '../src/after.ts';
+import { loopFindings } from '../src/doctor.ts';
 import { enqueue, ensureLoop, openLocalQueue, type LocalJob } from '../src/local-queue.ts';
 import { answerLocal, cancelLocal } from '../src/local-status.ts';
 import { loopConfig } from '../src/personal.ts';
@@ -362,4 +363,81 @@ test('animus cancel ends a waiting job, and a running one stays cancelled when i
 
   assert.deepEqual([queue.get(running.id)!.state, queue.get(running.id)!.outcome, queue.get(running.id)!.pid], ['cancelled', undefined, undefined]);
   queue.close();
+});
+
+/** A job's process that ends when told to, so a test decides how long the job runs. */
+function heldAnimus(result: object) {
+  const started: string[][] = [];
+  const children: (ChildProcess & { stdout: EventEmitter; stderr: EventEmitter })[] = [];
+  const launch = (_command: string, args: string[]): ChildProcess => {
+    started.push(args.slice(2));
+    const child = new EventEmitter() as ChildProcess & { stdout: EventEmitter; stderr: EventEmitter };
+    Object.assign(child, { pid: 4_100_000 + started.length, stdout: new EventEmitter(), stderr: new EventEmitter() });
+    children.push(child);
+    return child;
+  };
+  const finish = (n: number) => { children[n]!.stdout.emit('data', Buffer.from(JSON.stringify(result))); children[n]!.emit('close', 0, null); };
+  return { launch, started, finish };
+}
+
+const settle = async () => { for (let i = 0; i < 30; i += 1) await tick(); };
+
+// Protects: criterion 7. Fails when the newer release's loop starts a job while the older one still runs jobs, does not take over once they end, or the older loop goes on starting jobs after being asked to stop.
+test('a newer animus drains an older loop: it starts nothing more, its running job ends, then the newer loop runs the rest', async () => {
+  const home = newHome();
+  const queue = openLocalQueue(home);
+  const running = enqueue(queue, spec);
+  const oldAnimus = heldAnimus({ outcome: 'pr', pr: 'https://example.test/pr/1' });
+  const newAnimus = heldAnimus({ outcome: 'pr', pr: 'https://example.test/pr/2' });
+  const oldLoop = runLoop({ queue, version: '1.0.0', pid: process.ppid, launch: oldAnimus.launch, machine: plenty, sleep: tick, home });
+  await settle();
+  assert.equal(queue.get(running.id)!.state, 'running');
+
+  const later = enqueue(queue, spec);
+  let newLoop: Promise<'done' | 'held'> | undefined;
+  const start = () => { newLoop = runLoop({ queue, version: '1.1.0', launch: newAnimus.launch, machine: plenty, sleep: tick, home }); };
+  assert.equal(ensureLoop(queue, start, '1.1.0'), 'started');
+  assert.equal(ensureLoop(queue, start, '1.1.0'), 'running', 'a second animus command started a second successor');
+  await settle();
+
+  // Draining: the older loop holds its job and starts nothing; the newer one has not taken over.
+  assert.deepEqual([queue.loop()?.version, queue.draining(), queue.get(later.id)!.state, oldAnimus.started.length, newAnimus.started.length], ['1.0.0', true, 'queued', 1, 0]);
+
+  oldAnimus.finish(0);
+  await settle();
+
+  assert.equal(await oldLoop, 'done');
+  assert.deepEqual(newAnimus.started.map((a) => a[1]), [spec.spec], 'the newer loop runs only the queued job');
+  assert.deepEqual([queue.get(running.id)!.state, queue.get(running.id)!.pr], ['ended', 'https://example.test/pr/1']);
+  assert.equal(queue.get(later.id)!.state, 'running');
+  newAnimus.finish(0);
+  assert.equal(await newLoop, 'done');
+  assert.deepEqual([queue.get(later.id)!.state, queue.get(later.id)!.pr], ['ended', 'https://example.test/pr/2']);
+  queue.close();
+});
+
+// Protects: criterion 7, the other direction. Fails when an older animus, or one of the same release, stops a loop that is as new or newer.
+test('animus does not drain a loop of its own release or a newer one', () => {
+  const queue = openLocalQueue(newHome());
+  enqueue(queue, spec);
+  queue.claim('1.10.0', process.ppid);
+
+  assert.equal(ensureLoop(queue, () => assert.fail('started a loop'), '1.10.0'), 'running');
+  assert.equal(ensureLoop(queue, () => assert.fail('started a loop'), '1.9.0'), 'running');
+  assert.equal(queue.draining(), false);
+  queue.close();
+});
+
+// Protects: criterion 7, doctor. Fails when a variable the shell has and the loop lacks goes unwarned, or one the loop has (or the shell sets on its own) is warned about.
+test('animus doctor warns of variables this shell has that the loop was started without', () => {
+  const home = newHome();
+  const queue = openLocalQueue(home);
+  queue.claim('1.0.0', process.ppid, ['PATH', 'HOME']);
+  queue.close();
+
+  const warned = loopFindings({ PATH: '/bin', HOME: '/h', GH_TOKEN: 'x', PWD: '/here' }, home);
+  assert.deepEqual(warned.map((f) => f.level), ['warn']);
+  assert.match(warned[0]!.detail, /without GH_TOKEN,/);
+  assert.doesNotMatch(warned[0]!.detail, /PWD|PATH/);
+  assert.deepEqual(loopFindings({ PATH: '/bin' }, home), []);
 });
