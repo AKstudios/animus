@@ -379,20 +379,19 @@ a.tag:hover { opacity: 1; background: color-mix(in srgb, currentColor 22%, trans
 .section-head .all-jobs { margin-left: auto; font-size: 13px; color: var(--mute); }
 
 /* ------------------------------------------------------------ Insights */
-.tiles { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 12px; }
+.tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 12px; }
 .tile { display: flex; flex-direction: column; gap: 4px; padding: 16px 18px; min-width: 0; border: 1px solid var(--line); border-radius: 12px; background: var(--panel); }
 .tile > .mute { font-size: 12px; }
 .tile b { font-size: 28px; font-weight: 600; line-height: 1.15; font-variant-numeric: tabular-nums; }
 .tile .note { font-size: 12px; color: var(--mute); overflow-wrap: anywhere; }
-.delta { font-family: var(--mono); font-size: 12px; color: var(--mute); }
-.delta.good { color: var(--open); }
-.delta.bad { color: var(--fail-ink); }
+.tile .note.good { color: var(--open); } .tile .note.bad { color: var(--fail-ink); }
 .two { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 28px 32px; align-items: start; }
 .scroll { overflow-x: auto; }
 .grid { width: 100%; border-collapse: collapse; font-size: 13px; }
-.grid th { padding: 8px 10px; text-align: left; font-size: 12px; font-weight: 500; color: var(--mute); border-bottom: 1px solid var(--line); white-space: nowrap; }
-.grid td { padding: 10px; border-bottom: 1px solid var(--soft); overflow-wrap: anywhere; }
-.grid .num { text-align: right; font-family: var(--mono); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.grid th { padding: 8px 10px; text-align: right; font: 500 12px var(--sans); color: var(--mute); border-bottom: 1px solid var(--line); }
+.grid th:first-child, .grid td:first-child { text-align: left; font: 14px var(--sans); }
+.grid td { padding: 11px 10px; border-bottom: 1px solid var(--soft); text-align: right; font: 13px var(--mono); }
+.grid .num { font-variant-numeric: tabular-nums; }
 .cause { display: grid; grid-template-columns: 150px minmax(0, 1fr) 64px; gap: 12px; align-items: center; padding: 6px 0; font-size: 13px; }
 .cause .mono { text-align: right; font-size: 12px; }
 .bar { display: block; width: 100%; height: 6px; border-radius: 3px; overflow: hidden; }
@@ -402,18 +401,22 @@ a.tag:hover { opacity: 1; background: color-mix(in srgb, currentColor 22%, trans
 .bar.tone-ask .fill { fill: var(--ask); }
 .note { font-size: 13px; color: var(--mute); }
 .note b { color: var(--ink); font-family: var(--mono); font-weight: 600; }
-.li { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 4px 16px; padding: 10px 0; border-bottom: 1px solid var(--soft); font-size: 13px; }
-.lesson { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 4px 14px; align-items: baseline; padding: 12px 0; border-bottom: 1px solid var(--soft); font-size: 13px; }
-.lesson .said { font-weight: 500; overflow-wrap: anywhere; }
-.lesson .mute, .lesson .cmd { grid-column: 1 / -1; font-size: 12px; overflow-wrap: anywhere; }
-.lesson .cmd { font-family: var(--mono); color: var(--acc-ink); }
-.lesson > .mono { grid-column: 2; grid-row: 1; font-size: 12px; }
-.lesson > .used { color: var(--open); }
+.li { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: 4px 12px; align-items: center; padding: 10px 0; border-bottom: 1px solid var(--soft); font-size: 13px; }
+.li .r { font: 12px var(--mono); color: var(--mute); text-align: right; }
+.li .tt { overflow-wrap: anywhere; }
+.pill { font-size: 11px; font-weight: 600; padding: 2px 9px; border-radius: 999px; white-space: nowrap; background: color-mix(in srgb, currentColor 13%, transparent); }
+.p-plain { color: var(--mute); } .p-open { color: var(--open); }
+.lesson { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 6px 16px; align-items: center; padding: 14px 0; border-bottom: 1px solid var(--soft); font-size: 13px; }
+.lesson .src { font-size: 12px; color: var(--mute); grid-column: 1; overflow-wrap: anywhere; }
+.lesson .cmd { grid-row: 1 / 3; grid-column: 2; font: 12px var(--mono); color: var(--mute); padding: 6px 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--panel); }
+.scope-chip { font-size: 11px; font-weight: 600; padding: 2px 7px; border-radius: 999px; background: var(--soft); color: var(--mute); margin-right: 6px; }
 @media (max-width: 900px) {
-  .tiles { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .two { grid-template-columns: minmax(0, 1fr); }
 }
 @media (max-width: 640px) {
   .tile b { font-size: 24px; }
   .cause { grid-template-columns: 110px minmax(0, 1fr) 48px; }
+  .lesson { grid-template-columns: minmax(0, 1fr); }
+  .lesson .cmd { grid-row: auto; grid-column: 1; justify-self: start; }
+  .li { grid-template-columns: auto minmax(0, 1fr); } .li .r { grid-column: 1 / -1; text-align: left; }
 }
