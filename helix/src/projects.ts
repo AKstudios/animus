@@ -153,6 +153,25 @@ const git = (args: string[], opts: { cwd?: string; env: Record<string, string> }
 };
 
 /**
+ * Runs the profile's installs and setup, then every gate, in a worktree on
+ * `on` (a branch's name, for what it says), as a job would; says what it finds.
+ * Why it failed, or nothing when it passed. The add check and a provision
+ * job's attempts both end here.
+ */
+export function runEnvironment(opts: { setup: SetupRun; worktree: string; clone: string; env: Record<string, string>; image: string | undefined; profile: { setup?: string }; on: string; say: (line: string) => void }): string | undefined {
+  const { say } = opts;
+  say(`running the profile's installs and setup, then every gate, as a job would${opts.profile.setup ? `: ${opts.profile.setup}` : ''}`);
+  const r = opts.setup(opts.worktree, opts.clone, opts.env, opts.image);
+  if (!r.gates) return `setup did not pass, so every job would fail at it:\n${failureExcerpt(r.output, 30)}`;
+  say('setup passed');
+  for (const line of describe(r.gates).split('\n').slice(0, r.gates.length)) say(`  ${line}`);
+  for (const g of r.gates.filter((g) => g.flaky)) say(`flaky: ${g.name} failed, then passed when run again`);
+  const failed = r.gates.filter((g) => !g.ok);
+  if (failed.length) return `its gates fail on ${opts.on}, so every job would fail at them:\n${describe(failed)}`;
+  return undefined;
+}
+
+/**
  * The check `helix check-project` runs. What it finds goes to say, line by
  * line, for the person waiting on `animus project add`. Moves the project to
  * ready or failed; whether it is ready.
@@ -228,15 +247,9 @@ export function checkProject(opts: {
       git(['worktree', 'prune'], { cwd: dir, env: {} });
       const added = git(['worktree', 'add', '--quiet', '--detach', worktree, `origin/${profile.base}`], { cwd: dir, env: {} });
       if (added.code !== 0) return fail(`could not make a worktree on ${profile.base}: ${added.out}`);
-      say(`running the profile's installs and setup, then every gate, as a job would${profile.setup ? `: ${profile.setup}` : ''}`);
-      const r = opts.setup(worktree, dir, { ...env, ...given }, image);
+      const why = runEnvironment({ setup: opts.setup, worktree, clone: dir, env: { ...env, ...given }, image, profile, on: profile.base, say });
       git(['worktree', 'remove', '--force', worktree], { cwd: dir, env: {} });
-      if (!r.gates) return fail(`setup did not pass, so every job would fail at it:\n${failureExcerpt(r.output, 30)}`, true);
-      say('setup passed');
-      for (const line of describe(r.gates).split('\n').slice(0, r.gates.length)) say(`  ${line}`);
-      for (const g of r.gates.filter((g) => g.flaky)) say(`flaky: ${g.name} failed, then passed when run again`);
-      const failed = r.gates.filter((g) => !g.ok);
-      if (failed.length) return fail(`its gates fail on ${profile.base}, so every job would fail at them:\n${describe(failed)}`, true);
+      if (why) return fail(why, true);
     }
     settle({ state: 'ready' });
     say(`${name} is ready: animus submit <spec.md> from a checkout of it`);
