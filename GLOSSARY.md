@@ -13,8 +13,10 @@ in Slack or on GitHub, is named Animus, never Helix.
 _Avoid_: Animus server, the bot
 
 **Person**:
-Someone who has joined a Helix, with their own Claude and GitHub tokens on it.
-_Avoid_: User, member, account
+Someone who has joined a Helix, with their own Claude and GitHub tokens on it;
+on one machine, whoever started a job there. A person is shown by one name
+everywhere, never by their email or login when their name is known.
+_Avoid_: User, member, account, submitter
 
 **Owner**:
 The one person on a Helix who may invite and remove people and act on any
@@ -64,6 +66,22 @@ _Avoid_: Route, screen, view
 One run of the factory on one spec, ending in a pull request, a question, or
 a failure.
 _Avoid_: Run, build, task
+
+**Labels**:
+A spec's size, difficulty and type, which decide which agents a job runs, at
+which model tier and effort, and what evidence it gathers.
+_Avoid_: Tags, classification
+
+**Stage**:
+One step every job passes through in order: setup, plan, implement, gates,
+review, evidence and PR. A job is in one stage at a time; a fix round
+happens inside implement and gates, not as a stage of its own.
+_Avoid_: Phase, step, ring
+
+**Agent session**:
+One agent working on one part of a job in one stage, with its role, model
+tier and effort, from when it starts until it answers.
+_Avoid_: Agent run, crew member, worker
 
 **Waiting**:
 A job held in the queue, using no slot, until the pull request of the spec it
@@ -120,12 +138,13 @@ overview, a job page and a person page.
 _Avoid_: Dashboard, web UI, Helix UI
 
 **Job page**:
-Everything about one job on one page: its spec, stages, checks, review,
-questions and answers, log and screenshots.
+Everything about one job on one page: what it is doing now, then each of
+its stages with the agent sessions and what that stage produced, and its
+spec, log, tool calls and questions.
 _Avoid_: Job detail, job view
 
 **Person page**:
-One person's jobs and activity on a Helix.
+One person's jobs, usage and activity, on a Helix or on one machine.
 _Avoid_: Profile, user page
 
 **Activity**:
