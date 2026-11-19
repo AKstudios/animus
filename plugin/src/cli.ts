@@ -54,7 +54,8 @@ const USAGE = `animus: a spec goes in, a pull request with proof comes out
         --dry-run stops before the push; --draft opens the PR as a draft;
         --keep leaves the worktree.
         A spec with \`after: <spec.md>\` in its header waits until that spec's
-        pull request is merged, then starts.
+        pull request is merged, then starts; --after-merged says a queue has
+        already seen it merged, so the job starts at once.
         Your own skills in ANIMUS_HOME/config.yaml are copied into the job
         when it starts (--skills <file> gives them instead, as JSON).
   animus plan <spec.md> [--slices] [--repo <dir>]
@@ -226,7 +227,7 @@ async function main(argv: string[]): Promise<number> {
   const { values, positionals } = parseArgs({
     args: rest, allowPositionals: true,
     options: {
-      repo: { type: 'string' }, project: { type: 'string' }, 'dry-run': { type: 'boolean' }, keep: { type: 'boolean' }, draft: { type: 'boolean' }, answer: { type: 'string' },
+      repo: { type: 'string' }, project: { type: 'string' }, 'dry-run': { type: 'boolean' }, keep: { type: 'boolean' }, draft: { type: 'boolean' }, answer: { type: 'string' }, 'after-merged': { type: 'boolean' },
       json: { type: 'boolean' }, skills: { type: 'string' }, local: { type: 'boolean' }, helix: { type: 'boolean' }, n: { type: 'string', short: 'n' }, again: { type: 'boolean' }, days: { type: 'string' }, force: { type: 'boolean' }, slices: { type: 'boolean' }, yes: { type: 'boolean' }, github: { type: 'string' }, slack: { type: 'string' }, all: { type: 'boolean' }, references: { type: 'string' },
     },
   });
@@ -261,7 +262,7 @@ async function main(argv: string[]): Promise<number> {
       const specFile = resolve(positionals[0]);
       const repo = resolve(values.repo ?? cwd);
       const personal = localSkills(repo, values.skills);
-      return finish(await runJob({ repo, specFile, personal, ...flags, ...(process.env.ANIMUS_TRIGGER ? { trigger: process.env.ANIMUS_TRIGGER } : {}) }, deps()));
+      return finish(await runJob({ repo, specFile, personal, ...flags, ...(values['after-merged'] ? { afterMerged: true } : {}), ...(process.env.ANIMUS_TRIGGER ? { trigger: process.env.ANIMUS_TRIGGER } : {}) }, deps()));
     }
     case 'start': {
       if (!positionals[0]) throw new AnimusError('usage: animus start <spec.md> [--local | --helix] [--draft]');

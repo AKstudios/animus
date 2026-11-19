@@ -8,7 +8,7 @@ import { describeJob } from '../../plugin/src/remote.ts';
 import { hashToken, type Config } from '../src/config.ts';
 import { deviceCode, keepTokens, pollDevice } from '../src/github-app.ts';
 import { openStore, type HelixJob } from '../src/store.ts';
-import { supervise, type Launch } from '../src/supervisor.ts';
+import { animusArgs, supervise, type Launch } from '../src/supervisor.ts';
 import { fakeGitHub } from './fake-github.ts';
 
 const spec = (title: string, after?: string) => `---\nsize: small\n${after ? `after: ${after}\n` : ''}---\n# ${title}\n\n## Acceptance criteria\n\n1. It works.\n`;
@@ -36,8 +36,10 @@ async function helix(home = mkdtempSync(join(tmpdir(), 'helix-waiting-'))) {
   github.addIssue('o/app', 4, { title: 'Base', body: 'x', pull: true });
   const started: string[] = [];
   const told: HelixJob[] = [];
-  const launch: Launch = (job) => {
+  const launched = new Map<string, string[]>();
+  const launch: Launch = (job, repoDir) => {
     started.push(job.title);
+    launched.set(job.title, animusArgs(job, repoDir));
     return { command: process.execPath, args: ['-e', `console.log(JSON.stringify({ outcome: 'pr', pr: 'https://github.com/o/app/pull/9' }))`] };
   };
   const supervisor = supervise({ store, config, home, launch, github, notify: (j) => { told.push(j); } });
@@ -50,7 +52,7 @@ async function helix(home = mkdtempSync(join(tmpdir(), 'helix-waiting-'))) {
     }
     return store.get(id)!;
   };
-  return { github, store, supervisor, started, told, home, submit, reaches, stop: () => { supervisor.stop(); store.close(); } };
+  return { github, store, supervisor, started, launched, told, home, submit, reaches, stop: () => { supervisor.stop(); store.close(); } };
 }
 
 // Protects: criteria 1 and 2. Fails when: a job whose earlier PR is open takes a slot or starts, says something else than what it waits for, is not queued once that PR merges, or does not then run.
@@ -68,6 +70,9 @@ test('a job after a spec whose pull request is open waits without a slot, then r
   h.github.addIssue('o/app', 4, { title: 'Base', body: 'x', pull: true, merged: true });
   const done = await h.reaches(waiting.id, 'ended');
   assert.deepEqual([done.outcome, done.pr, h.started], ['pr', 'https://github.com/o/app/pull/9', ['Other', 'Later']]);
+  // The queue has settled the wait: `animus run` must not look for the earlier spec's file (it may exist only as another Helix job's) or wait again.
+  assert.ok(h.launched.get('Later')!.includes('--after-merged'));
+  assert.ok(!h.launched.get('Other')!.includes('--after-merged'));
   h.stop();
 });
 

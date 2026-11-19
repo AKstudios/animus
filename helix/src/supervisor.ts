@@ -40,7 +40,8 @@ export const animusArgs = (job: HelixJob, repoDir: string): string[] => {
   const references = existsSync(referencesDir(job)) ? ['--references', referencesDir(job)] : [];
   // `--` keeps an ask that starts with a dash from being read as an option.
   if (job.ask) return ['fix', '--repo', repoDir, ...skills, ...references, '--', job.pr!, job.ask!];
-  return ['run', job.spec, '--repo', repoDir, ...(job.draft ? ['--draft'] : []), ...skills];
+  // A job with `after:` is only started once the queue has seen the earlier pull request merged, so `animus run` neither looks for that spec's file nor waits.
+  return ['run', job.spec, '--repo', repoDir, ...(job.after?.length ? ['--after-merged'] : []), ...(job.draft ? ['--draft'] : []), ...skills];
 };
 
 /** Where Helix keeps the skills a person sent with a spec: beside it, so a job's container sees them where the spec is. */

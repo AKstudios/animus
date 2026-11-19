@@ -343,6 +343,15 @@ test('a bug spec with no acceptance command is refused before anything starts', 
   assert.equal(calls.length, 0);
 });
 
+// Protects: Helix's hand-off of a waiting job. Fails when: a job whose queue saw the earlier PR merge still looks for that spec's file (absent here) or waits again.
+test('a spec with after: runs at once when the queue says the earlier pull request merged, whether or not the earlier spec is in the repo', async () => {
+  const { agent } = fakeAgent([say('done'), () => clean()]);
+  const looked: string[] = [];
+  const d = deps(agent, { prState: (url) => { looked.push(url); return 'OPEN'; } });
+  const run = await runJob({ repo: makeRepo(), specFile: writeSpec(`${SMALL}\nafter: docs/specs/none.md`), afterMerged: true }, d);
+  assert.deepEqual([run.outcome, looked], ['pr', []]);
+});
+
 test('a spec with after: waits until the earlier spec\'s pull request is merged, and fails if it was closed unmerged', async () => {
   const repo = makeRepo();
   const first = writeSpec(SMALL);
