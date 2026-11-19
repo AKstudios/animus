@@ -6,7 +6,7 @@ import { test } from 'node:test';
 import { fixAlone, fixTarget } from '../src/fix.ts';
 import { jobDir, loadState, saveProgress, saveState } from '../src/log.ts';
 import { runJob, type Deps } from '../src/pipeline.ts';
-import { BODY_LIMIT, prBody, SPEC_SUMMARY } from '../src/pr.ts';
+import { BODY_LIMIT, prBody, publish, SPEC_SUMMARY } from '../src/pr.ts';
 import { loadFactory, resolvePlan } from '../src/profiles.ts';
 import { git } from '../src/proc.ts';
 import { parseSpec } from '../src/spec.ts';
@@ -185,6 +185,33 @@ test('the pull request body holds the spec in a collapsed block, and leaves it o
   assert.ok(long.length <= BODY_LIMIT);
   assert.doesNotMatch(long, /<details>/);
   assert.match(long, /The spec is not in this description: .* 65,536 characters\.$/);
+});
+
+// Protects: criterion 5 of the any-pull-request spec. Fails when: a fix overwrites a push made to the branch while it ran, or ends without saying to fix again.
+test('a fix whose push is rejected because the branch changed on GitHub meanwhile pushes nothing and ends failed', async () => {
+  const repo = makeRepo();
+  const origin = mkdtempSync(join(tmpdir(), 'animus-origin-'));
+  git(origin, ['init', '-q', '--bare']);
+  git(repo, ['remote', 'add', 'origin', origin]);
+  const first = await opened(repo, 'session-job');
+  git(repo, ['push', '-q', 'origin', first.branch]);
+  const other = join(mkdtempSync(join(tmpdir(), 'animus-other-')), 'clone');
+  git(tmpdir(), ['clone', '-q', '--branch', first.branch, origin, other]);
+  // Another fix lands on GitHub while this one's implementer works.
+  const meanwhile: Step = (req) => {
+    write(other, 'src/other.txt', 'the other fix\n');
+    git(other, ['add', '-A']);
+    git(other, ['commit', '-qm', 'The other fix']);
+    git(other, ['push', '-q', 'origin', first.branch]);
+    return say('done, again')(req);
+  };
+
+  const { run } = await fixOf(repo, 'Say it twice', fakeAgent([meanwhile, () => clean()]).agent, { publish });
+
+  assert.equal(run.outcome, 'failed');
+  assert.equal(run.reason, 'the branch changed while this fix ran: fix again');
+  assert.equal(run.pr, undefined);
+  assert.equal(git(origin, ['rev-parse', first.branch]), git(other, ['rev-parse', 'HEAD']));
 });
 
 const notReady = () => ({ output: { status: 'not-ready', summary: 'It misses the point.', criteria: [], findings: [{ severity: 'blocker', problem: 'It is wrong.' }] } });
