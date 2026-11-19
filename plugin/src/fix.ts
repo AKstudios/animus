@@ -70,9 +70,13 @@ export async function whereToFix(opts: Omit<Parameters<typeof whereToRun>[0], 'c
 /** What a fix that runs from the pull request alone takes from it; author is the GitHub login that opened it. */
 export type FromPr = { spec: string; branch: string; baseBranch: string; closes?: number; fixes?: FixEntry[]; author?: string };
 
+/** The spec in the collapsed block an Animus job writes in its pull request's description (pr.ts prBody); undefined when it has none. */
+export const specInBody = (body: string): string | undefined =>
+  new RegExp(`<details><summary>${SPEC_SUMMARY}</summary>\\n\\n(\`{3,})md\\n([\\s\\S]*?)\\n\\1\\n\\n</details>`).exec(body)?.[2];
+
 /** The spec, branches, Closes line and Fixes list a pull request's description and GitHub give; `what` names the description in the refusal when it holds no spec. */
 function fromDescription(found: PrSource, what: string): FromPr {
-  const spec = new RegExp(`<details><summary>${SPEC_SUMMARY}</summary>\\n\\n(\`{3,})md\\n([\\s\\S]*?)\\n\\1\\n\\n</details>`).exec(found.body)?.[2];
+  const spec = specInBody(found.body);
   if (!spec) throw new AnimusError(`${what} holds no spec (one too long for GitHub's limit is left out), so the fix cannot run`);
   const { closes, fixes } = readBody(found.body);
   return { spec, branch: found.head, baseBranch: found.base, ...(closes ? { closes } : {}), ...(fixes.length ? { fixes } : {}), ...(found.author ? { author: found.author } : {}) };

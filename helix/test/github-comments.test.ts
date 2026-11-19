@@ -10,7 +10,7 @@ import { deviceCode, keepTokens, pollDevice } from '../src/github-app.ts';
 import { slackNotifier } from '../src/slack.ts';
 import { openStore } from '../src/store.ts';
 import { animusArgs, pauseFile, supervise, type Launch } from '../src/supervisor.ts';
-import { fakeGitHub, type FakeGitHub } from './fake-github.ts';
+import { ANIMUS_BODY, fakeGitHub, type FakeGitHub } from './fake-github.ts';
 import { fakeTransport, until } from './fake-slack.ts';
 import { fakeAdmit } from './fake-admit.ts';
 
@@ -40,6 +40,8 @@ else console.log(JSON.stringify({ outcome: 'pr', pr: 'https://github.com/o/app/p
 const T0 = Date.parse('2030-01-01T10:00:00Z');
 const at = (seconds: number) => new Date(T0 + seconds * 1000).toISOString().replace('.000Z', 'Z');
 const HOUR = 3600;
+/** Pull request 8 on GitHub: an Animus one, by ana. */
+const PR_8 = { title: 'Fix login', body: ANIMUS_BODY, pull: true, author: 'ana-gh' };
 
 /**
  * A Helix with ana (GitHub login ana-gh, signed in through the app) and the
@@ -67,7 +69,7 @@ async function helix(opts: { slack?: boolean; owner?: string; run?: boolean } = 
   mkdirSync(join(home, 'app'));
   store.putProject({ name: 'app', url: 'https://github.com/o/app.git', dir: join(home, 'app'), state: 'ready', added: '', added_by: 'ana' });
   github.addIssue('o/app', 7, { title: 'Login', body: 'Users cannot sign in with a passkey' });
-  github.addIssue('o/app', 8, { title: 'Fix login', body: 'A pull request', pull: true });
+  github.addIssue('o/app', 8, PR_8);
   github.addIssue('o/other', 1, { title: 'Not a project', body: 'x' });
   let clock = T0;
   const launch: DraftLaunch = (draft) => ({ command: process.execPath, args: ['-e', FAKE, draft.folder] });
@@ -83,7 +85,7 @@ async function helix(opts: { slack?: boolean; owner?: string; run?: boolean } = 
   const launchJob: Launch = (job, _dir, env) => { closes.push(env.ANIMUS_CLOSES); return { command: process.execPath, args: ['-e', JOB, job.title, job.answer ?? ''] }; };
   const toGitHub = githubNotifier({ store, config, github, say: (l) => lines.push(l) });
   const toSlack = slackNotifier(slack.transport, store, (l) => lines.push(l), config);
-  const jobs = supervise({ store, config, home, launch: launchJob, notify: (job) => { toGitHub(job); if (opts.slack) toSlack(job); } });
+  const jobs = supervise({ store, config, home, launch: launchJob, github, notify: (job) => { toGitHub(job); if (opts.slack) toSlack(job); } });
   const watcher = commentWatcher({ store, config, drafts, jobs, github, now: () => clock, say: (l) => lines.push(l) });
   await watcher.poll();
   return { github, store, config, lines, drafts, jobs, closes, slack: slack.sent, home, poll: () => watcher.poll(), clock: { at: (s: number) => { clock = T0 + s * 1000; } } };
@@ -183,7 +185,7 @@ const PULL_8 = 'https://github.com/o/app/pull/8';
 /** ana's job 1, which opened pull request 8 and last pushed to it at 10 seconds; its title, which a fix of it takes, says how that fix ends (see JOB). */
 const opened8 = (h: Awaited<ReturnType<typeof helix>>, title = 'Fix login') =>
   h.store.add({ state: 'ended', person: 'ana', repo: 'app', spec: '', title, draft: false, outcome: 'pr', pr: PULL_8, submitted: at(-HOUR), ended: at(10) });
-const fixes = (h: Awaited<ReturnType<typeof helix>>) => h.store.list().filter((j) => j.fix_of);
+const fixes = (h: Awaited<ReturnType<typeof helix>>) => h.store.list().filter((j) => j.ask);
 
 // Protects: fix criterion 1. Fails when: /animus fix gets no 👀, is not queued as a fix of the job's pull request with the text as its ask, keeps no pull request to report on, or its references miss a review or inline comment since the last push or hold one from before it.
 test('/animus fix on a pull request a job opened gets 👀 and queues a fix with the text as its ask and the reviews since the last push as references', async () => {
@@ -209,10 +211,22 @@ test('/animus fix on a pull request a job opened gets 👀 and queues a fix with
   assert.doesNotMatch(references, /Already pushed for|Old inline remark/);
 });
 
+// Protects: criterion 3. Fails when: a plain /animus on an Animus pull request is not a fix with its text as the ask, or gets no 👀.
+test('a plain /animus <text> on an Animus pull request queues a fix with the text as its ask', async () => {
+  const h = await helix();
+  opened8(h);
+  const id = h.github.addComment('o/app', 8, 'ana-gh', '/animus make the button blue', at(30));
+
+  await h.poll();
+
+  assert.deepEqual(h.github.reactions, [{ repo: 'o/app', comment: id, login: 'ana-gh', content: 'eyes' }]);
+  assert.deepEqual(fixes(h).map((j) => [j.fix_of, j.person, j.ask]), [[1, 'ana', 'make the button blue']]);
+});
+
 const REFUSED = [
-  { why: 'a plain /animus on a pull request', login: 'ana-gh', body: '/animus make it blue', reply: /^Comment `\/animus fix <what to change>`/ },
-  { why: 'fix from someone not the job\'s person or the owner', login: 'bob-gh', body: '/animus fix make it blue', reply: /^Not queued: pull request 8 was opened by ana's job 1: only ana or the owner may fix it\.$/ },
-  { why: 'a pull request no job opened', number: 11, login: 'ana-gh', body: '/animus fix make it blue', reply: /^Not queued: no job on Helix opened pull request 11 of app, so there is nothing to fix\.$/ },
+  { why: 'a /animus on a pull request that says nothing', login: 'ana-gh', body: '/animus', reply: /^Comment `\/animus <what to change>`/ },
+  { why: 'fix from someone not the job\'s person or the owner', login: 'bob-gh', body: '/animus fix make it blue', reply: /^Not queued: pull request 8 was opened by ana: only ana or the owner may fix it\.$/ },
+  { why: 'a pull request without the spec block', number: 11, login: 'ana-gh', body: '/animus make it blue', reply: /^Not queued: pull request 11 holds no Animus spec block, so no Animus job opened it and there is nothing to fix\.$/ },
   { why: 'a merged pull request', pull: { state: 'closed', merged: true }, login: 'ana-gh', body: '/animus fix make it blue', reply: /^Not queued: pull request 8 is merged, so it cannot be fixed\.$/ },
   { why: 'a closed pull request', pull: { state: 'closed' }, login: 'ana-gh', body: '/animus fix make it blue', reply: /^Not queued: pull request 8 is closed, so it cannot be fixed\.$/ },
   { why: 'a pull request with a fix queued', active: { state: 'queued' }, login: 'ana-gh', body: '/animus fix make it blue', reply: /^Not queued: pull request 8 has a fix queued: job 2 \(http:\/\/helix\.test\/jobs\/2\)\.$/ },
@@ -224,7 +238,7 @@ for (const c of REFUSED) {
   test(`replies with one line and queues nothing for ${c.why}`, async () => {
     const h = await helix({ owner: 'nobody' });
     opened8(h);
-    if ('pull' in c) h.github.addIssue('o/app', 8, { title: 'Fix login', body: 'A pull request', pull: true, ...c.pull });
+    if ('pull' in c) h.github.addIssue('o/app', 8, { ...PR_8, ...c.pull });
     if ('number' in c) h.github.addIssue('o/app', c.number, { title: 'By hand', body: 'x', pull: true });
     if ('active' in c) h.store.add({ ...c.active, person: 'ana', repo: 'app', spec: '', title: 'fix: Fix login', draft: false, pr: PULL_8, fix_of: 1, ask: 'earlier', submitted: at(0) });
     const before = fixes(h).length;

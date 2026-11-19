@@ -39,7 +39,7 @@ export type HelixJob = {
   animus_job?: string;
   /** The person's answer to the job's question, for the next start. */
   answer?: string;
-  /** A fix (GLOSSARY.md): the job on this Helix it continues, and what was asked. Its pr is the pull request it updates, set when it is queued. */
+  /** A fix (GLOSSARY.md), which ask marks: the job on this Helix it continues (none when no job here opened its pull request), and what was asked. Its pr is the pull request it updates, set when it is queued. */
   fix_of?: number;
   ask?: string;
   /** How the run ended: Animus's outcome (pr, draft-pr, needs-input, failed). */

@@ -253,7 +253,7 @@ export function serve(opts: {
         if (typeof b.repo !== 'string' || typeof b.pr !== 'string' || !b.pr.trim() || typeof b.ask !== 'string' || !b.ask.trim()) throw new Refused(400, 'a fix needs repo (its name here), pr (a number or its address) and ask (what to change)');
         let skills: PersonalSkill[];
         try { skills = parseSkills(b.skills, 'the fix'); } catch (err) { throw new Refused(400, (err as Error).message); }
-        const queued = supervisor.fix(person, { repo: b.repo, pr: b.pr, ask: b.ask, ...(skills.length ? { skills } : {}) });
+        const queued = await supervisor.fix(person, { repo: b.repo, pr: b.pr, ask: b.ask, ...(skills.length ? { skills } : {}) });
         return send(201, { ...queued, skills: skills.map((k) => k.name), links: jobLinks(config, queued.id) });
       } else if (/^\d+$/.test(id)) {
         const n = Number(id);

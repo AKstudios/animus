@@ -4,6 +4,7 @@
 // answers, errors included, are shaped as GitHub's. No test talks to GitHub.
 import { createServer } from 'node:http';
 import type { AddressInfo } from 'node:net';
+import { SPEC_SUMMARY } from '../../plugin/src/pr.ts';
 import type { GitHubUrls } from '../src/github-app.ts';
 
 export type FakeGitHub = GitHubUrls & {
@@ -23,8 +24,8 @@ export type FakeGitHub = GitHubUrls & {
   permissions: Record<string, Record<string, string>>;
   /** The repositories (owner/name) each login has access to; a login left out has access to every installed one. */
   access: Record<string, string[]>;
-  /** An issue (or pull request) on owner/name, as the issue and comment routes serve it; a pull request is open unless state or merged says otherwise. Adding it again replaces it. */
-  addIssue(repo: string, number: number, issue: { title: string; body: string; pull?: boolean; state?: 'open' | 'closed'; merged?: boolean }): void;
+  /** An issue (or pull request) on owner/name, as the issue and comment routes serve it; a pull request is open unless state or merged says otherwise, and opened by author (default someone). Adding it again replaces it. */
+  addIssue(repo: string, number: number, issue: Issue): void;
   /** A review a login submitted on a pull request, at submitted. */
   addReview(repo: string, number: number, login: string, body: string, submitted: string): void;
   /** An inline comment a login made on a line of a pull request's diff, at created. */
@@ -43,7 +44,12 @@ export type FakeGitHub = GitHubUrls & {
   close(): Promise<void>;
 };
 
-type Device = { code: string; user: string; state: 'pending' | 'approved' | 'denied' | 'used'; login?: string };
+type Issue = { title: string; body: string; pull?: boolean; state?: 'open' | 'closed'; merged?: boolean; author?: string };
+
+/** A pull request's description as an Animus job writes it: its job's line and the spec in its collapsed block. */
+export const ANIMUS_BODY = `Built by Animus, job \`add-button\`.\n\n<details><summary>${SPEC_SUMMARY}</summary>\n\n\`\`\`md\n# Add a button\n\n## Acceptance criteria\n\n1. It shows.\n   $ npm test\n\`\`\`\n\n</details>`;
+
+type Device ={ code: string; user: string; state: 'pending' | 'approved' | 'denied' | 'used'; login?: string };
 
 /** clientId is the app's, with the device flow on unless deviceFlow is false. */
 export async function fakeGitHub(opts: { clientId?: string; deviceFlow?: boolean } = {}): Promise<FakeGitHub> {
@@ -60,7 +66,7 @@ export async function fakeGitHub(opts: { clientId?: string; deviceFlow?: boolean
     return { access_token: `ghu_${issued}`, expires_in: 28800, refresh_token: `ghr_${issued}`, refresh_token_expires_in: 15811200, token_type: 'bearer', scope: '' };
   };
   const ids: Record<string, number> = {};
-  const issues = new Map<string, { title: string; body: string; pull?: boolean; state?: 'open' | 'closed'; merged?: boolean }>();
+  const issues = new Map<string, Issue>();
   const reviews: { repo: string; number: number; id: number; user: { login: string }; body: string; state: string; submitted_at: string }[] = [];
   const inline: { repo: string; number: number; id: number; user: { login: string }; body: string; path: string; line: number; created_at: string }[] = [];
   const second = () => `${new Date().toISOString().slice(0, 19)}Z`;
@@ -127,7 +133,7 @@ export async function fakeGitHub(opts: { clientId?: string; deviceFlow?: boolean
     const number = Number(m[3]);
     const pull = issues.get(`${repo}#${number}`);
     if (!reaches(login, m[1]!, m[2]!) || !pull?.pull) return [404, { message: 'Not Found' }];
-    if (!m[4]) return [200, { number, state: pull.state ?? 'open', merged: Boolean(pull.merged), html_url: `https://github.com/${repo}/pull/${number}` }];
+    if (!m[4]) return [200, { number, title: pull.title, body: pull.body, user: { login: pull.author ?? 'someone' }, state: pull.state ?? 'open', merged: Boolean(pull.merged), html_url: `https://github.com/${repo}/pull/${number}` }];
     const per = Number(url.searchParams.get('per_page') ?? 30);
     const page = Number(url.searchParams.get('page') ?? 1);
     const all = (m[4] === 'reviews' ? reviews : inline).filter((r) => r.repo === repo && r.number === number).map(({ repo: _r, number: _n, ...r }) => r);
@@ -172,7 +178,7 @@ export async function fakeGitHub(opts: { clientId?: string; deviceFlow?: boolean
       return [201, shown(fake.comments[fake.addComment(repo, number, login, body.body!) - 1]!)];
     }
     if (issue[2]) return [200, fake.comments.filter((c) => c.repo === repo && c.number === number).map(shown)];
-    return [200, { title: found.title, body: found.body, state: found.state ?? 'open', html_url: `https://github.com/${repo}/${found.pull ? 'pull' : 'issues'}/${number}`, user: { login: 'someone' }, ...(found.pull ? { pull_request: {} } : {}) }];
+    return [200, { title: found.title, body: found.body, state: found.state ?? 'open', html_url: `https://github.com/${repo}/${found.pull ? 'pull' : 'issues'}/${number}`, user: { login: found.author ?? 'someone' }, ...(found.pull ? { pull_request: {} } : {}) }];
   };
 
   const api = (method: string, path: string, token: string, body: Record<string, string>): [number, unknown] => {
