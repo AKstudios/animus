@@ -12,7 +12,7 @@ const fake = (log: string, tag = 'v0.1.0') => ({
   git: (...args: string[]) => {
     if (args[0] === 'tag') return tag;
     const range = args.find((a) => a.endsWith('..HEAD'));
-    if (range && range !== `${tag}..HEAD`) throw new Error(`git log ${range}: unknown revision`);
+    if (range && (!tag || range !== `${tag}..HEAD`)) throw new Error(`git log ${range}: unknown revision`);
     return log;
   },
   pull: (n: number) => pulls[n]!,
