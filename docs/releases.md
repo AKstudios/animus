@@ -9,15 +9,22 @@ Helix ship from the same tag.
 npm run release -- <version> [--breaking] [--deploy <ssh-host>]
 ```
 
-From a clean `main`, it needs `CHANGELOG.md`'s Unreleased section filled in.
-It runs the tests and typecheck, turns Unreleased into the release, tags
+From a clean `main` that matches origin, it writes `## <version> (<date>)` into
+`CHANGELOG.md` from the pull requests merged since the last `v*` tag (found
+from the first-parent "Merge pull request #N" commits, read with `gh`): one
+line each with its title and a link, those with a `## Breaking` section first
+and marked **Breaking:**, then commits pushed without a pull request. Lines
+still written by hand under Unreleased stay above them. It runs the tests and
+typecheck, tags
 `v<version>` and moves the `stable` branch, which teammates' Claude Code
 follows. It prints the push to make; with `--deploy` it pushes, then moves
 that Helix machine to the release (below).
 
-A release that breaks the HTTP API, a spec, a profile or a job's files is
-listed under **Breaking** in the changelog, bumps the minor version before
-1.0 (the major after) and needs `--breaking`. Helix then refuses older
+A release that breaks the HTTP API, a spec, a profile or a job's files has a
+`## Breaking` section in its pull request (the implementer's `breaking` report
+fills it), bumps the minor version before
+1.0 (the major after) and needs `--breaking`: the release refuses without it, naming those pull
+requests. Helix then refuses older
 clients (HTTP 426) with how to update.
 
 ## Moving Helix to a release
