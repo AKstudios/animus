@@ -140,7 +140,7 @@ a.title:hover, a.card-title:hover, .back:hover { text-decoration: underline; }
 .ask-btn { padding: 8px 16px; border-radius: 8px; background: var(--ask-fill); color: var(--on-ask); font-weight: 600; font-size: 14px; text-decoration: none; }
 .section.needs { gap: 10px; }
 .facts { display: flex; flex-wrap: wrap; gap: 8px 28px; font-family: var(--mono); font-size: 14px; animation: hxIn 0.5s ease-out; }
-.facts > div { min-width: 0; overflow-wrap: anywhere; }
+.facts > div { min-width: 0; }
 
 .empty { flex-grow: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 18px; padding: 48px 16px; text-align: center; border: 1px dashed var(--line); border-radius: 12px; }
 .empty h2 { font-size: 24px; font-weight: 600; }
