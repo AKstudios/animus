@@ -7,7 +7,7 @@
 // machine's loopback is the person whose jobs these are, and there are no
 // people pages.
 import { createServer, type Server } from 'node:http';
-import { readdirSync, readFileSync, statSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
 import type { AddressInfo } from 'node:net';
 import { hostname } from 'node:os';
 import { basename, join } from 'node:path';
@@ -16,6 +16,8 @@ import type { Display, DisplayJob, JobListPage, JobPage, ListJob, PrState } from
 import { asset, CSP } from './assets.ts';
 import { afterOf, fixRounds, insightsData, lessonsCiting } from './insights-data.ts';
 import { folderParts, read, shotFile } from './job-folder.ts';
+import { logFile } from './local-loop.ts';
+import { openLocalQueue, queueFile, type LocalJob } from './local-queue.ts';
 import { readOutcomes, type Outcomes } from './outcomes.ts';
 import { alive, animusHome, jobDir, loadProgress, loadState, readRuns, STAGES, type Run } from './log.ts';
 
@@ -25,7 +27,26 @@ const PLAIN = /^[A-Za-z0-9][\w.-]*$/;
 /** The project of a job that has no state and no run row: it never got far enough to name one. */
 const NO_PROJECT = 'unknown project';
 
-function jobOf(id: string, runs: readonly Run[]): DisplayJob | undefined {
+/** This machine's queue (local-queue.ts), newest last; none when it has never had one. */
+function queued(): LocalJob[] {
+  if (!existsSync(queueFile())) return [];
+  const queue = openLocalQueue();
+  try { return queue.list(1000); } catch { return []; } finally { queue.close(); }
+}
+
+const readLog = (id: number): string => { try { return readFileSync(logFile(id), 'utf8'); } catch { return ''; } };
+
+/** A job of the queue, shown as it stands there: not yet a folder of its own, or one that ended without making it. */
+function queuedJob(q: LocalJob): DisplayJob {
+  return {
+    id: q.id, person: '', repo: basename(q.repo), title: q.title, submitted: q.submitted, state: q.state,
+    ...(q.queued ? { queued: q.queued } : {}), ...(q.started ? { started: q.started } : {}), ...(q.ended ? { ended: q.ended } : {}),
+    ...(q.waiting ? { waiting: q.waiting } : {}), ...(q.outcome ? { outcome: q.outcome } : {}), ...(q.pr ? { pr: q.pr } : {}),
+    ...(q.reason ? { reason: q.reason } : {}), ...(q.question ? { question: q.question } : {}), ...(q.cost_usd !== undefined ? { cost_usd: q.cost_usd } : {}),
+  };
+}
+
+function jobOf(id: string, runs: readonly Run[], from?: LocalJob): DisplayJob | undefined {
   const state = loadState(id);
   const progress = loadProgress(id);
   if (!state && !progress) return undefined;
@@ -37,7 +58,7 @@ function jobOf(id: string, runs: readonly Run[]): DisplayJob | undefined {
   const running = !state?.outcome && progress?.host === hostname() && progress.pid !== undefined && alive(progress.pid);
   const submitted = mine[0]?.started ?? progress?.at ?? statSync(jobDir(id)).mtime.toISOString();
   return {
-    id, person: last?.submitter ?? '', repo: state ? basename(state.repo) : last ? basename(last.repo) : NO_PROJECT, title: title ?? id, submitted,
+    id, person: last?.submitter ?? '', repo: state ? basename(state.repo) : last ? basename(last.repo) : from ? basename(from.repo) : NO_PROJECT, title: title ?? id, submitted,
     state: state?.outcome ? 'ended' : running ? 'running' : 'stopped',
     ...(last?.started ? { started: last.started } : {}), ...(last?.ended ? { ended: last.ended } : {}),
     ...(state?.outcome ? { outcome: state.outcome } : {}), ...(last?.pr ? { pr: last.pr } : {}),
@@ -55,7 +76,12 @@ export function localJobs(): DisplayJob[] {
   let names: string[] = [];
   try { names = readdirSync(join(animusHome(), 'jobs')); } catch { /* no jobs yet */ }
   const runs = readRuns();
-  return names.filter((n) => PLAIN.test(n)).flatMap((id) => jobOf(id, runs) ?? []).sort((a, b) => (a.submitted < b.submitted ? 1 : -1));
+  const queue = queued();
+  const folders = names.filter((n) => PLAIN.test(n)).flatMap((id) => jobOf(id, runs, queue.find((q) => q.animus_job === id)) ?? []);
+  // A queue job whose folder is shown is that folder's job; the rest show as the queue has them.
+  const shown = new Set(folders.map((j) => j.id));
+  const rest = queue.filter((q) => !q.animus_job || !shown.has(q.animus_job)).map(queuedJob);
+  return [...folders, ...rest].sort((a, b) => (a.submitted < b.submitted ? 1 : -1));
 }
 
 /** What the overview shows: the jobs, and a project for each repository they ran in. */
@@ -96,18 +122,22 @@ export function localJobList(f: Partial<JobFilter>, before?: string): JobListPag
   return { at: new Date().toISOString(), ...listJobs(jobs, { ...f, person: '' }, before) };
 }
 
-/** One job's page, or nothing when this machine has no such job. Its log is empty: `animus run` prints to its own terminal and keeps none. */
+/** One job's page, or nothing when this machine has no such job. Its log is what the loop kept of its output; empty for a job that ran before the queue. */
 export function localJobPage(id: string): JobPage | undefined {
   const runs = readRuns();
-  const job = PLAIN.test(id) ? jobOf(id, runs) : undefined;
+  const queue = queued();
+  // A number is a queue job's id; anything else is a job folder, which may be a queue job's.
+  const q = /^\d+$/.test(id) ? queue.find((j) => j.id === Number(id)) : queue.find((j) => j.animus_job === id);
+  const folder = PLAIN.test(id) ? jobOf(id, runs, q) : undefined;
+  const job = folder ?? (q ? queuedJob(q) : undefined);
   if (!job) return undefined;
-  const spec = read(loadState(id)?.spec ?? join(jobDir(id), 'spec.md'));
+  const spec = read(folder ? loadState(id)?.spec ?? join(jobDir(id), 'spec.md') : q!.spec);
   let outcomes: Outcomes = {};
   try { outcomes = readOutcomes(); } catch { /* unreadable: no PR is known */ }
   const o = job.pr ? outcomes[job.pr] : undefined;
   const pr: Partial<JobPage> = o ? { pr_state: o.state.toLowerCase() as PrState, pr_opened: o.opened, ...(o.state === 'MERGED' ? { pr_merged: o.closed ?? o.checked } : {}) } : {};
   const lessons = lessonsCiting(id);
-  return { at: new Date().toISOString(), stages: STAGES, job, ...pr, ...(o ? { after: afterOf(o) } : {}), ...(lessons.length ? { lessons } : {}), ...(spec !== undefined ? { spec } : {}), log: '', ...folderParts(jobDir(id), runs.filter((r) => r.job === id)) };
+  return { at: new Date().toISOString(), stages: STAGES, job, ...pr, ...(o ? { after: afterOf(o) } : {}), ...(lessons.length ? { lessons } : {}), ...(spec !== undefined ? { spec } : {}), log: q ? readLog(q.id) : '', ...(folder ? folderParts(jobDir(id), runs.filter((r) => r.job === id)) : {}) };
 }
 
 /** Listens on the first free port from `port` up, on 127.0.0.1 only. */

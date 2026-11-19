@@ -203,7 +203,7 @@ export function jobView(p: JobPage, now: number, local = false, closed?: Display
       src: `/jobs/${encodeURIComponent(j.id)}/shots/${f.split('/').map(encodeURIComponent).join('/')}`,
     })),
     log: p.log,
-    noLog: local ? 'Its output went to the terminal it ran in; this display keeps no log of it.' : 'It has printed nothing yet.',
+    noLog: local ? 'It has printed nothing yet, or it ran in a terminal and kept no log.' : 'It has printed nothing yet.',
     follow: j.state === 'running' || j.state === 'queued' || j.state === 'waiting',
   };
 }

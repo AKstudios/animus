@@ -13,8 +13,9 @@ import { jobNotice, peopleNotice, personNotice, route } from '../display/pages.t
 import type { Display, DisplayJob, JobListPage, JobPage } from '../display/shape.ts';
 import { view } from '../display/view.ts';
 import { listenLocal, localJobs, localServer } from '../src/local-display.ts';
+import { openLocalQueue } from '../src/local-queue.ts';
 import { outcomesFile } from '../src/outcomes.ts';
-import { appendRun, jobDir, loadProgress, saveProgress, saveState, writeJson, type JobState, type Run } from '../src/log.ts';
+import { animusHome, appendRun, jobDir, loadProgress, saveProgress, saveState, writeJson, type JobState, type Run } from '../src/log.ts';
 import { runJob } from '../src/pipeline.ts';
 import { git } from '../src/proc.ts';
 import { clean, cli, deps, done, fakeAgent, fakeOpener, makeRepo, write, writeSpec, type Step } from './helpers.ts';
@@ -145,7 +146,7 @@ test('the local display names a job by its PR, links it, and says where people a
   assert.match(peopleNotice(false, undefined, true) ?? '', /no people pages/);
   assert.match(personNotice('ana', false, undefined, true) ?? '', /no people pages/);
   const page = jobView({ at: d.at, stages: d.stages, job: d.jobs[0]!, log: '' }, 0, true);
-  assert.match(page.noLog, /went to the terminal it ran in/);
+  assert.match(page.noLog, /kept no log/);
 });
 
 // Protects: only loopback names are answered. Fails when: a page on another site, resolving its own name to 127.0.0.1, can read the jobs.
@@ -231,4 +232,37 @@ test('the local /job-list tags merged and closed PRs from outcomes.json and filt
   assert.equal(jobListView(all, true).rows.every((r) => r.personPage === undefined), true);
   // Totals cover the whole filter, not the page: the project filter changes them.
   assert.deepEqual([all.totals.merged, wiki.totals.jobs, wiki.totals.merged], [1, 1, 0]);
+});
+
+// ---- jobs of this machine's queue
+
+// Protects: criterion 6, a queued or waiting job is on the display with its project and what it holds for. Fails when: it is missing, shows as "unknown project", or loses its reason.
+test('the local display lists queued and waiting jobs with their project and why they are held', () => {
+  const queue = openLocalQueue();
+  const base = { repo: '/work/shop', spec: '/work/shop/docs/specs/a.md', title: 'Held spec', flags: [], submitted: '2026-11-17T10:00:00.000Z' };
+  const room = queue.add({ ...base, state: 'queued', waiting: 'only 1.0 GB is free; a job needs 4g', queued: base.submitted });
+  const wait = queue.add({ ...base, title: 'Later spec', state: 'waiting', waiting: "waiting for a.md's pull request", queued: base.submitted });
+  queue.close();
+  const jobs = localJobs();
+  const pick = (id: number) => jobs.find((j) => j.id === id)!;
+  assert.deepEqual([pick(room.id).state, pick(room.id).repo, pick(room.id).waiting], ['queued', 'shop', 'only 1.0 GB is free; a job needs 4g']);
+  assert.deepEqual([pick(wait.id).state, pick(wait.id).repo, pick(wait.id).waiting], ['waiting', 'shop', "waiting for a.md's pull request"]);
+});
+
+// Protects: criterion 6, a job's output is on its page and its project is known before it has state. Fails when: the loop's log is not shown, the job shows twice, or a job that died in setup is "unknown project".
+test('a queue job that stopped in setup shows its project and its log once, under its folder', async () => {
+  saveProgress('died-in-setup', 'setup', 'script');
+  writeJson(join(jobDir('died-in-setup'), 'progress.json'), { ...loadProgress('died-in-setup')!, pid: deadPid() });
+  const queue = openLocalQueue();
+  const job = queue.add({ state: 'ended', outcome: 'failed', animus_job: 'died-in-setup', repo: '/work/shop', spec: '/nope.md', title: 'Died', flags: [], submitted: '2026-11-17T10:00:00.000Z' });
+  queue.close();
+  write(animusHome(), `queue/${job.id}/log.txt`, 'job died-in-setup: Died\nsetup blew up\n');
+  const shown = localJobs().filter((j) => j.id === 'died-in-setup' || j.id === job.id);
+  const s = await served();
+  const page = (await (await s.get('/jobs/died-in-setup/page-data')).json()) as JobPage;
+  const byQueueId = (await s.get(`/jobs/${job.id}/page-data`)).status;
+  s.stop();
+  assert.deepEqual(shown.map((j) => [j.id, j.repo]), [['died-in-setup', 'shop']]);
+  assert.equal(page.log, 'job died-in-setup: Died\nsetup blew up\n');
+  assert.equal(byQueueId, 200);
 });
