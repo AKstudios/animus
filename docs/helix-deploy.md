@@ -6,7 +6,7 @@ running it holds:
 | What | Where (the account `desmond` on abstergo) | Can be made again? |
 | --- | --- | --- |
 | This repository, at a release tag | `~/animus` | yes: clone it |
-| Helix's config; `helix.db` with people's token hashes, the projects and the queue; credentials files; each job's spec and log; the clones Helix made of projects people added (`repos/`) | `~/.helix` | no: copy it |
+| Helix's config; `helix.db` with people's token hashes, the projects and the queue; credentials files; project secrets (`secrets/`); each job's spec and log; the clones Helix made of projects people added (`repos/`) | `~/.helix` | no: copy it |
 | Each job's state, gate output, review and transcripts; the run log | `~/.animus` | no: copy it to keep history and resume jobs |
 | Clones added by hand with `helix add-repo`, and their worktrees | `~/repos`, `~/repos/.worktrees` | yes: clone over https |
 | Claude Code, gh, Node 24, agent-browser's Chrome | `~/.local/bin`, `/usr/local/bin`, `~/.agent-browser` | yes |

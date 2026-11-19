@@ -13,10 +13,10 @@ import { resolveAfter, waitForMerged } from './after.ts';
 import type { Agent, AgentResult } from './agent.ts';
 import { describe, failsOnBase, gateReport, jobChecks, LATER_SLICE, restore, runGates, type CheckResult } from './gates.ts';
 import { commitAll, mainCheckout, matchesAny, touchedFiles } from './git.ts';
-import { appendRun, CANCELLED_MARKER, jobDir, toolsLog, saveProgress, saveState, writeJson, type Cause, type FindingLog, type JobState, type Outcome, type Run, type Stage } from './log.ts';
+import { appendRun, CANCELLED_MARKER, jobDir, masked, toolsLog, saveProgress, saveState, writeJson, type Cause, type FindingLog, type JobState, type Outcome, type Run, type Stage } from './log.ts';
 import { evidenceBranch, findPrByTitle, prBody, prDraft, prState, PushRejected, type DraftLookup, type PrFind, type Evidence, type PrLookup, type Publish } from './pr.ts';
 import { admitFile, profileOnBase, refusal, type Admitted } from './admit.ts';
-import { loadProfile } from './profile.ts';
+import { loadProfile, maskSecrets, useJobEnv } from './profile.ts';
 import { describePlan, escalate, modelFor, PLUGIN_ROOT, raise, readPrompt, resolvePlan, type Factory, type Plan, type Tier } from './profiles.ts';
 import { animusCommand, git, AnimusError, tryGit } from './proc.ts';
 import { factoryVersion } from './version.ts';
@@ -154,7 +154,9 @@ export async function runJob(opts: RunOptions, deps: Deps): Promise<Run> {
 }
 
 async function runJobWith(opts: RunOptions, deps: Deps, live: { run?: Run; startedAt: number }): Promise<Run> {
-  const { factory, log } = deps;
+  const { factory } = deps;
+  // What the job says is its log (stderr, on one machine and on Helix): no secret it was given shows in it.
+  const log = (line: string) => deps.log(maskSecrets(line));
   const startedAt = live.startedAt;
   // What this job's sessions serve stops when this process ends, however it ends (ui.ts).
   process.env[JOB_PID] = String(process.pid);
@@ -166,6 +168,8 @@ async function runJobWith(opts: RunOptions, deps: Deps, live: { run?: Run; start
   // On Helix the profile is the base branch's as Helix fetched it, not whatever the clone has checked out (docs/adr/0008).
   const onBase = opts.trigger === 'helix' || process.env.ANIMUS_TRIGGER === 'helix' ? profileOnBase(repo) : undefined;
   const repoProfile = onBase?.profile ?? loadProfile(repo);
+  // One job per process: every command and session it starts inherits this.
+  useJobEnv(repoProfile);
   // A new job is admitted before any work (docs/adr/0007); a resumed one was, when it started.
   let spec: Spec;
   let plan: Plan;
@@ -315,7 +319,7 @@ async function runJobWith(opts: RunOptions, deps: Deps, live: { run?: Run; start
     });
     if (r.tools?.length) {
       mkdirSync(dir, { recursive: true });
-      appendFileSync(toolsLog(job), r.tools.map((t) => `${JSON.stringify({ ...t, stage, role, ...(r.session ? { session: r.session } : {}) })}\n`).join(''));
+      appendFileSync(toolsLog(job), r.tools.map((t) => `${JSON.stringify({ ...t, stage, role, ...(r.session ? { session: r.session } : {}) }, masked)}\n`).join(''));
     }
     if (r.context !== undefined) log(`  ${stage}: ${k(r.context)} tokens of context at the end${budget ? `, budget ${k(budget)}` : ''}`);
     run.cost_usd = Math.round((run.cost_usd + r.cost_usd) * 10_000) / 10_000;
@@ -434,7 +438,7 @@ async function runJobWith(opts: RunOptions, deps: Deps, live: { run?: Run; start
       const ok = lastGates.every((r) => r.ok);
       run.gates.push({ attempt, ok, ms: Date.now() - t, checks: lastGates.map((r) => ({ name: r.name, ok: r.ok, skipped: r.skipped, ms: r.ms, ...(r.flaky ? { flaky: true } : {}) })) });
       mkdirSync(join(dir, 'gates'), { recursive: true });
-      writeFileSync(join(dir, 'gates', `run-${attempt}.txt`), gateReport(lastGates));
+      writeFileSync(join(dir, 'gates', `run-${attempt}.txt`), maskSecrets(gateReport(lastGates)));
       for (const line of describe(lastGates).split('\n').slice(0, lastGates.length)) log(`  ${line}`);
       if (ok) return;
       const used = slice ? rounds : run.fix_rounds - spentBefore;

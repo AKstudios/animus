@@ -14,6 +14,7 @@ import { credentialEnv, personEnv, readyRepos, type Config } from './config.ts';
 import { Refused } from './supervisor.ts';
 import { freshToken, liveTokenFile, type GitHubUrls } from './github-app.ts';
 import { freshBase, git } from './fresh.ts';
+import { missingSecret } from './secrets.ts';
 import type { HelixJob, Store } from './store.ts';
 
 /** What a spec was admitted as on Helix, and what to tell the person besides. */
@@ -24,8 +25,9 @@ export type Reading = { admitted: Admitted; warnings: string[] };
  * with env, reads the profile at that commit. Throws AnimusError when GitHub
  * cannot be reached or the base branch has no readable profile.
  * `checkout` is the profile text a laptop would use, to warn when it differs.
+ * `secrets`: the Helix home, project and person whose job would get the profile's secrets.
  */
-export function admitOnBase(repoDir: string, env: Record<string, string>, text: string, name: string, checkout?: string): Reading {
+export function admitOnBase(repoDir: string, env: Record<string, string>, text: string, name: string, secrets: { home: string; project: string; person: string }, checkout?: string): Reading {
   const commit = freshBase(repoDir, env);
   const shown = git(repoDir, ['show', `${commit}:${PROFILE_PATH}`], env);
   if (!shown.ok) throw new AnimusError(`the project's base branch on GitHub has no ${PROFILE_PATH}: commit one there (animus init writes it)`);
@@ -37,6 +39,7 @@ export function admitOnBase(repoDir: string, env: Record<string, string>, text: 
     hasBranch: (b) => git(repoDir, ['rev-parse', '--verify', '--quiet', origin(b)], env).ok
       || git(repoDir, ['fetch', '--quiet', 'origin', `+refs/heads/${b}:refs/remotes/${origin(b)}`], env).ok,
     hasPath: (b, path) => git(repoDir, ['cat-file', '-e', `${origin(b)}:${path}`], env).ok,
+    missingSecret: (n) => missingSecret(secrets.home, secrets.project, secrets.person, n),
   };
   const admitted = admit(loadFactory(), text, facts, name);
   const warnings = checkout !== undefined && checkout.trim() !== shown.out.trim()
@@ -54,23 +57,23 @@ export function fetchEnv(store: Store, person: string): Record<string, string> {
 /** The message a refused spec carries, or nothing when it is admitted. */
 export const refusedWith = (name: string, r: Reading): string | undefined => (r.admitted.problems.length || !r.admitted.plan ? refusal(name, r.admitted).message : undefined);
 
-/** The supervisor's admit at a job's start: the spec as it was queued, against the project's base branch as GitHub has it now. */
-export const startAdmit = (job: Pick<HelixJob, 'spec'>, repoDir: string, env: Record<string, string>): string | undefined => {
+/** The supervisor's admit at a job's start: the spec as it was queued, against the project's base branch as GitHub has it now and the secrets kept under home. */
+export const startAdmit = (home: string) => (job: Pick<HelixJob, 'spec' | 'repo' | 'person'>, repoDir: string, env: Record<string, string>): string | undefined => {
   const name = basename(job.spec);
-  return refusedWith(name, admitOnBase(repoDir, env, readFileSync(job.spec, 'utf8'), name));
+  return refusedWith(name, admitOnBase(repoDir, env, readFileSync(job.spec, 'utf8'), name, { home, project: job.repo, person: job.person }));
 };
 
 /** Admits a submission for a project before it is queued; the person's token is refreshed first. */
 export type AdmitSubmission = (person: string, repo: string, spec: string, name: string, checkout?: string) => Promise<Reading>;
 
-export function submissionAdmit(store: Store, config: Config, github?: GitHubUrls): AdmitSubmission {
+export function submissionAdmit(store: Store, config: Config, home: string, github?: GitHubUrls): AdmitSubmission {
   return async (person, repo, spec, name, checkout) => {
     const project = store.project(repo);
     // The same answers as the supervisor's submit, which admit now runs ahead of.
     if (project?.state === 'checking') throw new Refused(409, `Helix is still checking the project ${repo}: animus project list says when it is ready`);
     if (project?.state !== 'ready') throw new Refused(400, `Helix has no project named ${repo}; it has ${Object.keys(readyRepos(store)).join(', ') || 'none'}. Add it from a checkout of it: animus project add`);
     await freshToken(store, config, person, github);
-    return admitOnBase(project.dir, fetchEnv(store, person), spec, name, checkout);
+    return admitOnBase(project.dir, fetchEnv(store, person), spec, name, { home, project: repo, person }, checkout);
   };
 }
 

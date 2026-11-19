@@ -9,12 +9,12 @@ import { describeFindings, doctor } from './doctor.ts';
 import { writeDraft } from './draft.ts';
 import { enable, realRun, setup, terminalIo, thisMachine } from './setup.ts';
 import { initProfile } from './init.ts';
-import { githubLogin, joinHelix, leaveHelix, openPage } from './join.ts';
+import { ask, githubLogin, joinHelix, leaveHelix, openPage } from './join.ts';
 import { addProject } from './project.ts';
 import { describe, failsOnBase, jobChecks, runChecks } from './gates.ts';
 import { fixAlone, fixFromPr, fixSkills, fixTarget, isPr, keptFromBody, openedHere, whereToFix } from './fix.ts';
 import { githubUrl, mainCheckout, touchedFiles } from './git.ts';
-import { describeRuns, describeTools, jobDir, loadState, readRuns, readTools, type Run } from './log.ts';
+import { describeRuns, describeTools, jobDir, loadState, masked, readRuns, readTools, type Run } from './log.ts';
 import { jobOf, onPath, runJob, uiJobOf } from './pipeline.ts';
 import { describeNumbers, numbers, refreshOutcomes } from './outcomes.ts';
 import { ghLogin, prFacts, publish, pushEvidence } from './pr.ts';
@@ -26,7 +26,7 @@ import { listenLocal, localServer } from './local-display.ts';
 import { enqueue, ensureLoop, openLocalQueue, queueFile, type LocalQueue } from './local-queue.ts';
 import { answerLocal, cancelLocal, describeLocalJob, describeLocalJobs, localJob, logTail, needsYou } from './local-status.ts';
 import { logFile, runLoop } from './local-loop.ts';
-import { loadProfile, PROFILE_PATH } from './profile.ts';
+import { loadProfile, maskSecrets, PROFILE_PATH, useJobEnv } from './profile.ts';
 import { describePlan, loadFactory, resolvePlan } from './profiles.ts';
 import { admitFile, describeAdmit } from './admit.ts';
 import { git, tryGit, AnimusError, GitError } from './proc.ts';
@@ -155,6 +155,14 @@ With Helix, the machine that runs jobs for everyone:
   animus project remove <name>
         Only whoever added it, or the owner; its people's clones on Helix are
         deleted.
+  animus project secret set <project> <NAME> [--mine]
+        Keep a value on Helix that the project's jobs get as NAME when its
+        profile's secrets: lists it. The value is typed at a prompt or piped
+        in, never given as an argument. Shared values are set by whoever added
+        the project, or the owner; with --mine, your own, which your jobs get
+        first. The model can read every secret a job gets.
+  animus project secret list <project>
+  animus project secret remove <project> <NAME> [--mine]
   animus submit <spec.md> [--repo <dir>] [--draft]
         Queue the spec there, for the project with this checkout's GitHub
         address (or, failing that, named after its folder), with your own
@@ -229,7 +237,7 @@ async function submitSpec(file: string, checkout: string, draft: boolean, known?
 
 /** Prints a run's result as JSON; the exit code says whether it ended in a pull request. */
 function finish(run: Run): number {
-  console.log(JSON.stringify({ job: run.job, outcome: run.outcome, pr: run.pr, reason: run.reason, question: run.question, branch: run.branch, cost_usd: run.cost_usd, dir: run.dir }, null, 2));
+  console.log(JSON.stringify({ job: run.job, outcome: run.outcome, pr: run.pr, reason: run.reason, question: run.question, branch: run.branch, cost_usd: run.cost_usd, dir: run.dir }, masked, 2));
   return run.outcome === 'pr' || run.outcome === 'dry-run' ? 0 : 1;
 }
 
@@ -246,7 +254,7 @@ async function main(argv: string[]): Promise<number> {
     args: rest, allowPositionals: true,
     options: {
       repo: { type: 'string' }, project: { type: 'string' }, 'dry-run': { type: 'boolean' }, keep: { type: 'boolean' }, draft: { type: 'boolean' }, answer: { type: 'string' }, 'after-merged': { type: 'boolean' },
-      json: { type: 'boolean' }, skills: { type: 'string' }, local: { type: 'boolean' }, helix: { type: 'boolean' }, n: { type: 'string', short: 'n' }, again: { type: 'boolean' }, days: { type: 'string' }, force: { type: 'boolean' }, slices: { type: 'boolean' }, yes: { type: 'boolean' }, github: { type: 'string' }, slack: { type: 'string' }, all: { type: 'boolean' }, references: { type: 'string' },
+      json: { type: 'boolean' }, skills: { type: 'string' }, local: { type: 'boolean' }, helix: { type: 'boolean' }, n: { type: 'string', short: 'n' }, again: { type: 'boolean' }, days: { type: 'string' }, force: { type: 'boolean' }, slices: { type: 'boolean' }, yes: { type: 'boolean' }, github: { type: 'string' }, slack: { type: 'string' }, all: { type: 'boolean' }, references: { type: 'string' }, mine: { type: 'boolean' },
     },
   });
   const cwd = process.cwd();
@@ -415,7 +423,31 @@ async function main(argv: string[]): Promise<number> {
         console.log(`${p.name} was not taken: ${p.reason ?? 'its check failed'}`);
         return 1;
       }
-      throw new AnimusError('usage: animus project add [<name>] | list | remove <name>');
+      if (sub === 'secret') {
+        const [, act, project, secret, extra] = positionals;
+        const mine = values.mine === true;
+        if (act === 'list' && project) { console.log(helix.describeSecrets(project, (await helix.secrets(project)).secrets)); return 0; }
+        if (act === 'remove' && project && secret) {
+          await helix.removeSecret(project, secret, mine);
+          console.log(`${mine ? 'your own' : 'the shared'} ${secret} is off ${project}`);
+          return 0;
+        }
+        if (act === 'set' && project && secret) {
+          if (extra !== undefined) throw new AnimusError(`a secret's value is read from a prompt or stdin, never from an argument, which shell history and the process list keep: animus project secret set ${project} ${secret}, then type it or pipe it in`);
+          let value = '';
+          if (process.stdin.isTTY) value = await ask(`${secret}: `, true);
+          else for await (const chunk of process.stdin) value += String(chunk);
+          value = value.replace(/\r?\n$/, '');
+          if (!value) throw new AnimusError(`no value for ${secret}: type it at the prompt or pipe it in`);
+          const s = await helix.setSecret(project, secret, value, mine);
+          console.log(`${s.name} is set for ${s.project}, ${s.mine ? 'your own value' : 'shared'}`);
+          if (!s.masked) console.log(`${s.name} is too short to be masked: under 8 characters, it shows as it is in a job's log and pull request`);
+          console.log('the model can read every secret a job gets: never keep a live or deploy credential as a project secret');
+          return 0;
+        }
+        throw new AnimusError('usage: animus project secret set <project> <NAME> [--mine] | list <project> | remove <project> <NAME> [--mine]');
+      }
+      throw new AnimusError('usage: animus project add [<name>] | list | remove <name> | secret set|list|remove <project> [<NAME>]');
     }
     case 'status': {
       if (values.local && values.helix) throw new AnimusError('--local or --helix, not both');
@@ -585,6 +617,7 @@ async function main(argv: string[]): Promise<number> {
       if (!state) throw new AnimusError(`animus ${command} runs inside a job's worktree, and this is not one`);
       const spec = loadSpec(state.spec);
       const profile = loadProfile(state.repo);
+      useJobEnv(profile);
       if (command === 'check') {
         const files = [...new Set([...touchedFiles(root, state.workspace.base, 'HEAD'), ...git(root, ['ls-files', '--others', '--modified', '--exclude-standard']).split('\n').filter(Boolean)])];
         // Part-way through a job's slices, only the criteria of the slices so far are checked.
@@ -643,7 +676,7 @@ async function main(argv: string[]): Promise<number> {
 
 main(process.argv.slice(2)).then((code) => process.exit(code), (err: unknown) => {
   if (err instanceof AnimusError || err instanceof GitError) {
-    console.error(`animus: ${err.message}`);
+    console.error(`animus: ${maskSecrets(err.message)}`);
     process.exit(2);
   }
   throw err;
