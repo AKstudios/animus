@@ -81,6 +81,27 @@ person asked on it, and updates that same pull request. Not a gate's fix
 round, which is a retry inside one job.
 _Avoid_: Follow-up, revision, amendment
 
+**Project image**:
+The image a project's jobs run in on Helix, built from the project's own
+Dockerfile on top of the job image every project starts from.
+_Avoid_: Custom image, environment, container
+
+**Add check**:
+What Helix runs when a project is added: its setup and every gate, on the
+base branch, in its project image. The project is ready only when all pass.
+_Avoid_: Project check, validation, health check
+
+**Provision job**:
+A job that makes a project's add check pass by changing the project's
+Dockerfile and profile, never its code, ending in a pull request.
+_Avoid_: Setup job, bootstrap, environment fix
+
+**Project secret**:
+A named value Helix keeps for a project and gives to that project's jobs:
+shared by every person's jobs, or one person's own. The model can read it, so
+it is never a live or deploy credential.
+_Avoid_: Env var, credential, token
+
 **Draft**:
 A spec written from a Slack message or a GitHub comment and its references,
 waiting for its person to submit, revise or discard it.
