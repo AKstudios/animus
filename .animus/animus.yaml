@@ -9,7 +9,6 @@ setup: npm ci
 commands:
   typecheck: npm run typecheck
   test: npm run test
-  changelog: npm run changelog
 base: main
 
 # The display (plugin/display), served from made-up jobs so a display job's

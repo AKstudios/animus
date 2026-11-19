@@ -57,6 +57,7 @@ export type Report = {
   summary: string;
   question?: string;
   notes?: string;
+  breaking?: string;
   escalate?: { size?: string; difficulty?: string; why: string };
 };
 
@@ -68,6 +69,7 @@ export const REPORT_SCHEMA = {
     summary: { type: 'string' },
     question: { type: 'string' },
     notes: { type: 'string' },
+    breaking: { type: 'string' },
     escalate: {
       type: 'object',
       required: ['why'],

@@ -72,6 +72,17 @@ test('on Helix, each gh call uses the token in the live token file as it is at t
   assert.deepEqual([...new Set(tokens())], ['ghu_renewed']);
 });
 
+// Protects: criterion 2. Fails when: the Breaking section is missing or sinks below the review notes.
+test('a pull request with a breaking report says it under Breaking, above Review here', () => {
+  const spec = parseSpec('# Say done\n\n## Acceptance criteria\n\n1. It says done.\n   $ true\n');
+  const body = prBody({
+    job: 'j', spec, plan: resolvePlan(loadFactory(), spec), summary: 's', gates: [], gateAttempts: 1, fixRounds: 0, reviewRounds: 0, open: [],
+    protectedTouched: [], escalations: [], models: 'fake', cost_usd: 0, breaking: 'Profiles lose `x`.',
+  });
+
+  assert.ok(body.indexOf('## Breaking\n\nProfiles lose `x`.') > 0 && body.indexOf('## Breaking') < body.indexOf('## Review here'));
+});
+
 // Protects: criterion 9 of the admit spec. Fails when: issue_link: refs is ignored and merging the PR closes an issue a person wanted to close, or the default stops closing.
 test('a pull request names its issue as Refs when the profile says refs, as Closes otherwise', () => {
   const spec = parseSpec('# Say done\n\n## Acceptance criteria\n\n1. It says done.\n   $ true\n');
