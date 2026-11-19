@@ -24,6 +24,7 @@ ui:
         overview: { path: /, reference: docs/design/display/overview.html }
         jobs: { path: /jobs, reference: docs/design/display/jobs.html }
         job: { path: /jobs/drafts-from-slack, reference: docs/design/display/job.html }
+        job-running: { path: /jobs/comments-on-github, reference: docs/design/display/job-running.html }
         # Built by docs/specs/insights-3-page.md; its spec names docs/design/insights as its design.
         insights: { path: /insights, reference: docs/design/insights/insights.html }
       viewports: ["1440x900", "390x844"]

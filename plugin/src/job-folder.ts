@@ -1,10 +1,10 @@
 // What a job's Animus folder and the run log say about it, in the pieces of a
 // job page (plugin/display/shape.ts). Helix reads a person's folder with it,
 // and the local display reads this machine's: both answer the same page.
-import { readdirSync, readFileSync, realpathSync, statSync } from 'node:fs';
+import { closeSync, openSync, readdirSync, readFileSync, readSync, realpathSync, statSync } from 'node:fs';
 import { extname, join, sep } from 'node:path';
-import type { JobCheck, JobPage, JobRun } from '../display/shape.ts';
-import { describeTools, readToolsFile, STAGES, type JobState, type Run } from './log.ts';
+import type { JobCheck, JobPage, JobRun, LiveSession } from '../display/shape.ts';
+import { describeTools, readToolsFile, STAGES, type JobState, type Progress, type Run, type ToolLine } from './log.ts';
 import type { Review } from './review.ts';
 import { readShots } from './ui.ts';
 
@@ -77,7 +77,7 @@ function jobRun(dir: string, runs: readonly Run[]): JobRun {
     agents: agents.map((a) => ({
       stage: a.stage, role: a.role, tier: a.tier, model: a.model ?? '', effort: a.effort ?? '', ok: a.ok !== false, ms: a.ms ?? 0, turns: a.turns ?? 0,
       tokens: { input: a.tokens?.input ?? 0, output: a.tokens?.output ?? 0, cache_read: a.tokens?.cache_read ?? 0, cache_write: a.tokens?.cache_write ?? 0 },
-      cost_usd: a.cost_usd, calls: a.tools?.calls ?? 0, errors: a.tools?.errors ?? 0,
+      ...(a.started ? { started: a.started } : {}), cost_usd: a.cost_usd, calls: a.tools?.calls ?? 0, errors: a.tools?.errors ?? 0,
     })),
     findings: runs.flatMap((r) => r.review?.log ?? []).map(({ round, severity, fate }) => ({ round, severity, fate })),
     tools: { calls: agents.reduce((n, a) => n + (a.tools?.calls ?? 0), 0), errors: agents.reduce((n, a) => n + (a.tools?.errors ?? 0), 0), text: describeTools(agents, lines) },
@@ -99,6 +99,9 @@ export function folderParts(dir: string, runs: readonly Run[], answer?: string):
   if (gateFiles.length) page.gate_runs = gateFiles.length;
   const checks = gates ? parseGates(read(gates) ?? '') : [];
   if (checks.length) page.checks = checks;
+  if (gateFiles.length > 1) page.gate_list = gateFiles.map((f) => parseGates(read(f) ?? ''));
+  const body = read(join(dir, 'pr-body.md'));
+  if (body?.trim()) page.pr_body = body;
   const reviews = written(dir, /^review-\d+\.json$/).flatMap((f) => readJson<Review>(f) ?? []).filter((r) => Array.isArray(r.findings));
   if (reviews.length) page.reviews = reviews.map((r) => ({ summary: r.summary, findings: r.findings }));
   // The question it stopped on is in its state until a run reads the answer.
@@ -108,4 +111,58 @@ export function folderParts(dir: string, runs: readonly Run[], answer?: string):
   const shots = shotsOf(dir);
   if (shots.files.length) page.shots = shots;
   return page;
+}
+
+/** Each running job's tool-call log read so far, by file: how many bytes, and the lines in them. */
+const toolsRead = new Map<string, { offset: number; lines: ToolLine[] }>();
+
+/** Forgets what was read of a tool-call log: for a job that is no longer running. */
+export const forgetTools = (file: string) => { toolsRead.delete(file); };
+
+/** A tool-call log, reading only what was appended since the last call; a log that shrank is read again. */
+function toolsSoFar(file: string): ToolLine[] {
+  let seen = toolsRead.get(file);
+  let size = 0;
+  try { size = statSync(file).size; } catch { /* no log yet */ }
+  if (!seen || size < seen.offset) { seen = { offset: 0, lines: [] }; toolsRead.set(file, seen); }
+  if (size > seen.offset) {
+    const fd = openSync(file, 'r');
+    try {
+      const buf = Buffer.alloc(size - seen.offset);
+      readSync(fd, buf, 0, buf.length, seen.offset);
+      const whole = buf.subarray(0, buf.lastIndexOf(10) + 1);
+      seen.offset += whole.length;
+      for (const line of whole.toString('utf8').split('\n').filter(Boolean)) { try { seen.lines.push(JSON.parse(line) as ToolLine); } catch { /* a line that is not a call */ } }
+    } finally { closeSync(fd); }
+  }
+  return seen.lines;
+}
+
+/**
+ * The sessions of a job's first attempt, before its run record: the ones the
+ * tool-call log (`file`) shows ended (a session's calls are logged when it
+ * ends, as one run of lines of one stage and role), and the one progress says
+ * is working, which owns the calls logged since progress last moved.
+ */
+export function liveSessions(file: string, p: Progress, now: number): LiveSession[] {
+  const lines = toolsSoFar(file);
+  const since = Date.parse(p.at);
+  const ended: LiveSession[] = [];
+  let prev: ToolLine | undefined;
+  for (const l of lines.filter((l) => !(Date.parse(l.at) >= since))) {
+    const s = ended.at(-1);
+    if (s && prev && prev.stage === l.stage && prev.role === l.role && prev.session === l.session) {
+      s.calls++; s.errors += l.ok ? 0 : 1; s.ms = Math.max(s.ms, Date.parse(l.at) + l.ms - Date.parse(s.started));
+    } else ended.push({ stage: l.stage, role: l.role, model: '', effort: '', started: l.at, ms: l.ms, calls: 1, errors: l.ok ? 0 : 1, live: false });
+    prev = l;
+  }
+  const mine = lines.filter((l) => Date.parse(l.at) >= since);
+  const last = mine.at(-1);
+  const role = p.who.split(' · ')[0]!;
+  const working: LiveSession = {
+    stage: p.stage, role, model: p.model ?? '', effort: p.effort ?? '', started: p.at, ms: Math.max(0, now - since), calls: mine.length, errors: mine.filter((l) => !l.ok).length, live: true,
+    ...(last ? { tool: last.tool, target: last.target } : {}),
+  };
+  // Only a stage with an agent has a session to show.
+  return p.model ? [...ended, working] : ended;
 }

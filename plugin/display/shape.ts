@@ -67,6 +67,10 @@ export type JobPage = {
   checks?: JobCheck[];
   /** How many times its gates ran: the job folder's gate run files. */
   gate_runs?: number;
+  /** Every gate run's checks, oldest first; the last is `checks`. */
+  gate_list?: JobCheck[][];
+  /** The description the pull request was opened with (the job folder's pr-body.md). */
+  pr_body?: string;
   /** Every review round, first to last. */
   reviews?: Pick<Review, 'summary' | 'findings'>[];
   /** Every question the job asked, with the answer it was given; the one it waits on has none. */
@@ -79,6 +83,8 @@ export type JobPage = {
   pr_merged?: string;
   /** What the job's run log says of its runs, left out until one has ended. */
   run?: JobRun;
+  /** A first attempt's agent sessions so far, before any run record exists: from its tool-call log and progress. Tokens and cost are unknown until a session ends. */
+  sessions?: LiveSession[];
   /** What happened to its PR after the job, as outcomes.json says; left out where it has not said. */
   after?: Pick<InsightsOutcome, 'human_commits' | 'reverted' | 'reworked'> & { lines?: { added: number; removed: number } };
   /** The lessons that cite the job, proposed or kept. */
@@ -109,10 +115,13 @@ export type JobRun = {
   fix_rounds: number;
   gates: { flaky: string[] }[];
   /** Each agent session in the order it ran, with its stage, model, wall time and tokens. */
-  agents: { stage: string; role: string; tier: string; model: string; effort: string; ok: boolean; ms: number; turns: number; tokens: TokenCount; cost_usd: number; calls: number; errors: number }[];
+  agents: { stage: string; role: string; tier: string; model: string; effort: string; /** When it began (ISO); left out of a run recorded before that was kept. */ started?: string; ok: boolean; ms: number; turns: number; tokens: TokenCount; cost_usd: number; calls: number; errors: number }[];
   findings: { round: number; severity: string; fate: 'fixed' | 'open' | 'not-acted-on' }[];
   tools: { calls: number; errors: number; text: string };
 };
+
+/** An agent session of a job still on its first attempt; `live` is the one working now, with the tool it last used. */
+export type LiveSession = { stage: string; role: string; model: string; effort: string; started: string; ms: number; calls: number; errors: number; live: boolean; tool?: string; target?: string };
 
 /** An open pull request one of Helix's jobs opened, as GitHub lists it now. */
 export type DisplayPr = { /** Helix's number, or a local job's own id. */ job: number | string; repo: string; person: string; number: number; title: string; url: string; draft: boolean; created: string };

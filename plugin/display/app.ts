@@ -4,7 +4,7 @@
 // token, sent with each request for its data.
 // It only reads. Sent to the browser with its types stripped (helix/src/ui.ts).
 import { forgetToken, insightsNotice, jobNotice, jobsNotice, keepToken, originOf, peopleNotice, personNotice, readToken, route, takeToken, type Origin } from './pages.ts';
-import { atEnd, jobView, type JobPageView } from './job-view.ts';
+import { atEnd, jobView, type JobPageView, type StageSection } from './job-view.ts';
 import { keepOlder, peopleView, personView, type UsageView } from './people-view.ts';
 import { insightsView, scopeOf } from './insights-view.ts';
 import { filterOf, jobListView, queryOf, RESULTS, type JobRow } from './job-list.ts';
@@ -255,56 +255,91 @@ const none = (text: string) => `<div class="none">${esc(text)}</div>`;
 
 const SPIN = '<svg class="spin" viewBox="0 0 16 16" fill="none" aria-label="working on it"><circle cx="8" cy="8" r="6" stroke="currentColor" stroke-opacity="0.25" stroke-width="2"></circle><path d="M14 8a6 6 0 0 0-6-6" stroke="currentColor" stroke-width="2" stroke-linecap="round"></path></svg>';
 
-/** A section whose body folds away under its heading. */
-const foldSection = (name: string, title: string, body: string, open = true) => `<details class="section fold-section ${name}" data-key="fs-${name}"${open ? ' open' : ''}><summary class="section-head"><h2>${title}</h2><span class="chev" aria-hidden="true"></span></summary>${body}</details>`;
+/**
+ * A part of a job page that folds. It starts open or folded as the job's state
+ * says (`v.open`), until the person's own choice, kept per job in this
+ * browser, says otherwise; the page works without that storage.
+ */
+const foldKey = (id: number | string) => `animus.folds.${id}`;
+function readFolds(id: number | string): Record<string, boolean> {
+  try {
+    const saved: unknown = JSON.parse(storage().getItem(foldKey(id)) ?? '{}');
+    return saved && typeof saved === 'object' ? (saved as Record<string, boolean>) : {};
+  } catch { return {}; }
+}
+const detailsOf = (v: JobPageView, key: string, cls: string, summary: string, body: string) => {
+  const dflt = v.open[key] ?? false;
+  return `<details class="${cls}" data-key="fold-${esc(key)}" data-fold="${esc(key)}" data-default="${dflt ? 1 : 0}"${(readFolds(v.id)[key] ?? dflt) ? ' open' : ''}><summary>${summary}</summary>${body}</details>`;
+};
+/** A heading section: its head is the summary, with a chevron. */
+const foldSection = (v: JobPageView, key: string, title: string, body: string) => detailsOf(v, key, `section fold-section fold-${key}`, `<span class="section-head"><h2>${title}</h2><span class="chev" aria-hidden="true"></span></span>`, body);
+
+const STAGE_TITLE: Record<string, string> = { setup: 'Setup', plan: 'Plan', implement: 'Implement', gates: 'Gates', review: 'Review', evidence: 'Evidence', pr: 'PR' };
+const plural = (n: number, one: string) => `${n} ${n === 1 ? one : `${one}s`}`;
+
+/** One agent session as a row, as Orbit's Workflow view draws it: the square blinks (CSS only) while the session works. */
+const sessionRow = (a: JobPageView['timeline']['sessions'][number], i: number) => `<div class="sess" data-key="sess-${i}">
+    <span class="sq ${a.live ? 'live' : a.ok ? 'done' : 'bad'}" role="img" aria-label="${a.live ? 'working' : a.ok ? 'ended' : 'ended badly'}"></span>
+    <span class="sess-who"><span class="sess-name">${esc(a.role)}</span> <span class="mute">${esc([a.model, a.effort ? `${a.effort} effort` : ''].filter(Boolean).join(', '))}</span></span>
+    <svg class="sess-bar" aria-hidden="true"><rect class="rail" width="100%" height="100%"/><rect class="st-${esc(a.stage)}" x="${a.at}%" width="${Math.max(a.pct, 0.4)}%" height="100%"/></svg>
+    <span class="mono">${esc(a.took)}</span>
+    <span class="mono${a.errors ? ' tone-fail' : ''}">${a.calls} ${a.calls === 1 ? 'call' : 'calls'}${a.errors ? ' !' : ''}</span>
+    <span class="mono mute">${esc(a.tokens)} tokens</span>
+    ${a.live && a.tool ? `<span class="sess-tool mono">${esc(a.tool)} ${esc(a.target ?? '')}</span>` : ''}
+  </div>`;
+
+const mark = (tone: string, tag: string) => `<span class="mark tone-${tone}" aria-label="${tone === 'fail' ? 'failed' : tone === 'ink' ? 'passed' : esc(tag)}">${esc(tag)}</span>`;
+const output = (text?: string) => (text !== undefined ? `<details class="out"><summary>output</summary>${pre(text)}</details>` : '');
+const note = (text: string) => (text ? ` <span class="count">${esc(text)}</span>` : '');
+/** A check or criterion: its mark, name and command, and its output folded under it. */
+const checkRow = (c: { name: string; command: string; tag: string; tone: string; output?: string }) => `<div class="criterion">${mark(c.tone, c.tag)}<div class="what"><p class="mono">${esc(c.name)}</p>${c.command ? `<code>${esc(c.command)}</code>` : ''}</div>${output(c.output)}</div>`;
+const icon = (st: string) => (st === 'done' ? '<span class="mark tone-ink" aria-label="passed">✓</span>' : st === 'now' ? SPIN : st === 'left' ? '<span class="mark tone-mute" aria-label="not reached">–</span>' : '<span class="dot" aria-label="to come"></span>');
+
+/** What one stage produced, under its sessions. */
+function stageBody(v: JobPageView, s: StageSection, sessions: string): string {
+  const slices = (s.slices ?? []).map((x, i) => `<div class="criterion slice ${x.state}" data-key="sl-${s.name}-${i}">${icon(x.state)}<div class="what"><p><span class="b">${esc(x.title)}</span>${x.state === 'now' ? ' <span class="tone-acc">working on it</span>' : ''}</p>${x.delivers ? `<span class="mute">${esc(x.delivers)}</span>` : ''}</div></div>`).join('');
+  const parts: string[] = [];
+  if (sessions) parts.push(`<div class="sessions">${sessions}</div>`);
+  if (slices) parts.push(`<div class="list">${slices}</div>`);
+  if (s.fixRounds?.length) parts.push(`<p class="note">${esc(plural(s.fixRounds.length, 'fix round'))}: ${s.fixRounds.map(esc).join(' · ')}</p>`);
+  if (s.gates) {
+    parts.push(`<p class="runs mono">${esc(s.gates.line)}</p><p class="note">${esc(s.gates.catchUp)}</p>`);
+    parts.push(...s.gates.runs.map((r, n) => `<div class="round" data-key="run-${n}"><div class="label">${esc(r.outcome)}</div><div class="list">${r.checks.map(checkRow).join('')}</div></div>`));
+    if (v.flaky.length) parts.push(`<p class="note">${v.flaky.map(esc).join(' · ')}</p>`);
+  }
+  if (s.reviews) {
+    parts.push(...s.reviews.map((r) => `<div class="round"><div class="label">${esc(r.title)}</div><p>${esc(r.summary)}</p>
+    ${r.findings.map((f) => `<div class="finding"><span class="tag tone-${f.tone}">${esc(f.tag)}${f.fate ? ` · ${esc(f.fate)}` : ''}</span>${f.where ? `<code>${esc(f.where)}</code>` : ''}<p>${esc(f.problem)}</p>${f.fix ? `<p class="mute">${esc(f.fix)}</p>` : ''}</div>`).join('') || none('No findings.')}</div>`));
+  }
+  if (s.shots) {
+    parts.push(`<p class="note">click one to enlarge</p><div class="shots">${s.shots.map((x, i) => {
+      const src = shotUrls.get(shotKey(x.src));
+      return `<figure class="shot" data-key="s-${esc(x.src)}">${src ? `<button type="button" class="shot-open" data-shot="${i}" aria-label="Open ${esc(x.name)}"><img src="${esc(src)}" alt="${esc(x.name)}"></button>` : none('Loading…')}<figcaption>${esc(x.name)}</figcaption></figure>`;
+    }).join('')}</div>`);
+  }
+  if (s.pr) parts.push(`<p>${s.pr.href ? `<a href="${esc(s.pr.href)}" target="_blank" rel="noopener noreferrer">${esc(s.pr.text)} ↗</a>` : esc(s.pr.text)}</p>${s.pr.body ? pre(s.pr.body) : ''}`);
+  return parts.join('') || none(s.state === 'next' ? 'Not reached yet.' : s.state === 'skipped' ? 'Nothing to do for this job.' : 'Nothing to show for this stage.');
+}
 
 function jobSections(v: JobPageView): string {
   // Each stage is its own nested svg so its name is clipped to its part; the CSP allows no style attribute, so widths are percentages in attributes.
   const bar = v.bar.length ? `<svg class="timebar" role="img" aria-label="Where the time went">${v.bar.map((s) => `<svg x="${s.at}%" width="${s.pct}%" height="28"><rect class="st-${esc(s.name)}" width="100%" height="28"/>${s.label ? `<text x="8" y="18">${esc(s.label)}</text>` : ''}</svg>`).join('')}</svg>
     <div class="timekey">${v.bar.map((s) => `<span class="${s.on ? 'on' : ''}"><i class="st-${esc(s.name)}"></i>${esc(s.name)} <code>${s.on ? 'now' : esc(s.took)}</code></span>`).join('')}</div>` : '';
-  const t = v.timeline;
-  const stageRows = t.stages.map((s) => `<tr><td><i class="st-${esc(s.name)}"></i>${esc(s.name)}</td><td class="num">${esc(s.took)}</td><td class="num">${esc(s.share)}</td><td class="num">${s.sessions || '–'}</td><td class="num">${esc(s.tokens)}</td><td class="num">${esc(s.cost)}</td></tr>`).join('');
-  const sessions = t.sessions.map((a, i) => `<div class="sess" data-key="sess-${i}">
-    <div class="sess-head"><span class="sess-name">${esc(a.name)}${a.ok ? '' : ' <span class="tone-fail">· ended badly</span>'}</span><span class="mono mute">${esc(a.took)} · ${esc(a.tokens)} tokens · ${esc(a.cost)}</span></div>
-    <svg class="sess-bar" aria-hidden="true"><rect class="rail" width="100%" height="100%"/><rect class="st-${esc(a.stage)}" x="${a.at}%" width="${Math.max(a.pct, 0.4)}%" height="100%"/></svg>
-    <div class="sess-detail">${esc(a.stage)} · ${esc(a.tier)}${a.effort ? `, ${esc(a.effort)} effort` : ''} · ${esc(a.detail)}</div>
-  </div>`).join('');
-  const detail = `<div class="timeline">
-    <div class="scroll"><table class="grid"><thead><tr><th>Stage</th><th class="num">Took</th><th class="num">Share</th><th class="num">Sessions</th><th class="num">Tokens</th><th class="num">Cost</th></tr></thead><tbody>${stageRows}</tbody></table></div>
-    ${sessions ? `<h3>Agent sessions <span class="count">in the order they ran, on the same bar</span></h3><div class="sessions">${sessions}</div>` : none('No agent session has ended yet.')}
-  </div>`;
-  // Closed, the heading and the bar are its summary, so the bar shows and a click on it opens the detail.
-  const stages = bar ? `<details class="section fold-section stages" data-key="fs-stages"><summary><div class="section-head"><h2>Where the time went</h2><span class="hint">agents and tokens</span><span class="chev" aria-hidden="true"></span></div><div class="timebar-wrap">${bar}</div></summary>${detail}</details>`
-    : section('stages', 'Where the time went', none('No stage has taken time yet.'));
-  const fold = (name: string, title: string, body: string, open = false) => `<details class="fold ${name}" data-key="fold-${name}"${open ? ' open' : ''}><summary>${title}</summary>${body}</details>`;
-  const mark = (tone: string, tag: string) => `<span class="mark tone-${tone}" aria-label="${tone === 'fail' ? 'failed' : tone === 'ink' ? 'passed' : esc(tag)}">${esc(tag)}</span>`;
-  const output = (text?: string) => (text !== undefined ? `<details class="out"><summary>output</summary>${pre(text)}</details>` : '');
+  const stages = v.stageSections.map((s) => detailsOf(v, `stage-${s.name}`, `stage st-state-${s.state}`,
+    `<span class="stage-head"><i class="st-${esc(s.name)}"></i><h2>${esc(STAGE_TITLE[s.name] ?? s.name)}</h2><span class="stage-state ${s.state === 'now' ? 'tone-acc' : 'mute'}">${esc(s.stateText)}</span><span class="mono mute stage-took">${esc(s.took)}</span><span class="mute stage-count">${s.sessions.length ? esc(plural(s.sessions.length, 'session')) : ''}</span><span class="chev" aria-hidden="true"></span></span>`,
+    stageBody(v, s, s.sessions.map(sessionRow).join(''))));
   const criteria = v.criteria.map((c) => `<div class="criterion">${mark(c.tone, c.tag)}<div class="what"><p>${esc(c.text)}</p>${c.command ? `<code>${esc(c.command)}</code>` : ''}</div>${output(c.output)}</div>`).join('');
-  // A check is drawn as a criterion is: its mark, its name and command, and its output folded under it.
-  const checks = v.pills.map((c) => `<div class="criterion">${mark(c.tone, c.tag)}<div class="what"><p class="mono">${esc(c.name)}</p>${c.command ? `<code>${esc(c.command)}</code>` : ''}</div>${output(c.output)}</div>`).join('');
-  const flaky = v.flaky.length ? `<p class="note">${v.flaky.map(esc).join(' · ')}</p>` : '';
-  const note = (text: string) => (text ? ` <span class="count">${esc(text)}</span>` : '');
-  const icon = (st: string) => (st === 'done' ? '<span class="mark tone-ink" aria-label="passed">✓</span>' : st === 'now' ? SPIN : st === 'left' ? '<span class="mark tone-mute" aria-label="not reached">–</span>' : '<span class="dot" aria-label="to come"></span>');
-  const slices = v.slices.map((s, i) => `<div class="criterion slice ${s.state}" data-key="sl-${i}">${icon(s.state)}<div class="what"><p><span class="b">${esc(s.title)}</span>${s.state === 'now' ? ' <span class="tone-acc">working on it</span>' : ''}</p>${s.delivers ? `<span class="mute">${esc(s.delivers)}</span>` : ''}</div></div>`).join('');
-  const reviews = v.reviews.map((r) => `<div class="round"><div class="label">${esc(r.title)}</div><p>${esc(r.summary)}</p>
-    ${r.findings.map((f) => `<div class="finding"><span class="tag tone-${f.tone}">${esc(f.tag)}${f.fate ? ` · ${esc(f.fate)}` : ''}</span>${f.where ? `<code>${esc(f.where)}</code>` : ''}<p>${esc(f.problem)}</p>${f.fix ? `<p class="mute">${esc(f.fix)}</p>` : ''}</div>`).join('') || none('No findings.')}</div>`).join('');
-  const shots = v.shots.map((s, i) => {
-    const src = shotUrls.get(shotKey(s.src));
-    return `<figure class="shot" data-key="s-${esc(s.src)}">${src ? `<button type="button" class="shot-open" data-shot="${i}" aria-label="Open ${esc(s.name)}"><img src="${esc(src)}" alt="${esc(s.name)}"></button>` : none('Loading…')}<figcaption>${esc(s.name)}</figcaption></figure>`;
-  }).join('');
   const questions = v.questions.map((q) => `<div class="qa"><p><span class="label">Asked</span> ${esc(q.question)}</p><p${q.answered ? '' : ' class="tone-ask"'}><span class="label">Answer</span> ${esc(q.answer)}</p></div>`).join('');
+  const fold = (name: string, title: string, body: string) => detailsOf(v, name, `fold ${name}`, title, body);
   return [
     v.reason ? `<pre class="text why">${esc(v.reason)}</pre>` : '',
-    `<div class="numbers">${v.numbers.map((n) => `<div><code class="num">${esc(n.v)}</code><span class="mute">${esc(n.k)}</span></div>`).join('')}</div>`,
-    slices ? section('slice-list', `Slices${note(`${v.slices.filter((s) => s.done).length} of ${v.slices.length} passed`)}`, `<div class="list">${slices}</div>`) : '',
-    stages,
-    criteria ? foldSection('criteria', `Acceptance criteria${note(v.notes.criteria)}`, `<div class="list">${criteria}</div>`) : '',
-    section('checks', `Checks${note(v.notes.checks)}`, (checks ? `<div class="list">${checks}</div>` : none(criteria ? 'No other checks.' : 'No checks have run yet.')) + flaky),
-    section('review', `Review${note(v.notes.review)}`, reviews || none('Not reviewed yet.')),
-    shots ? section('screenshots', `Screenshots${note(`${v.shots.length} · click one to enlarge`)}`, `<div class="shots">${shots}</div>`) : '',
+    foldSection(v, 'numbers', 'The numbers', `<div class="numbers">${v.numbers.map((n) => `<div><code class="num">${esc(n.v)}</code><span class="mute">${esc(n.k)}</span></div>`).join('')}</div>`),
+    criteria ? foldSection(v, 'criteria', `Acceptance criteria${note(v.notes.criteria)}`, `<div class="list">${criteria}</div>`) : '',
+    `<div class="stages-head">${bar}</div>`,
+    `<div class="stage-list">${stages.join('')}</div>`,
     `<div class="folds">${[
       fold('spec', 'Spec', v.spec ? pre(v.spec) : none('Helix no longer has the spec.')),
-      fold('log', 'Log', v.log ? pre(v.log, ' data-log') : none(v.noLog), v.follow),
+      fold('log', 'Log', v.log ? pre(v.log, ' data-log') : none(v.noLog)),
       v.tools ? fold('tools', `Tool calls${note(v.tools.summary)}`, pre(v.tools.text)) : '',
       fold('questions', `Questions${note(v.questions.length ? '' : 'none asked')}`, questions || none('It has asked nothing.')),
     ].join('')}</div>`,
@@ -352,7 +387,7 @@ function jobMain(id: number | string, now: number, local: boolean): string {
   const v = state.job?.job.id === id ? jobView(state.job, now, local, state.display?.closed?.find((c) => c.job === id)) : undefined;
   const fixes = v?.facts.find((f) => f.k === 'fixes');
   const lead = v && !notice ? `<div class="tag-row"><span class="tag tone-${v.tag.tone}">${esc(v.tag.text)}</span>${fixes ? '<span class="tag tone-mute">Fix</span>' : ''}<span class="mute">${ref(id) ? `${ref(id)} · ` : ''}${v.lineParts.map((x) => (x.page ? `<a href="${esc(x.page)}">${esc(x.text)}</a>` : esc(x.text))).join(' · ')}${fixes?.page ? ` · fix of <a href="${esc(fixes.page)}">${esc(fixes.v)}</a>` : ''}</span></div>` : '';
-  const scope = `<div class="scope"><div><h1>${esc(v?.title ?? `Job ${ref(id) || id}`)}</h1>${lead}</div></div>`;
+  const scope = `<div class="scope"><div><h1>${esc(v?.title ?? `Job ${ref(id) || id}`)}</h1>${lead}${v?.now && !notice ? `<p class="now-line mono" data-now>${esc(v.now)}</p>` : ''}</div></div>`;
   const body = notice ? `<div class="none boxed">${esc(notice.text)}</div>${notice.signIn ? signIn : ''}` : v ? jobSections(v) : '';
   const to = from ?? { name: 'Jobs', href: '/jobs' };
   const trail = v && !notice ? `<nav class="crumb" aria-label="Trail"><a class="crumb-back" href="${esc(to.href)}">&larr; ${esc(to.name)}</a> / ${esc(v.trail.project)} / <code>${esc(v.trail.job)}</code></nav>` : back(to.href, to.name);
@@ -483,7 +518,8 @@ const keyOf = (n: Node) => (n instanceof Element ? n.getAttribute('data-key') : 
  */
 function morph(from: Element, to: Element): void {
   // A folded part is opened and closed by the person, never by a redraw.
-  const kept = (n: string) => n === 'open' && from.nodeName === 'DETAILS';
+  // Unless its default moved (the job went on to its next stage, or ended).
+  const kept = (n: string) => n === 'open' && from.nodeName === 'DETAILS' && from.getAttribute('data-default') === to.getAttribute('data-default');
   for (const a of [...from.attributes]) if (!to.hasAttribute(a.name) && !kept(a.name)) from.removeAttribute(a.name);
   for (const a of [...to.attributes]) if (!kept(a.name) && from.getAttribute(a.name) !== a.value) from.setAttribute(a.name, a.value);
   const keyed = new Map<string, ChildNode>();
@@ -638,6 +674,16 @@ root.addEventListener('change', (event) => {
   const f = { ...filterOf(location.search), [select.dataset.filter!]: select.value || (select.dataset.filter === 'result' ? 'all' : '') };
   location.assign(`/jobs${queryOf(f)}`);
 });
+
+// A fold's own choice is kept per job, only where it differs from the default, so the default can move with the job; `toggle` does not bubble.
+root.addEventListener('toggle', (event) => {
+  const el = event.target as Element;
+  const key = el.getAttribute?.('data-fold');
+  if (!key || at.page !== 'job') return;
+  const saved = readFolds(at.id);
+  if ((el as HTMLDetailsElement).open === (el.getAttribute('data-default') === '1')) delete saved[key]; else saved[key] = (el as HTMLDetailsElement).open;
+  try { storage().setItem(foldKey(at.id), JSON.stringify(saved)); } catch { /* no storage: the choice stands until the page is left */ }
+}, true);
 
 root.addEventListener('click', (event) => {
   if ((event.target as Element).closest('[data-sign-out]')) {

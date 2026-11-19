@@ -15,7 +15,7 @@ type JobState = import('../plugin/src/log.ts').JobState;
 type Run = import('../plugin/src/log.ts').Run;
 const { outcomesFile } = await import('../plugin/src/outcomes.ts');
 const { listenLocal, localServer } = await import('../plugin/src/local-display.ts');
-const { writeFileSync, mkdirSync } = await import('node:fs');
+const { writeFileSync, mkdirSync, readFileSync } = await import('node:fs');
 const { deflateSync } = await import('node:zlib');
 
 /** A made-up screenshot: a flat PNG of a page's colours, a header band and a few rows, so the viewer has something to show. */
@@ -68,6 +68,17 @@ job('comments-on-github', REPO.animus, 'Start and follow work with /animus comme
   running: { stage: 'implement', who: 'implementer · slice 2 of 3', minutes: 23 }, spec: SPEC('Start and follow work with /animus comments on GitHub', working),
   extra: { slicing: { by: 'planner', slices: [{ title: 'Drafts from issue comments', delivers: 'criterion 1' }, { title: 'Fixes from PR comments', delivers: 'criterion 2' }, { title: 'Replies with the link', delivers: 'criterion 3' }] } as unknown as JobState['slicing'], slices_done: ['1'] },
 });
+// Its sessions so far: the planner and the first slice's implementer ended (their calls are logged when they end), the second slice's is working.
+const call = (minutes: number, stage: string, role: string, session: string, tool: string, target: string, ok = true) => JSON.stringify({ at: ago(minutes), stage, role, session, tool, target, ok, ms: 300 });
+writeFileSync(join(jobDir('comments-on-github'), 'tools.jsonl'), [
+  call(22, 'plan', 'planner', 'a', 'Read', 'docs/github.md'), call(21.5, 'plan', 'planner', 'a', 'Grep', 'comment'),
+  call(19, 'slice-1', 'implementer', 'b', 'Edit', 'helix/src/github.ts'), call(14, 'slice-1', 'implementer', 'b', 'Bash', 'npm test', false), call(9, 'slice-1', 'implementer', 'b', 'Edit', 'helix/src/github.ts'),
+  call(0.5, 'slice-2', 'implementer', 'c', 'Read', 'helix/src/pulls.ts'), call(0.2, 'slice-2', 'implementer', 'c', 'Edit', 'helix/src/pulls.ts'),
+].join('\n') + '\n');
+{
+  const p = join(jobDir('comments-on-github'), 'progress.json');
+  writeJson(p, { ...JSON.parse(readFileSync(p, 'utf8')), model: 'claude-sonnet-5-5', effort: 'medium' });
+}
 job('swap-a-meal', REPO.meal, 'Swap a meal for another with the same ingredients', { running: { stage: 'gates', who: 'gates · attempt 1', minutes: 7 } });
 
 // Needs you.
@@ -85,11 +96,12 @@ job('drafts-from-slack', REPO.animus, 'Drafts from Slack', {
   outcome: 'pr', spec: SPEC('Drafts from Slack', criteria),
   extra: { slicing: { by: 'planner', slices: [{ title: 'Drafts in a DM', delivers: 'criterion 1' }, { title: 'Submit from a draft', delivers: 'criterion 2' }, { title: 'Manifest scopes', delivers: 'criterion 3' }] } as unknown as JobState['slicing'], slices_done: ['1', '2', '3'] },
 });
-const ag = (stage: string, role: string, tier: string, cost: number, calls: number, errors: number, minutes: number) => ({ stage, role, tier, effort: 'medium', model: tier === 'deep' ? 'claude-opus-5-5' : 'claude-sonnet-5-5', ok: true, status: 'ok', cost_usd: cost, turns: Math.round(calls / 2), tokens: { input: Math.round(cost * 9_000), output: Math.round(cost * 21_000), cache_read: Math.round(cost * 310_000), cache_write: Math.round(cost * 40_000) }, ms: minutes * 60_000, tools: { calls, errors, by_tool: { Bash: calls - 2, Edit: 2 } } });
+let sessionAt = 900;
+const ag = (stage: string, role: string, tier: string, cost: number, calls: number, errors: number, minutes: number) => ({ stage, role, tier, started: ago((sessionAt -= minutes + 1) + minutes + 1), effort: 'medium', model: tier === 'deep' ? 'claude-opus-5-5' : 'claude-sonnet-5-5', ok: true, status: 'ok', cost_usd: cost, turns: Math.round(calls / 2), tokens: { input: Math.round(cost * 9_000), output: Math.round(cost * 21_000), cache_read: Math.round(cost * 310_000), cache_write: Math.round(cost * 40_000) }, ms: minutes * 60_000, tools: { calls, errors, by_tool: { Bash: calls - 2, Edit: 2 } } });
 ran('drafts-from-slack', REPO.animus, 'Drafts from Slack', 900, 41, 6.02, { outcome: 'pr', pr: 16, extra: {
   fix_rounds: 1, gates: [{ attempt: 1, ok: false, ms: 1000, checks: [{ name: 'test', ok: false, skipped: false, ms: 900, flaky: true }] }, { attempt: 2, ok: true, ms: 1000, checks: [] }],
-  agents: [ag('plan', 'planner', 'deep', 0.9, 14, 0, 1.5), ag('implement', 'implementer', 'standard', 2.1, 40, 2, 9), ag('implement', 'implementer', 'standard', 1.3, 22, 1, 6), ag('implement', 'implementer', 'standard', 0.7, 18, 1, 4), ag('review', 'reviewer', 'deep', 1.02, 20, 0, 5)],
-  review: { rounds: 1, findings: 2, blockers: 1, acted_on: 1, open: 0, log: [{ round: 1, severity: 'blocker', file: 'helix/src/drafts.ts', line: 88, fate: 'fixed' }, { round: 1, severity: 'should-fix', file: 'helix/src/slack.ts', line: 212, fate: 'not-acted-on' }] },
+  agents: [ag('plan', 'planner', 'deep', 0.9, 14, 0, 1.5), ag('implement', 'implementer', 'standard', 2.1, 40, 2, 9), ag('implement', 'implementer', 'standard', 1.3, 22, 1, 6), ag('implement', 'implementer', 'standard', 0.7, 18, 1, 4), ag('gate-fix-1', 'implementer', 'standard', 0.4, 9, 0, 2), ag('review-1', 'reviewer', 'deep', 1.02, 20, 0, 5), ag('review-fix-1', 'implementer', 'standard', 0.3, 8, 0, 2), ag('review-2', 'reviewer', 'deep', 0.6, 10, 0, 3)],
+  review: { rounds: 2, findings: 2, blockers: 1, acted_on: 1, open: 0, log: [{ round: 1, severity: 'blocker', file: 'helix/src/drafts.ts', line: 88, fate: 'fixed' }, { round: 1, severity: 'should-fix', file: 'helix/src/slack.ts', line: 212, fate: 'not-acted-on' }] },
 } as Partial<Run> });
 pr(REPO.animus, 16, 'drafts-from-slack', 'MERGED', 400);
 Object.assign(outcomes[`https://github.com/example/animus/pull/16`] as object, { human_commits: 2, human_lines: { added: 24, removed: 6 }, reverted: false, reworked: false });
@@ -108,6 +120,8 @@ writeJson(join(jobDir('drafts-from-slack'), 'review-1.json'), { status: 'reviewe
   { severity: 'blocker', file: 'helix/src/drafts.ts', line: 88, problem: "A draft's file upload is retried forever when Slack answers 429.", fix: 'Give up after three tries and say so in the DM.' },
   { severity: 'should-fix', file: 'helix/src/slack.ts', line: 212, problem: 'The DM reply names the spec path on Helix, which the sender cannot open.' },
 ] });
+writeJson(join(jobDir('drafts-from-slack'), 'review-2.json'), { status: 'reviewed', summary: 'The blocker is fixed; nothing new.', criteria: [], findings: [] });
+writeFileSync(join(jobDir('drafts-from-slack'), 'pr-body.md'), 'Drafts started in a Slack DM are posted as a file and queue as a job under the sender.\n\n- `/animus draft` starts a draft\n- Submit queues it\n- The manifest asks for files:read and files:write\n');
 
 for (const [id, repo, title, n, state, at, minutes, cost] of [
   ['slack-rename', REPO.animus, "Slack's command is /animus and its bot is Animus", 19, 'MERGED', 120, 2, 0.46],

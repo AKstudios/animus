@@ -224,7 +224,7 @@ async function runJobWith(opts: RunOptions, deps: Deps, live: { run?: Run; start
   };
 
   /** Says where the job is, in its folder: what Helix's display shows while it runs. */
-  const at = (stage: Stage, who: string) => saveProgress(job, stage, who);
+  const at = (stage: Stage, who: string, tier?: Tier, effort?: string) => saveProgress(job, stage, who, tier && effort ? { model: modelFor(factory, tier), effort } : undefined);
 
   const source = before ? before.source : alone ? undefined : resolve(opts.specFile!);
   if (source) run.spec_file = source;
@@ -313,7 +313,7 @@ async function runJobWith(opts: RunOptions, deps: Deps, live: { run?: Run; start
     const by_tool: Record<string, number> = {};
     for (const t of r.tools ?? []) by_tool[t.tool] = (by_tool[t.tool] ?? 0) + 1;
     run.agents.push({
-      stage, role, tier, effort, model: r.model, ok: r.ok, status: r.status, cost_usd: r.cost_usd, turns: r.turns, tokens: r.tokens, ms: r.ms,
+      stage, role, tier, effort, model: r.model, started: new Date(Date.now() - r.ms).toISOString(), ok: r.ok, status: r.status, cost_usd: r.cost_usd, turns: r.turns, tokens: r.tokens, ms: r.ms,
       ...(r.session ? { session: r.session } : {}), ...(r.transcript ? { transcript: r.transcript } : {}), ...(r.context !== undefined ? { context: r.context } : {}),
       ...(r.tools ? { tools: { calls: r.tools.length, errors: r.tools.filter((t) => !t.ok).length, by_tool } } : {}),
     });
@@ -376,7 +376,7 @@ async function runJobWith(opts: RunOptions, deps: Deps, live: { run?: Run; start
     }
     log(`${stage}: ${modelFor(factory, tier)}, ${effort} effort`);
     const before = git(wt, ['rev-parse', 'HEAD']);
-    at('implement', `implementer · ${tier} tier${inSlice ? ` · ${inSlice}` : ''}${/-fix-/.test(stage) ? ` · ${stage.replace('-fix-', ' fix ')}` : ''}`);
+    at('implement', `implementer · ${tier} tier${inSlice ? ` · ${inSlice}` : ''}${/-fix-/.test(stage) ? ` · ${stage.replace('-fix-', ' fix ')}` : ''}`, tier, effort);
     const r = await timed('implement', () => deps.agent({ role: 'implementer', tier, effort, prompt, cwd: wt, ...instructions('implementer'), schema: REPORT_SCHEMA, ...caps(tier), ...(state.session ? { resume: state.session } : {}) }));
     record(stage, 'implementer', tier, effort, r);
     if (r.session) state.session = r.session;
@@ -549,7 +549,7 @@ async function runJobWith(opts: RunOptions, deps: Deps, live: { run?: Run; start
     if (!state.slicing) {
       state.slicing = carried ? oneSlice(spec) : await timed('plan', () => {
         try {
-          if (isPlanned(factory, spec.size)) at('plan', `planner · ${factory.planner!.tier} tier`);
+          if (isPlanned(factory, spec.size)) at('plan', `planner · ${factory.planner!.tier} tier`, factory.planner!.tier, factory.planner!.effort);
           const planned = planSlices({ factory, agent: deps.agent, spec, cwd: wt, personal, lessons: () => lessonsFor('planner'), log, record: (stage, r) => record(stage, 'planner', factory.planner!.tier, factory.planner!.effort, r) });
           state.sliced_by = planned.by;
           if (planned.by === 'planner') for (const name of roleSkills(factory, 'planner', plan.type, wt, personal).names) if (!run.skills.includes(name)) run.skills.push(name);
@@ -630,7 +630,7 @@ async function runJobWith(opts: RunOptions, deps: Deps, live: { run?: Run; start
       for (let round = 1; ; round++) {
         const seen = ui ? await shoot(ui, 'review') : undefined;
         log(`review ${round}: ${role}, ${modelFor(factory, tier)}, ${effort} effort`);
-        at('review', `${role} · ${tier} tier${round > 1 ? ` · round ${round}` : ''}`);
+        at('review', `${role} · ${tier} tier${round > 1 ? ` · round ${round}` : ''}`, tier, effort);
         const prompt = reviewPrompt({ spec, ws, round, earlier: open, shots: seen, answers, ...(fix ? { ask: fix.ask } : {}) });
         let said: Review | undefined;
         let ended = 'success';

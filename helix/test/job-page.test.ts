@@ -450,3 +450,77 @@ test('the labels dialog markup has its three ways to close and the folded table'
   assert.match(app, /state\.labels && event\.key === 'Escape'/);
   assert.match(app, /<details class="all-labels">/);
 });
+
+// Protects: criterion 1. Fails when: the Now line misses the stage, agent, model, effort, time on the stage or the current tool, or a job that is not running has one.
+test('a running job\'s page has a Now line from its progress and last tool call, and a job that is not running has none', () => {
+  const progress = { stage: 'implement' as const, who: 'implementer · deep tier · slice 2 of 3', at: '2026-11-17T11:56:00Z', model: 'opus', effort: 'high' };
+  const live = { stage: 'implement', role: 'implementer', model: 'opus', effort: 'high', started: progress.at, ms: 240_000, calls: 3, errors: 0, live: true, tool: 'Edit', target: 'plugin/display/app.ts' };
+  assert.equal(jobView(page({ progress }, { sessions: [live] }), NOW).now, 'Implementing slice 2 of 3 · implementer · opus, high effort · 4m · now: Edit plugin/display/app.ts');
+  assert.equal(jobView(page({ progress: { stage: 'gates', who: 'gates · attempt 1', at: '2026-11-17T11:59:00Z' } }), NOW).now, 'Running the gates · 1m');
+  assert.equal(jobView(page({ state: 'ended', progress }), NOW).now, undefined);
+});
+
+// Protects: criterion 4. Fails when: a session with a start time is not placed by it on the job's span, a live row loses its tool, "!" is missing on a failure, or an old record's sessions are not laid end to end under the note.
+test('agent sessions sit on the job\'s time span by their start, and an old record lays them end to end under a note', () => {
+  const t = { input: 1, output: 2, cache_read: 0, cache_write: 0 };
+  const base = { ...session, role: 'implementer', model: 'opus', tier: 'deep', effort: 'high', tokens: t, cost_usd: 1, calls: 4 };
+  const run = (agents: NonNullable<JobPage['run']>['agents']) => ({ fix_rounds: 0, gates: [], findings: [], tools: { calls: 0, errors: 0, text: '' }, agents });
+  const job = { state: 'ended' as const, started: '2026-11-17T10:00:00Z', ended: '2026-11-17T10:10:00Z' };
+  const timed = jobView(page(job, { ms: { implement: 600_000 }, run: run([
+    { ...base, stage: 'implement', started: '2026-11-17T10:02:00Z', ms: 120_000, errors: 1 },
+    { ...base, stage: 'implement', started: '2026-11-17T10:06:00Z', ms: 60_000 },
+  ]) }), NOW).timeline;
+  assert.deepEqual(timed.sessions.map((s) => [s.at, s.pct, s.calls, s.errors]), [[20, 20, 4, 1], [60, 10, 4, 0]]);
+  assert.equal(timed.note, undefined);
+  const old = jobView(page(job, { ms: { implement: 600_000 }, run: run([{ ...base, stage: 'implement', ms: 120_000 }, { ...base, stage: 'implement', ms: 60_000 }]) }), NOW).timeline;
+  assert.deepEqual(old.sessions.map((s) => [s.at, s.pct]), [[0, 20], [20, 10]]);
+  assert.equal(old.note, 'times are durations only');
+  const running = { stage: 'implement', role: 'implementer', model: 'opus', effort: 'high', started: '2026-11-17T11:55:00Z', ms: 300_000, calls: 2, errors: 0, live: true, tool: 'Bash', target: 'npm test' };
+  const first = jobView(page({ started: '2026-11-17T11:50:00Z' }, { sessions: [running] }), NOW).timeline.sessions;
+  assert.deepEqual(first.map((s) => [s.at, s.pct, s.live, s.tool, s.target, s.tokens, s.cost]), [[50, 50, true, 'Bash', 'npm test', '–', '–']]);
+});
+
+// Protects: criteria 3 and 6, the stage sections built from a job's folder on Helix. Fails when: a stage is missing or out of order, a gate run or review round is left out of its section, or a stage the job skipped reads as done.
+test('Helix\'s job page has a section per stage with its state, gate runs in turn, review rounds and the slices', async () => {
+  const h = await helix();
+  const job = h.add({ state: 'ended', person: 'ana', repo: 'app', title: 'Export to PDF', draft: false, animus_job: 'app-7', submitted: '2026-11-17T10:00:00Z', started: '2026-11-17T10:05:00Z', ended: '2026-11-17T10:40:30Z', outcome: 'failed' }, '# Export\n', '');
+  animusFolder(h.animus, 'app-7');
+  const v = jobView(await h.page(job.id), NOW);
+  h.stop();
+  const by = Object.fromEntries(v.stageSections.map((s) => [s.name, s]));
+  assert.deepEqual(v.stageSections.map((s) => [s.name, s.state]), [['setup', 'done'], ['plan', 'done'], ['implement', 'done'], ['gates', 'done'], ['review', 'done'], ['evidence', 'skipped'], ['pr', 'done']]);
+  assert.equal(by.evidence!.stateText, 'skipped for this kind of job');
+  assert.equal(by.plan!.slices!.length, 2);
+  assert.equal(by.gates!.gates!.line, 'run 1 failed → fix round 1 → run 2 failed');
+  assert.equal(by.gates!.gates!.runs[1]!.checks.find((c) => c.name === 'test')!.output, 'not ok 3 - exports the cover\n\n  expected 1 page, got 0');
+  assert.deepEqual(by.review!.reviews!.map((r) => r.title), ['Review 1', 'Review 2']);
+});
+
+// Protects: criterion 3's states, the PR section and catch-up count. Fails when: Plan on a fix is not skipped, a stage after the current one is not "not reached", the PR description or the base catch-up is lost.
+test('a stage is done, now, not reached or skipped, and Gates counts the catch-up and PR shows its description', () => {
+  const running = jobView(page({ progress: { stage: 'implement', who: 'implementer · deep tier', at: '2026-11-17T11:56:00Z' } }, { ms: { setup: 5_000 } }), NOW).stageSections;
+  assert.deepEqual(running.map((s) => s.state), ['done', 'done', 'now', 'next', 'next', 'next', 'next']);
+  assert.deepEqual([running[2]!.took, running[3]!.stateText], ['4m', 'not reached']);
+  const fix = jobView(page({ state: 'ended', fix_of: 3, pr: 'https://github.com/o/app/pull/4' }, { ms: { setup: 1000, implement: 5000, gates: 1000, pr: 1000 }, pr_body: 'Fixes the cover.', gate_runs: 1, log: 'catch-up: merged main at abc\n', checks: [{ name: 'test', command: 'npm test', status: 'ok', detail: '1s' }] }), NOW).stageSections;
+  assert.equal(fix[1]!.stateText, 'skipped for a fix');
+  assert.equal(fix[3]!.gates!.catchUp, 'caught up with the base once');
+  assert.deepEqual(fix[6]!.pr, { href: 'https://github.com/o/app/pull/4', text: '#4', body: 'Fixes the cover.' });
+});
+
+// Protects: criterion 5's defaults. Fails when: a running job does not open its current stage and fold the rest, or a finished job does not open its acceptance criteria.
+test('a running job opens its current stage and folds the others, and a finished job opens its acceptance criteria', () => {
+  const running = jobView(page({ progress: { stage: 'gates', who: 'gates · attempt 1', at: '2026-11-17T11:59:00Z' } }), NOW).open;
+  assert.deepEqual(Object.entries(running).filter(([k, o]) => k.startsWith('stage-') && o).map(([k]) => k), ['stage-gates']);
+  assert.equal(running.criteria, false);
+  const ended = jobView(page({ state: 'ended' }), NOW).open;
+  assert.equal(ended.criteria, true);
+  assert.equal(Object.entries(ended).some(([k, o]) => k.startsWith('stage-') && o), false);
+});
+
+// Protects: criterion 5's remembering. Fails when: the page stops keeping a person's folding per job, or breaks when the browser has no storage.
+test('the page keeps what a person folded per job in the browser\'s storage, and works without it', () => {
+  const app = readFileSync(join(import.meta.dirname, '..', '..', 'plugin', 'display', 'app.ts'), 'utf8');
+  assert.match(app, /`animus\.folds\.\$\{id\}`/);
+  assert.match(app, /addEventListener\('toggle'/);
+  assert.match(app, /try \{ storage\(\)\.setItem\(foldKey/);
+});

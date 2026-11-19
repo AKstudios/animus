@@ -28,6 +28,18 @@
       <div><b>3 of 3</b><span class="sub">slices passed</span></div>
     </div>
 
+
+    <section>
+      <div class="sh"><h2>Acceptance criteria</h2><span class="n">3 of 3 proven</span></div>
+      <div class="ac">
+        <div><span class="ok" aria-label="passed">✓</span><span>/animus draft in a DM starts a draft and posts it as a file<span class="proof">node --test test/c1.test.ts</span></span><a class="sub" href="#">output</a></div>
+        <div><span class="ok" aria-label="passed">✓</span><span>Submit on a draft queues it as a job under the sender<span class="proof">node --test test/c2.test.ts</span></span><a class="sub" href="#">output</a></div>
+        <div><span class="ok" aria-label="passed">✓</span><span>The manifest asks for files:read and files:write<span class="proof">node --test test/c3.test.ts</span></span><a class="sub" href="#">output</a></div>
+      </div>
+    </section>
+
+
+
     <section>
       <div class="sh"><h2>Where the time went</h2></div>
       <div class="tl" role="img" aria-label="Time per stage">
@@ -42,31 +54,24 @@
       <div class="legend"><span><i class="s-setup"></i>setup 20s</span><span><i class="s-plan"></i>plan 1m</span><span><i class="s-implement"></i>implement 24m</span><span><i class="s-gates"></i>gates 6m</span><span><i class="s-review"></i>review 6m</span><span><i class="s-evidence"></i>evidence 30s</span><span><i class="s-pr"></i>pr 12s</span></div>
     </section>
 
-    <section>
-      <div class="sh"><h2>Acceptance criteria</h2><span class="n">3 of 3 proven</span></div>
-      <div class="ac">
-        <div><span class="ok" aria-label="passed">✓</span><span>/animus draft in a DM starts a draft and posts it as a file<span class="proof">node --test test/c1.test.ts</span></span><a class="sub" href="#">output</a></div>
-        <div><span class="ok" aria-label="passed">✓</span><span>Submit on a draft queues it as a job under the sender<span class="proof">node --test test/c2.test.ts</span></span><a class="sub" href="#">output</a></div>
-        <div><span class="ok" aria-label="passed">✓</span><span>The manifest asks for files:read and files:write<span class="proof">node --test test/c3.test.ts</span></span><a class="sub" href="#">output</a></div>
-      </div>
-    </section>
-
-    <section>
-      <div class="sh"><h2>Checks</h2><span class="n">all passed on the last run</span></div>
-      <div class="chips"><span class="chip"><span class="ok">✓</span>typecheck</span><span class="chip"><span class="ok">✓</span>test</span></div>
-    </section>
-
-    <section>
-      <div class="sh"><h2>Review</h2><span class="n">1 round · 2 findings</span></div>
-      <p class="sub" style="margin-bottom:10px">One blocker, fixed in the next round.</p>
-      <div class="finds">
-        <div class="find"><span class="sev" style="color:var(--fail)">Blocker</span><span>A draft's file upload is retried forever when Slack answers 429.</span><span class="sub">Give up after three tries and say so in the DM.</span><span class="sub mono">helix/src/drafts.ts:88</span></div>
-        <div class="find"><span class="sev" style="color:var(--ask)">Should fix</span><span>The DM reply names the spec path on Helix, which the sender cannot open.</span><span class="sub mono">helix/src/slack.ts:212</span></div>
-      </div>
-    </section>
-
+    <!-- A finished job: every stage folded, each head says its state, time and sessions. Review, the longest, is drawn open. -->
+    <div class="stage-list">
+      <details class="stage"><summary><span class="stage-head"><i class="s-setup"></i><h2>Setup</h2><span class="st">done</span><span class="took">20s</span></span></summary></details>
+      <details class="stage"><summary><span class="stage-head"><i class="s-plan"></i><h2>Plan</h2><span class="st">done</span><span class="took">1m</span><span class="sub">1 session</span></span></summary></details>
+      <details class="stage"><summary><span class="stage-head"><i class="s-implement"></i><h2>Implement</h2><span class="st">done</span><span class="took">24m</span><span class="sub">5 sessions</span></span></summary></details>
+      <details class="stage"><summary><span class="stage-head"><i class="s-gates"></i><h2>Gates</h2><span class="st">done</span><span class="took">6m</span></span></summary></details>
+      <details class="stage" open><summary><span class="stage-head"><i class="s-review"></i><h2>Review</h2><span class="st">done</span><span class="took">6m</span><span class="sub">2 sessions</span></span></summary>
+        <div class="stage-body">
+          <div class="sess"><span class="sq done"></span><span>reviewer <span class="sub">claude-opus-5-5, medium effort</span></span><span class="bar"><b class="s-review" style="left:62%;width:12%"></b></span><span class="mono sub">5m</span><span class="mono sub">20 calls</span></div>
+          <div class="round"><span class="label">Round 1</span><p class="sub">One blocker, fixed in the next round.</p>
+            <div class="find"><span class="sev" style="color:var(--fail)">Blocker · fixed</span><span>A draft's file upload is retried forever when Slack answers 429.</span><span class="sub mono">helix/src/drafts.ts:88</span></div>
+            <div class="find"><span class="sev" style="color:var(--ask)">Should fix · not acted on</span><span>The DM reply names the spec path on Helix, which the sender cannot open.</span><span class="sub mono">helix/src/slack.ts:212</span></div></div>
+          <div class="round"><span class="label">Round 2</span><p class="sub">The blocker is fixed; nothing new.</p></div>
+        </div></details>
+      <details class="stage"><summary><span class="stage-head"><i class="s-evidence"></i><h2>Evidence</h2><span class="st">done</span><span class="took">30s</span></span></summary></details>
+      <details class="stage"><summary><span class="stage-head"><i class="s-pr"></i><h2>PR</h2><span class="st">done</span><span class="took">12s</span></span></summary></details>
+    </div>
     <div class="folds">
-      <details><summary>Slices <span class="sub" style="font-weight:400">3 of 3 passed</span></summary></details>
       <details><summary>Spec</summary></details>
       <details><summary>Log</summary></details>
       <details><summary>Questions <span class="sub" style="font-weight:400">none asked</span></summary></details>

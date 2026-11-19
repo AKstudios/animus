@@ -1,0 +1,69 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Display job page, running: design reference</title>
+<link rel="stylesheet" href="display.css">
+</head>
+<body>
+<header class="top">
+  <div class="brand"><svg width="18" height="18" viewBox="0 0 18 18" fill="none" stroke-width="1.6" aria-hidden="true"><path d="M3 2c6 4 6 10 12 14M15 2C9 6 9 12 3 16M5 5h8M5 13h8"></path></svg>abstergo</div>
+  <nav class="nav"><a href="overview.html">Overview</a><a class="on" href="jobs.html">Jobs</a><a href="#">People</a></nav>
+  <div class="meta"><span><span class="dot"></span>2 of 4 slots</span><span>14:21</span></div>
+</header>
+
+<div class="wrap job" style="padding-top:28px">
+  <main class="main" style="gap:36px">
+    <div>
+      <div class="crumb"><a href="jobs.html">Jobs</a> / animus / <span class="mono">comments-on-github</span></div>
+      <h1>Start and follow work with /animus comments on GitHub</h1>
+      <div class="heads"><span class="pill p-run">Working</span><span class="sub">ajmal · started 23m ago</span></div>
+      <!-- The Now line: the stage, the agent working and what it did last, redrawn as the job moves. -->
+      <div class="now"><span class="sq live" role="img" aria-label="working"></span><b>Implement</b><span>implementer · slice 2 of 3</span><span class="tool">Edit helix/src/pulls.ts</span></div>
+    </div>
+
+    <section>
+      <div class="sh"><h2>Where the time went</h2></div>
+      <div class="tl" role="img" aria-label="Time per stage">
+        <span class="s-setup" style="flex:1"></span>
+        <span class="s-plan" style="flex:2">plan</span>
+        <span class="s-implement" style="flex:20">implement · now</span>
+      </div>
+    </section>
+
+    <!-- A running job: the current stage open with its sessions, the others folded. Stages not reached say so. -->
+    <div class="stage-list">
+      <details class="stage"><summary><span class="stage-head"><i class="s-setup"></i><h2>Setup</h2><span class="st">done</span><span class="took">20s</span></span></summary></details>
+      <details class="stage"><summary><span class="stage-head"><i class="s-plan"></i><h2>Plan</h2><span class="st">done</span><span class="took">1m</span><span class="sub">1 session</span></span></summary></details>
+      <details class="stage" open><summary><span class="stage-head"><i class="s-implement"></i><h2>Implement</h2><span class="st" style="color:var(--run)">now</span><span class="took">22m</span><span class="sub">2 sessions</span></span></summary>
+        <div class="stage-body">
+          <div class="sess"><span class="sq done"></span><span>implementer <span class="sub">slice 1, medium effort</span></span><span class="bar"><b class="s-implement" style="left:4%;width:38%"></b></span><span class="mono sub">11m</span><span class="mono sub">3 calls !</span></div>
+          <div class="sess"><span class="sq live" role="img" aria-label="working"></span><span>implementer <span class="sub">claude-sonnet-5-5, medium effort</span></span><span class="bar"><b class="s-implement" style="left:46%;width:50%"></b></span><span class="mono sub">1m</span><span class="mono sub">2 calls</span></div>
+          <div class="find"><span class="sev">Fixes from PR comments</span><span class="sub">working on it · delivers criterion 2</span></div>
+        </div></details>
+      <details class="stage"><summary><span class="stage-head"><i class="s-gates"></i><h2>Gates</h2><span class="st">not reached</span></span></summary></details>
+      <details class="stage"><summary><span class="stage-head"><i class="s-review"></i><h2>Review</h2><span class="st">not reached</span></span></summary></details>
+      <details class="stage"><summary><span class="stage-head"><i class="s-evidence"></i><h2>Evidence</h2><span class="st">not reached</span></span></summary></details>
+      <details class="stage"><summary><span class="stage-head"><i class="s-pr"></i><h2>PR</h2><span class="st">not reached</span></span></summary></details>
+    </div>
+    <div class="folds">
+      <details><summary>Spec</summary></details>
+      <details open><summary>Log</summary></details>
+      <details><summary>Questions <span class="sub" style="font-weight:400">none asked</span></summary></details>
+    </div>
+  </main>
+
+  <aside class="side">
+    <div class="box">
+      <h3>Labels</h3>
+      <div class="kvr"><span>size</span><span>medium</span></div>
+      <div class="kvr"><span>difficulty</span><span>routine</span></div>
+      <div class="kvr"><span>type</span><span>feature</span></div>
+    </div>
+  </aside>
+</div>
+
+<nav class="tabbar"><a href="overview.html">Overview</a><a class="on" href="jobs.html">Jobs</a><a href="#">People</a></nav>
+</body>
+</html>

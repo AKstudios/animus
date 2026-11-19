@@ -569,12 +569,19 @@ a job's folder live in the plugin (`plugin/src/assets.ts`,
 `plugin/src/job-folder.ts`), which Helix imports.
 
 A job page shows the job's project, person, state, outcome, pull request,
-cost and times; its spec as submitted; how long it spent in each stage,
-summed over its runs, and its slices when it was cut; the checks of its
-latest gate run, with what a failed one printed; every review round's
-findings; each question it asked with the answer it was given; its latest
-screenshots, for a UI job; and Helix's log of it. The checks, reviews,
-questions and screenshots come from the job's Animus folder, which keeps each gate run as `gates/run-<n>.txt`. While the job is
+cost and times; its spec as submitted; a Now line while it works; then one
+section for each stage (Setup, Plan, Implement, Gates, Review, Evidence, PR)
+with its state (done, now, not reached, or skipped for this kind of job), its
+time, its agent sessions and what it produced: the slices and fix rounds, each
+gate run in turn with what a failed check printed ("run 1 failed → fix round
+1 → run 2 passed") and how often the job caught up with the base, every review
+round's findings and their fates, the screenshots of a UI job, and the pull
+request with its description. Each question it asked is shown with the answer
+it was given, and so is Helix's log of it. Every part folds: the running
+job's current stage is open and the others folded, a finished job's
+acceptance criteria are open, and the browser remembers per job what you
+opened or folded. The gate runs, reviews, description
+and screenshots come from the job's Animus folder, which keeps each gate run as `gates/run-<n>.txt`. While the job is
 queued or running the page reads it again every two seconds and keeps the log
 at its end, unless you have scrolled up in it; once it has ended the log is
 there whole.

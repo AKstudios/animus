@@ -15,12 +15,12 @@ import { listJobs, RESULTS, type JobFilter, type Result } from '../display/job-l
 import type { Display, DisplayJob, JobListPage, JobPage, ListJob, PrState } from '../display/shape.ts';
 import { asset, CSP } from './assets.ts';
 import { afterOf, fixRounds, insightsData, lessonsCiting } from './insights-data.ts';
-import { folderParts, read, shotFile } from './job-folder.ts';
+import { folderParts, forgetTools, liveSessions, read, shotFile } from './job-folder.ts';
 import { logFile } from './local-loop.ts';
 import { newerThan, openLocalQueue, queueFile, type LocalJob } from './local-queue.ts';
 import { readOutcomes, type Outcomes } from './outcomes.ts';
 import { tryGit } from './proc.ts';
-import { alive, animusHome, jobDir, loadProgress, loadState, readRuns, STAGES, type Run } from './log.ts';
+import { alive, animusHome, jobDir, loadProgress, loadState, readRuns, STAGES, toolsLog, type Run } from './log.ts';
 import { loadFactory } from './profiles.ts';
 import { animusVersion } from './version.ts';
 import { personNamer, profilesInfo, runTokens, usageOf } from './usage.ts';
@@ -176,7 +176,10 @@ export function localJobPage(id: string): JobPage | undefined {
   const o = job.pr ? outcomes[job.pr] : undefined;
   const pr: Partial<JobPage> = o ? { pr_state: o.state.toLowerCase() as PrState, pr_opened: o.opened, ...(o.state === 'MERGED' ? { pr_merged: o.closed ?? o.checked } : {}) } : {};
   const lessons = lessonsCiting(id);
-  return { at: new Date().toISOString(), stages: STAGES, job, ...pr, ...profiles(), ...(o ? { after: afterOf(o) } : {}), ...(lessons.length ? { lessons } : {}), ...(spec !== undefined ? { spec } : {}), log: q ? readLog(q.id) : '', ...(folder ? folderParts(jobDir(id), runs.filter((r) => r.job === id)) : {}) };
+  // A job that is not running keeps no log in memory; one with a run record has its sessions there.
+  const sessions = folder && job.state === 'running' && job.progress && !runs.some((r) => r.job === id) ? liveSessions(toolsLog(id), job.progress, Date.now()) : undefined;
+  if (job.state !== 'running') forgetTools(toolsLog(id));
+  return { at: new Date().toISOString(), stages: STAGES, job, ...(sessions?.length ? { sessions } : {}), ...pr, ...profiles(), ...(o ? { after: afterOf(o) } : {}), ...(lessons.length ? { lessons } : {}), ...(spec !== undefined ? { spec } : {}), log: q ? readLog(q.id) : '', ...(folder ? folderParts(jobDir(id), runs.filter((r) => r.job === id)) : {}) };
 }
 
 /** What every label means, for the job page; nothing when the profiles do not read. */

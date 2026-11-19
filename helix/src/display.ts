@@ -7,7 +7,7 @@ import { hostname } from 'node:os';
 import { join } from 'node:path';
 import { listJobs, type JobFilter } from '../../plugin/display/job-list.ts';
 import { PERSON_JOBS, type InsightsPage, type Display, type DisplayClosed, type DisplayPr, type JobListPage, type ListJob, type DisplayJob, type DisplayRepo, type JobPage, type PeoplePage, type PersonPage, type PersonRow } from '../../plugin/display/shape.ts';
-import { folderParts, read, shotFile } from '../../plugin/src/job-folder.ts';
+import { folderParts, forgetTools, liveSessions, read, shotFile } from '../../plugin/src/job-folder.ts';
 import { afterOf, fixRounds, insightsData, lessonsCiting } from '../../plugin/src/insights-data.ts';
 import { animusHome, readRuns, STAGES } from '../../plugin/src/log.ts';
 import { readOutcomes } from '../../plugin/src/outcomes.ts';
@@ -146,7 +146,12 @@ export function jobPage(opts: { store: Store; supervisor: Supervisor }, id: numb
   let o;
   try { o = job.pr ? readOutcomes(join(home, 'outcomes.json'))[job.pr] : undefined; } catch { /* unreadable: no PR is known */ }
   const lessons = lessonsCiting(job.animus_job);
-  return Object.assign(page, folderParts(dir, runs, job.answer), o ? { after: afterOf(o) } : {}, lessons.length ? { lessons } : {});
+  // A first attempt has no run record yet: its sessions come from the tool-call log and progress, as in the local display.
+  const tools = join(dir, 'tools.jsonl');
+  const progress = page.job.progress;
+  const sessions = job.state === 'running' && progress && !runs.length ? liveSessions(tools, progress, Date.now()) : [];
+  if (job.state !== 'running') forgetTools(tools);
+  return Object.assign(page, sessions.length ? { sessions } : {}, folderParts(dir, runs, job.answer), o ? { after: afterOf(o) } : {}, lessons.length ? { lessons } : {});
 }
 
 /** The job's Animus folder. Its Animus id comes from what the job printed: only a plain name is taken as a folder. */

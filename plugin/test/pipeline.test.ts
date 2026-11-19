@@ -107,12 +107,14 @@ test('a running job says in its folder where it is: the stage, and who is workin
   const seen: string[] = [];
   const look = (step: Step): Step => (req) => {
     const p = loadProgress(jobOf(req.cwd)!)!;
-    seen.push(`${p.stage}: ${p.who}`);
+    seen.push(`${p.stage}: ${p.who} [${p.model}, ${p.effort}]`);
     return step(req);
   };
   const { agent } = fakeAgent([look(say('nearly')), look(say('done')), look(() => clean())]);
   const run = await runJob({ repo, specFile: writeSpec(SMALL) }, deps(agent));
-  assert.deepEqual(seen, ['implement: implementer · standard tier', 'implement: implementer · deep tier · gate fix 1', 'review: reviewer · fast tier']);
+  assert.deepEqual(seen, ['implement: implementer · standard tier [sonnet, medium]', 'implement: implementer · deep tier · gate fix 1 [opus, medium]', 'review: reviewer · fast tier [haiku, medium]']);
+  // Each session records when it started.
+  assert.ok(run.agents.every((a) => Date.parse(a.started!) <= Date.parse(run.ended)));
   assert.deepEqual([loadProgress(run.job)!.stage, loadProgress(run.job)!.who], ['pr', 'pr · writing the description']);
 });
 

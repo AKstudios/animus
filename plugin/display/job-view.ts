@@ -3,7 +3,7 @@
 // No DOM here, so the wording is tested without a browser
 // (helix/test/job-page.test.ts), as view.ts is.
 import { jobPage, personPage } from './pages.ts';
-import type { DisplayClosed, JobPage, ProfilesInfo, TokenCount } from './shape.ts';
+import type { DisplayClosed, DisplayJob, JobPage, LiveSession, ProfilesInfo, TokenCount } from './shape.ts';
 import { clock, recent, span, tokens, type Tone } from './view.ts';
 
 export type JobPageView = {
@@ -25,7 +25,9 @@ export type JobPageView = {
   /** The Agents panel: cost by role and tier, biggest first, each with its share of the cost as a bar and its sessions, tool calls and tokens. */
   agents: { name: string; cost: string; pct: number; calls: string }[];
   /** Where the time went, opened: each stage with what it took and used, then each agent session placed on the same bar. */
-  timeline: { stages: TimelineStage[]; sessions: TimelineSession[] };
+  timeline: { stages: TimelineStage[]; sessions: TimelineSession[]; /** Said when a session has no start time (a job recorded before they were kept) and the sessions are laid end to end. */ note?: string };
+  /** While the job runs: where it is now, as one line: the stage, the agent, its model and effort, the time on the stage and the tool in use. */
+  now?: string;
   /** The Labels panel's explainer: what every size, difficulty and type runs, the job's own marked; left out when the page was sent no profiles. */
   explain?: Explainer;
   /** "What this run taught": the lessons citing the job, each with its state; the panel is left out when none does. */
@@ -60,11 +62,36 @@ export type JobPageView = {
   log: string;
   /** Said in the log's place when the job printed nothing to it. */
   noLog: string;
+  /** One section per stage, in order. */
+  stageSections: StageSection[];
+  /** Whether each foldable part starts open (`numbers`, `criteria`, `stage-<name>`, `spec`, `log`, `tools`, `questions`), before the person's own choice. */
+  open: Record<string, boolean>;
   /** While the job may still write to it, the page reads its log again every two seconds and keeps to its end. */
   follow: boolean;
 };
 
-export type TimelineStage = { name: string; took: string; share: string; sessions: number; tokens: string; cost: string };
+/** One gate run: its checks and criteria as the run printed them; `outcome` is `run 1 failed`. */
+export type GateRunView = { outcome: string; ok: boolean; checks: { name: string; command: string; tag: string; tone: Tone; detail: string; output?: string }[] };
+
+/** One stage's section: its state, time, agent sessions and what it produced; only the parts the stage has are set. */
+export type StageSection = {
+  name: string;
+  state: 'done' | 'now' | 'next' | 'skipped';
+  /** The state in words: `done`, `now`, `not reached`, `skipped for a fix`. */
+  stateText: string;
+  took: string;
+  sessions: TimelineSession[];
+  slices?: JobPageView['slices'];
+  /** Implement: the sessions that answered a failed gate or a review, as `gate-fix-1`. */
+  fixRounds?: string[];
+  /** Gates: `run 1 failed → fix round 1 → run 2 passed`, each run, and the catch-up with the base. */
+  gates?: { line: string; runs: GateRunView[]; catchUp: string };
+  reviews?: JobPageView['reviews'];
+  shots?: JobPageView['shots'];
+  pr?: { href?: string; text: string; body: string };
+};
+
+export type TimelineStage ={ name: string; took: string; share: string; sessions: number; tokens: string; cost: string };
 export type TimelineSession = {
   /** role · model */
   name: string; stage: string; tier: string; effort: string; ok: boolean;
@@ -73,6 +100,13 @@ export type TimelineSession = {
   took: string; cost: string; tokens: string;
   /** in, out, cache read and written, turns and tool calls, as one line. */
   detail: string;
+  role: string; model: string;
+  /** The session's own name in the run, such as `gate-fix-1`. */
+  step: string;
+  /** Tool calls, and whether any failed. */
+  calls: number; errors: number;
+  /** The session is working now, with the tool it last used. */
+  live: boolean; tool?: string; target?: string;
 };
 
 /** One label's row in the explainer: its name, what it runs, and whether this job has it. */
@@ -141,7 +175,7 @@ export function when(iso: string, now = Date.now()): string {
 }
 
 /** Each stage's line in the opened time bar, and each agent session placed inside its stage's part of the bar, in the order it ran. */
-function timelineOf(bar: JobPageView['bar'], agents: NonNullable<JobPage['run']>['agents'], ms: Record<string, number>): JobPageView['timeline'] {
+function timelineOf(bar: JobPageView['bar'], agents: NonNullable<JobPage['run']>['agents'], ms: Record<string, number>, live: LiveSession[], now: number, job: DisplayJob): JobPageView['timeline'] {
   const byStage = Map.groupBy(agents, (a) => a.stage);
   const total = Object.values(ms).reduce((a, b) => a + b, 0);
   const stages = bar.map((b) => {
@@ -150,6 +184,25 @@ function timelineOf(bar: JobPageView['bar'], agents: NonNullable<JobPage['run']>
     const cost = as.reduce((n, a) => n + a.cost_usd, 0);
     return { name: b.name, took: b.took, share: `${Math.round(total ? ((ms[b.name] ?? 0) / total) * 100 : 0)}%`, sessions: as.length, tokens: used ? tokens(used) : '–', cost: as.length ? `$${cost.toFixed(2)}` : '–' };
   });
+  // With every session's start time, sessions sit on the job's own span; without, they lie end to end inside their stage's part.
+  if (agents.every((a) => a.started) && (agents.length || live.length)) {
+    const starts = [...agents.map((a) => ({ at: Date.parse(a.started!), ms: a.ms })), ...live.map((s) => ({ at: Date.parse(s.started), ms: s.ms }))];
+    const t0 = Math.min(job.started ? Date.parse(job.started) : Infinity, ...starts.map((s) => s.at));
+    const t1 = Math.max(job.ended ? Date.parse(job.ended) : job.state === 'running' ? now : 0, ...starts.map((s) => s.at + s.ms));
+    const whole = Math.max(t1 - t0, 1);
+    const place = (start: string, took: number) => {
+      const at = Math.round(((Date.parse(start) - t0) / whole) * 1000) / 10;
+      return { at, pct: Math.min(Math.round((took / whole) * 1000) / 10, 100 - at) };
+    };
+    const sessions = [
+      ...agents.map((a) => ({ ...sessionOf(a), ...place(a.started!, a.ms) })),
+      ...live.map((s) => ({
+        name: `${s.role} · ${s.model || '–'}`, role: s.role, model: s.model, stage: stageOf(s.stage, s.role), step: s.stage, tier: '', effort: s.effort, ok: true, ...place(s.started, s.ms),
+        took: span(s.ms), cost: '–', tokens: '–', detail: plural(s.calls, 'tool call'), calls: s.calls, errors: s.errors, live: s.live, ...(s.tool ? { tool: s.tool, target: s.target ?? '' } : {}),
+      })),
+    ];
+    return { stages, sessions };
+  }
   const sessions = bar.flatMap((b) => {
     const as = byStage.get(b.name) ?? [];
     const stageMs = ms[b.name] ?? 0;
@@ -158,17 +211,36 @@ function timelineOf(bar: JobPageView['bar'], agents: NonNullable<JobPage['run']>
     let from = b.at;
     return as.map((a) => {
       const pct = Math.round((a.ms / fit) * b.pct * 10) / 10;
-      const part = {
-        name: `${a.role} · ${a.model || a.tier}`, stage: a.stage, tier: a.tier, effort: a.effort, ok: a.ok, at: from, pct,
-        took: span(a.ms), cost: `$${a.cost_usd.toFixed(2)}`, tokens: tokens(allTokens(a.tokens)),
-        detail: [`in ${tokens(a.tokens.input)}`, `out ${tokens(a.tokens.output)}`, `cache read ${tokens(a.tokens.cache_read)}`, `cache written ${tokens(a.tokens.cache_write)}`, plural(a.turns, 'turn'), plural(a.calls, 'tool call')].join(' · '),
-      };
+      const part = { ...sessionOf(a), at: from, pct };
       from += pct;
       return part;
     });
   });
-  return { stages, sessions };
+  return { stages, sessions, ...(sessions.length ? { note: 'times are durations only' } : {}) };
 }
+
+/** The pipeline stage a session belongs to: the planner plans, the implementer implements (slices, fixes, catch-up), the rest review. */
+export const stageOf = (stage: string, role: string) => (role === 'planner' ? 'plan' : role === 'implementer' ? 'implement' : /^(setup|plan|implement|gates|review|evidence|pr)/.exec(stage)?.[0] ?? 'review');
+
+const DOING: Record<string, string> = { setup: 'Setting up', plan: 'Planning', implement: 'Implementing', gates: 'Running the gates', review: 'Reviewing', evidence: 'Gathering evidence', pr: 'Opening the PR' };
+
+/** The Now line: `Implementing slice 2 of 3 · implementer · opus, high effort · 4m · now: Edit plugin/display/app.ts`; the agent and tool only where the job has them. */
+function nowOf(pr: NonNullable<DisplayJob['progress']>, live: LiveSession | undefined, now: number): string {
+  const slice = /slice \d+ of \d+/.exec(pr.who)?.[0];
+  return [
+    `${DOING[pr.stage] ?? pr.stage}${slice ? ` ${slice}` : ''}`,
+    ...(pr.model ? [pr.who.split(' · ')[0]!, `${pr.model}${pr.effort ? `, ${pr.effort} effort` : ''}`] : []),
+    span(now - Date.parse(pr.at)),
+    ...(live?.tool ? [`now: ${live.tool}${live.target ? ` ${live.target}` : ''}`] : []),
+  ].join(' · ');
+}
+
+/** A finished agent session as a row, without where it sits on the bar. */
+const sessionOf = (a: NonNullable<JobPage['run']>['agents'][number]) => ({
+  name: `${a.role} · ${a.model || a.tier}`, role: a.role, model: a.model || a.tier, stage: stageOf(a.stage, a.role), step: a.stage, tier: a.tier, effort: a.effort, ok: a.ok,
+  took: span(a.ms), cost: `$${a.cost_usd.toFixed(2)}`, tokens: tokens(allTokens(a.tokens)), calls: a.calls, errors: a.errors, live: false,
+  detail: [`in ${tokens(a.tokens.input)}`, `out ${tokens(a.tokens.output)}`, `cache read ${tokens(a.tokens.cache_read)}`, `cache written ${tokens(a.tokens.cache_write)}`, plural(a.turns, 'turn'), plural(a.calls, 'tool call')].join(' · '),
+});
 
 /** What every label runs, from the factory's profiles, with this job's labels and the agents it ran marked. */
 function explainerOf(p: ProfilesInfo, labels: { k: string; v: string }[], agents: NonNullable<JobPage['run']>['agents']): Explainer {
@@ -270,8 +342,59 @@ export function jobView(p: JobPage, now: number, local = false, closed?: Display
     from += pct;
     return [part];
   });
+  const nowLine = j.state === 'running' && j.progress ? nowOf(j.progress, p.sessions?.find((s) => s.live), now) : undefined;
   const state = p.pr_state ?? (closed ? (closed.merged ? 'merged' : 'closed') : undefined);
   const mergedAt = p.pr_merged ?? (closed?.merged ? closed.at : undefined);
+  const timeline = timelineOf(bar, p.run?.agents ?? [], p.ms ?? {}, p.run ? [] : p.sessions ?? [], now, j);
+  const sliceRows = (p.slices ?? []).map((s, i) => ({ ...s, state: (s.done ? 'done' : j.state === 'running' && i === done ? 'now' : j.state === 'running' || j.state === 'queued' ? 'next' : 'left') as 'done' | 'now' | 'next' | 'left' }));
+  const reviewRows = (p.reviews ?? []).map((r, i) => ({
+    title: `Review ${i + 1}`, summary: r.summary,
+    findings: r.findings.map((f, n) => ({
+      tag: f.severity.toUpperCase(), tone: SEVERITY[f.severity] ?? 'mute', fate: fateOf(p.run?.findings.filter((l) => l.round === i + 1)[n]?.fate, i + 2),
+      where: f.file ? `${f.file}${f.line ? `:${f.line}` : ''}` : '', problem: f.problem, fix: f.fix ?? '',
+    })),
+  }));
+  const shotRows = (p.shots?.files ?? []).map((f) => ({
+    name: (f.split('/').at(-1) ?? f).replace(/\.[^.]+$/, ''),
+    src: `/jobs/${encodeURIComponent(j.id)}/shots/${f.split('/').map(encodeURIComponent).join('/')}`,
+  }));
+  const asRun = (list: typeof checks, n: number): GateRunView => {
+    const ok = !list.some((c) => c.tone === 'fail');
+    return { outcome: `run ${n} ${ok ? 'passed' : 'failed'}`, ok, checks: list };
+  };
+  const runList = p.gate_list?.length ? p.gate_list.map((l) => l.map((c) => { const [tag, tone] = CHECK[c.status]!; return { name: c.name, command: c.command, tag, tone, detail: c.detail, ...(c.output !== undefined ? { output: c.output } : {}) }; })) : checks.length ? [checks] : [];
+  const gateRuns = runList.map((l, i) => asRun(l, i + 1));
+  const caught = (p.log.match(/catch-up: merged /g) ?? []).length;
+  const running = j.state === 'running';
+  const at = p.stages.indexOf(j.progress?.stage ?? '');
+  const lastMs = p.stages.reduce((n, s, i) => ((p.ms?.[s] ?? 0) > 0 ? i : n), -1);
+  const stageSections: StageSection[] = p.stages.map((name, i) => {
+    const sessions = timeline.sessions.filter((s) => s.stage === name);
+    const ms = p.ms?.[name] ?? 0;
+    const own = running && at >= 0 ? (i < at ? 'done' : i === at ? 'now' : 'next') : ms > 0 || sessions.length ? 'done' : lastMs > i ? 'skipped' : 'next';
+    const state = own;
+    const kind = name === 'plan' && j.fix_of !== undefined ? ' for a fix' : ' for this kind of job';
+    const stateText = state === 'skipped' ? `skipped${kind}` : state === 'next' ? 'not reached' : state;
+    const took = ms > 0 ? span(ms) : state === 'now' && j.progress ? span(now - Date.parse(j.progress.at)) : '–';
+    const part: StageSection = { name, state, stateText, took, sessions };
+    if (name === 'plan' && sliceRows.length) part.slices = sliceRows;
+    if (name === 'implement') {
+      if (sliceRows.length) part.slices = sliceRows;
+      part.fixRounds = sessions.filter((s) => /^(gate-fix|review-fix)/.test(s.step)).map((s) => s.step);
+    }
+    if (name === 'gates' && gateRuns.length) {
+      const line = gateRuns.map((r, n) => (n < gateRuns.length - 1 ? `${r.outcome} → fix round ${n + 1}` : r.outcome)).join(' → ');
+      part.gates = { line, runs: gateRuns, catchUp: caught ? `caught up with the base ${caught === 1 ? 'once' : `${caught} times`}` : 'the base did not move' };
+    }
+    if (name === 'review' && reviewRows.length) part.reviews = reviewRows;
+    if (name === 'evidence' && shotRows.length) part.shots = shotRows;
+    if (name === 'pr' && (j.pr || p.pr_body)) part.pr = { ...(j.pr && /^https?:\/\//.test(j.pr) ? { href: j.pr } : {}), text: j.pr ? (pr ? `#${pr}` : j.pr) : 'No pull request', body: p.pr_body ?? '' };
+    return part;
+  });
+  const open: Record<string, boolean> = {
+    numbers: true, criteria: !running, spec: false, log: running || j.state === 'queued' || j.state === 'waiting', tools: false, questions: false,
+    ...Object.fromEntries(stageSections.map((s) => [`stage-${s.name}`, s.state === 'now'])),
+  };
   const found = (p.reviews ?? []).reduce((n, r) => n + r.findings.length, 0);
   const failed = checks.filter((c) => c.tone === 'fail').length;
   return {
@@ -292,7 +415,8 @@ export function jobView(p: JobPage, now: number, local = false, closed?: Display
       rows: [{ k: 'branch', v: `animus/${j.animus_job ?? j.id}` }, ...(p.pr_opened ? [{ k: 'opened', v: when(p.pr_opened, now) }] : []), ...(mergedAt ? [{ k: 'merged', v: when(mergedAt, now) }] : []), ...afterRows(p.after, state === 'merged')],
     } } : {}),
     agents: agentsOf(p.run?.agents ?? []),
-    timeline: timelineOf(bar, p.run?.agents ?? [], p.ms ?? {}),
+    timeline,
+    ...(nowLine ? { now: nowLine } : {}),
     ...(p.profiles ? { explain: explainerOf(p.profiles, labels, p.run?.agents ?? []) } : {}),
     taught: (p.lessons ?? []).map((l) => ({ text: l.text, state: l.status === 'proposed' ? `Proposed · animus lessons accept ${l.id}` : `Kept · used ${l.uses}×` })),
     flaky: [...Map.groupBy((p.run?.gates ?? []).flatMap((g) => g.flaky), (n) => n)].map(([name, at]) => `${name} was flaky ${at.length === 1 ? 'once' : at.length === 2 ? 'twice' : `${at.length} times`}`),
@@ -309,20 +433,13 @@ export function jobView(p: JobPage, now: number, local = false, closed?: Display
     spec: p.spec ?? '',
     stages: p.stages.map((name) => ({ name, took: p.ms?.[name] !== undefined ? span(p.ms[name]) : '', on: j.state === 'running' && j.progress?.stage === name })),
     // The slice being worked on is the first one not passed, while the job runs.
-    slices: (p.slices ?? []).map((s, i) => ({ ...s, state: s.done ? 'done' : j.state === 'running' && i === done ? 'now' : j.state === 'running' || j.state === 'queued' ? 'next' : 'left' })),
+    slices: sliceRows,
     checks,
-    reviews: (p.reviews ?? []).map((r, i) => ({
-      title: `Review ${i + 1}`, summary: r.summary,
-      findings: r.findings.map((f, n) => ({
-        tag: f.severity.toUpperCase(), tone: SEVERITY[f.severity] ?? 'mute', fate: fateOf(p.run?.findings.filter((l) => l.round === i + 1)[n]?.fate, i + 2),
-        where: f.file ? `${f.file}${f.line ? `:${f.line}` : ''}` : '', problem: f.problem, fix: f.fix ?? '',
-      })),
-    })),
+    reviews: reviewRows,
     questions: (p.questions ?? []).map((q) => ({ question: q.question, answer: q.answer ?? 'Not answered yet.', answered: q.answer !== undefined })),
-    shots: (p.shots?.files ?? []).map((f) => ({
-      name: (f.split('/').at(-1) ?? f).replace(/\.[^.]+$/, ''),
-      src: `/jobs/${encodeURIComponent(j.id)}/shots/${f.split('/').map(encodeURIComponent).join('/')}`,
-    })),
+    shots: shotRows,
+    stageSections,
+    open,
     log: p.log,
     noLog: local ? 'It has printed nothing yet, or it ran in a terminal and kept no log.' : 'It has printed nothing yet.',
     follow: j.state === 'running' || j.state === 'queued' || j.state === 'waiting',
