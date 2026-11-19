@@ -144,24 +144,29 @@ export function draftComment(spec: string, summary?: string): string {
   ].join('\n');
 }
 
-/** What a job submitted from an issue says there when it ends; nothing for any other step, which the issue is not told. */
-function milestone(job: HelixJob): string | undefined {
+/**
+ * What a job submitted from an issue, or a fix from a pull request, says there when it ends; nothing for any other
+ * step, which neither is told. A fix that pushed says what it changed, its cost and its page at url.
+ */
+function milestone(job: HelixJob, url?: string): string | undefined {
   if (job.state !== 'ended') return undefined;
   if (job.outcome === 'needs-input') return `Job ${job.id} needs input: ${job.question}\nReply with a comment: \`/animus answer <your answer>\``;
+  if (job.fix_of && job.outcome === 'pr') return `Job ${job.id} pushed to this pull request: ${job.ask}\nIt cost $${(job.cost_usd ?? 0).toFixed(2)}.${url ? ` Its page: ${url.replace(/\/+$/, '')}/jobs/${job.id}` : ''}`;
   if (job.outcome === 'pr' && job.pr) return `Job ${job.id} opened a pull request: ${job.pr}`;
-  // A job that failed after its fix rounds still publishes its report as a draft PR (outcome draft-pr): that is a failure, with the link.
-  return `Job ${job.id} ${job.outcome === 'refused' ? 'was refused' : 'failed'}: ${job.reason ?? job.outcome}${job.pr ? `. The failure report: ${job.pr}` : ''}`;
+  // A job that failed after its fix rounds still publishes its report as a draft PR (outcome draft-pr): that is a failure, with the link. A fix's is the pull request it is on.
+  return `Job ${job.id} ${job.outcome === 'refused' ? 'was refused' : 'failed'}: ${job.reason ?? job.outcome}${job.pr && !job.fix_of ? `. The failure report: ${job.pr}` : ''}`;
 }
 
 /**
- * The supervisor's notify for the issue a job was submitted from: Animus
- * comments there, as the job's person, when the job opens its pull request,
- * fails or needs input. Comments go out one at a time, in the order they came.
+ * The supervisor's notify for the issue a job was submitted from, or the pull
+ * request a fix was asked on: Animus comments there, as the job's person, when
+ * the job opens its pull request (a fix: pushes), fails or needs input.
+ * Comments go out one at a time, in the order they came.
  */
-export function githubNotifier(opts: { store: Store; config: Pick<Config, 'github'>; github?: GitHubUrls; say?: (line: string) => void }): (job: HelixJob) => void {
+export function githubNotifier(opts: { store: Store; config: Pick<Config, 'github' | 'url'>; github?: GitHubUrls; say?: (line: string) => void }): (job: HelixJob) => void {
   let last = Promise.resolve();
   return (job) => {
-    const text = job.github && milestone(job);
+    const text = job.github && milestone(job, opts.config.url);
     if (!job.github || !text) return;
     const { repo, issue } = job.github;
     last = last.then(() => commentAs(opts.store, opts.config, opts.github ?? GITHUB, job.person, repo, issue, text)).then(() => {})
@@ -200,16 +205,16 @@ export function commentWatcher(opts: {
     return undefined;
   }
 
-  /** The latest job submitted from the issue that waits for an answer, or for `cancel` is queued or running. */
+  /** The latest job submitted from the issue (or fix asked on the pull request) that waits for an answer, or for `cancel` is queued or running. */
   const jobOn = (repo: string, number: number, word: 'answer' | 'cancel') => (word === 'answer' ? store.inState('ended').filter((j) => j.outcome === 'needs-input') : [...store.inState('queued'), ...store.inState('running')])
     .filter((j) => j.github?.repo.toLowerCase() === repo.toLowerCase() && j.github.issue === number)
     .sort((a, b) => b.id - a.id)[0];
 
-  /** `/animus answer <text>` or `/animus cancel` on an issue, for its job: the person's, or anyone's for the owner; what to tell them on the issue. */
-  async function jobCommand(person: string, repo: string, number: number, word: 'answer' | 'cancel', text: string): Promise<string> {
+  /** `/animus answer <text>` or `/animus cancel` on an issue or pull request, for its job or fix: the person's, or anyone's for the owner; what to tell them there. */
+  async function jobCommand(person: string, repo: string, number: number, word: 'answer' | 'cancel', text: string, where: string): Promise<string> {
     if (word === 'answer' && !text) return 'Say the answer after `/animus answer`.';
     const job = jobOn(repo, number, word);
-    if (!job) return `No job from this issue is ${word === 'answer' ? 'waiting for an answer' : 'queued or running'}.`;
+    if (!job) return `No job from this ${where} is ${word === 'answer' ? 'waiting for an answer' : 'queued or running'}.`;
     if (job.person !== person && !isOwner(config, person)) return `Only ${job.person} or the owner may ${word} job ${job.id}.`;
     try {
       // The owner acts as the job's person, as the owner's Cancel does in Slack.
@@ -258,15 +263,15 @@ export function commentWatcher(opts: {
     const reply = (text: string) => commentAs(store, config, urls, person, repo, number, text);
     if (now() - Date.parse(c.created_at) > TOO_OLD_MS) { await reply('This `/animus` comment is too old to act on: Helix saw it more than a day after it was written. Comment again if you still want it.'); return; }
     const text = body.slice('/animus'.length).trim();
+    const word = text.split(/\s/)[0]!.toLowerCase();
+    if (word === 'answer' || word === 'cancel') { await reply(await jobCommand(person, repo, number, word, text.slice(word.length).trim(), m[1] === 'pull' ? 'pull request' : 'issue')); return; }
     if (m[1] === 'pull') {
       const refused = await fixCommand(person, project, repo, number, text);
       if (refused) await reply(refused); else await seen(person, repo, c.id);
       return;
     }
-    const word = text.split(/\s/)[0]!.toLowerCase();
     if (word === 'discard') { await reply(await drafts.githubDiscard(person, { repo, number })); return; }
     if (word === 'submit') { await reply(await drafts.githubSubmit(person, { repo, number }, jobs)); return; }
-    if (word === 'answer' || word === 'cancel') { await reply(await jobCommand(person, repo, number, word, text.slice(word.length).trim())); return; }
     if (WORDS.includes(word)) return;
     await seen(person, repo, c.id);
     const said = text ? await drafts.github(person, { project: project.name, repo, number, url: `https://github.com/${repo}/issues/${number}` }, text) : USAGE;

@@ -7,6 +7,7 @@ import { hashToken, type Config } from '../src/config.ts';
 import { draftRunner, type DraftLaunch } from '../src/drafts.ts';
 import { checkComments, commentWatcher, githubNotifier, MARKER } from '../src/github-comments.ts';
 import { deviceCode, keepTokens, pollDevice } from '../src/github-app.ts';
+import { slackNotifier } from '../src/slack.ts';
 import { openStore } from '../src/store.ts';
 import { animusArgs, pauseFile, supervise, type Launch } from '../src/supervisor.ts';
 import { fakeGitHub, type FakeGitHub } from './fake-github.ts';
@@ -25,13 +26,15 @@ fs.writeFileSync(folder + '/draft.md', '# Draft\\n\\n' + read(folder + '/message
 if (read(folder + '/message.md').includes('summarise')) fs.writeFileSync(folder + '/summary.md', 'gates: test\\n');
 `;
 
-// Stands in for `animus run` and `animus resume`: the job's title says how it ends.
+// Stands in for `animus run`, `animus fix` and `animus resume`: the job's title (a fix's, past its `fix: `) says how it ends.
 const JOB = `
-const [title, answer] = process.argv.slice(1);
+const [full, answer] = process.argv.slice(1);
+const title = full.replace(/^fix: /, '');
 if (title.startsWith('ask') && !answer) console.log(JSON.stringify({ outcome: 'needs-input', question: 'which provider?' }));
 else if (title.startsWith('fail')) console.log(JSON.stringify({ outcome: 'failed', reason: 'the checks never passed' }));
+else if (title.startsWith('refuse')) console.log(JSON.stringify({ outcome: 'refused', reason: 'the pull request has no spec' }));
 else if (title.startsWith('draftpr')) console.log(JSON.stringify({ outcome: 'draft-pr', pr: 'https://github.com/o/app/pull/10', reason: 'the checks never passed' }));
-else console.log(JSON.stringify({ outcome: 'pr', pr: 'https://github.com/o/app/pull/9' }));
+else console.log(JSON.stringify({ outcome: 'pr', pr: 'https://github.com/o/app/pull/9', cost_usd: 1.25 }));
 `;
 
 const T0 = Date.parse('2030-01-01T10:00:00Z');
@@ -78,7 +81,9 @@ async function helix(opts: { slack?: boolean; owner?: string; run?: boolean } = 
   const lines: string[] = [];
   const closes: (string | undefined)[] = [];
   const launchJob: Launch = (job, _dir, env) => { closes.push(env.ANIMUS_CLOSES); return { command: process.execPath, args: ['-e', JOB, job.title, job.answer ?? ''] }; };
-  const jobs = supervise({ store, config, home, launch: launchJob, notify: githubNotifier({ store, config, github, say: (l) => lines.push(l) }) });
+  const toGitHub = githubNotifier({ store, config, github, say: (l) => lines.push(l) });
+  const toSlack = slackNotifier(slack.transport, store, (l) => lines.push(l), config);
+  const jobs = supervise({ store, config, home, launch: launchJob, notify: (job) => { toGitHub(job); if (opts.slack) toSlack(job); } });
   const watcher = commentWatcher({ store, config, drafts, jobs, github, now: () => clock, say: (l) => lines.push(l) });
   await watcher.poll();
   return { github, store, config, lines, drafts, jobs, closes, slack: slack.sent, home, poll: () => watcher.poll(), clock: { at: (s: number) => { clock = T0 + s * 1000; } } };
@@ -175,9 +180,9 @@ test('posts the revised draft as a new comment when the author has an open draft
 });
 
 const PULL_8 = 'https://github.com/o/app/pull/8';
-/** ana's job 1, which opened pull request 8 and last pushed to it at 10 seconds. */
-const opened8 = (h: Awaited<ReturnType<typeof helix>>) =>
-  h.store.add({ state: 'ended', person: 'ana', repo: 'app', spec: '', title: 'Fix login', draft: false, outcome: 'pr', pr: PULL_8, submitted: at(-HOUR), ended: at(10) });
+/** ana's job 1, which opened pull request 8 and last pushed to it at 10 seconds; its title, which a fix of it takes, says how that fix ends (see JOB). */
+const opened8 = (h: Awaited<ReturnType<typeof helix>>, title = 'Fix login') =>
+  h.store.add({ state: 'ended', person: 'ana', repo: 'app', spec: '', title, draft: false, outcome: 'pr', pr: PULL_8, submitted: at(-HOUR), ended: at(10) });
 const fixes = (h: Awaited<ReturnType<typeof helix>>) => h.store.list().filter((j) => j.fix_of);
 
 // Protects: fix criterion 1. Fails when: /animus fix gets no 👀, is not queued as a fix of the job's pull request with the text as its ask, keeps no pull request to report on, or its references miss a review or inline comment since the last push or hold one from before it.
@@ -234,6 +239,71 @@ for (const c of REFUSED) {
     assert.equal(fixes(h).length, before);
   });
 }
+
+/** A Helix that runs jobs, where ana's /animus fix on pull request 8 (opened by a job titled title) has been read. */
+async function fixing(title: string, opts: Parameters<typeof helix>[0] = {}) {
+  const h = await helix({ run: true, ...opts });
+  opened8(h, title);
+  h.github.addComment('o/app', 8, 'ana-gh', '/animus fix make the button blue', at(30));
+  await h.poll();
+  return h;
+}
+
+// Protects: fix criterion 3. Fails when: a fix that pushed is not reported on its pull request with what it changed, its cost and its page, a stage before it is, or the person's Slack DM stops.
+test('comments on the pull request what the fix changed, its cost and its page when it pushed, and still DMs the person', async () => {
+  const h = await fixing('Fix login', { slack: true });
+  await until('the pushed comment', () => h.github.posted.length === 1 && h.store.get(2)?.state === 'ended');
+  await new Promise((r) => setTimeout(r, 100));
+
+  assert.deepEqual(bodies(h), ['Job 2 pushed to this pull request: make the button blue\nIt cost $1.25. Its page: http://helix.test/jobs/2']);
+  assert.deepEqual(h.github.posted.map((p) => [p.number, p.login]), [[8, 'ana-gh']]);
+  assert.ok(h.slack.some((s) => s.method === 'dm' && s.user === 'U1'));
+});
+
+const ENDED = [
+  { why: 'failed', title: 'fail login', body: 'Job 2 failed: the checks never passed' },
+  { why: 'was refused', title: 'refuse login', body: 'Job 2 was refused: the pull request has no spec' },
+];
+
+for (const c of ENDED) {
+  // Protects: fix criterion 3. Fails when: a fix that ended without pushing leaves its pull request silent or without the reason.
+  test(`comments on the pull request with the reason when the fix ${c.why}`, async () => {
+    const h = await fixing(c.title);
+    await until('the comment', () => h.github.posted.length === 1);
+
+    assert.deepEqual(bodies(h), [c.body]);
+    assert.equal(h.github.posted[0]!.number, 8);
+  });
+}
+
+// Protects: fix criterion 3. Fails when: a fix's question is not posted on its pull request, or /animus answer there does not resume it with the answer.
+test('comments the fix\'s question on the pull request, and /animus answer there resumes it', async () => {
+  const h = await fixing('ask login');
+  await until('the question', () => h.github.posted.length === 1);
+  assert.equal(bodies(h)[0], 'Job 2 needs input: which provider?\nReply with a comment: `/animus answer <your answer>`');
+
+  h.github.addComment('o/app', 8, 'ana-gh', '/animus answer GitHub, please', at(150));
+  h.clock.at(180);
+  await h.poll();
+  await until('the pushed comment', () => h.github.posted.length === 3);
+
+  assert.equal(bodies(h)[1], 'Got your answer: job 2 resumes.');
+  // The fake job pushes only when it was given an answer.
+  assert.match(bodies(h)[2]!, /^Job 2 pushed to this pull request: make the button blue\n/);
+});
+
+// Protects: fix criterion 3. Fails when: /animus cancel on the pull request leaves its fix queued, or says nothing.
+test('cancels the pull request\'s fix on /animus cancel there', async () => {
+  const h = await helix();
+  opened8(h);
+  h.github.addComment('o/app', 8, 'ana-gh', '/animus fix make the button blue', at(30));
+  h.github.addComment('o/app', 8, 'ana-gh', '/animus cancel', at(31));
+
+  await h.poll();
+
+  assert.equal(h.store.get(2)!.state, 'cancelled');
+  assert.deepEqual(bodies(h), ['Job 2 was cancelled.']);
+});
 
 // Protects: criterion 5. Fails when: a person with a Slack link is not DMed the draft's link, for a draft or its revision, or one without a link is.
 test('DMs a person with a Slack link the link to a draft and to its revision', async () => {
