@@ -144,6 +144,8 @@ repos:
 
 - What you say in the conversation ("run it on Helix") wins over `run:`, and
   a repository's entry wins over the top.
+- `run:` may also be a mapping, with `where: local | helix` and the keys the
+  loop on this machine starts jobs by ([below](#the-queue-on-this-machine)).
 - Your skills reach only the roles you name: the implementer and planner by
   default, the reviewer only when named, since it judges the work.
 - Their text is copied into the job when it starts, or sent with the spec to
@@ -153,6 +155,35 @@ repos:
   never depends on one person's file.
 
 `animus doctor` checks the file, and `animus plan` lists your skills by role.
+
+### The queue on this machine
+
+Jobs that run here wait in a queue, `queue.db` under `ANIMUS_HOME`, and a
+loop of this machine starts them ([cli.md](cli.md#the-queue-on-this-machine)).
+It decides by the same room check as Helix ([helix.md](helix.md#configyaml)),
+from these keys of `run:` in `~/.animus/config.yaml`, all optional:
+
+```yaml
+run:
+  where: local          # as `run: local` above
+  slots: 2              # the most jobs running at once
+  job_memory: 4g        # what a job needs
+  reserve_memory: 2g    # memory kept free beyond that
+  tier_limits: { deep: 1 }   # the most jobs at once whose implementer runs on a tier
+```
+
+| Key | Default | What it does |
+| --- | --- | --- |
+| `slots` | `2` | The most jobs running at once. A whole number, 1 or more. |
+| `job_memory` | `4g` | What one job needs, such as `4g` or `512m`. |
+| `reserve_memory` | `2g` | Memory kept free beyond a job's own. A job starts only when free memory covers `job_memory` plus this, and the 1-minute load average is under the core count. |
+| `tier_limits` | none | The most jobs at once by implementer tier (`fast`, `standard`, `deep`), counted from the spec's labels. |
+
+The loop reads them each time it starts, so a change counts for the next
+loop, not one already running. A job that does not fit stays queued, and
+`animus status <job>` and the display say why. With nothing running, the
+first queued job starts whatever the machine reports. A key that is wrong
+stops `animus start` with the file and the key named.
 
 ## Helix's settings
 

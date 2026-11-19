@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { mkdtempSync, readFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import type { AddressInfo } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -29,7 +29,7 @@ async function helix() {
   await new Promise<void>((r) => { server.listen(0, '127.0.0.1', r); });
   const url = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
   const get = (path: string, headers: Record<string, string> = {}) => fetch(new URL(path, url), { headers });
-  return { job, get, stop: () => { supervisor.stop(); server.close(); store.close(); } };
+  return { job, home, get, stop: () => { supervisor.stop(); server.close(); store.close(); } };
 }
 
 /** Storage as a browser keeps it, or one that refuses every read and write (a locked-down browser). */
@@ -105,6 +105,23 @@ test('a job page without a token, or with one Helix refused, says to sign in', (
   assert.deepEqual(jobNotice(7, false, 401), { signIn: true, text: 'Helix did not take that token, so this browser forgot it. Sign in again to see job #7.' });
   assert.deepEqual(jobNotice(7, true, 404), { signIn: false, text: 'Helix has no job #7.' });
   assert.equal(jobNotice(7, true, 200), undefined);
+});
+
+// Protects: one bad request does not stop Helix's display. Fails when: an unreadable run log gives anything but a 500 with a one-line reason, or the next request is not served.
+test('an error while answering one request is a 500 with a one-line reason, and Helix keeps serving', async () => {
+  const h = await helix();
+  const prev = process.env.ANIMUS_HOME;
+  process.env.ANIMUS_HOME = join(h.home, 'own');
+  mkdirSync(join(h.home, 'own', 'runs.jsonl'), { recursive: true });
+  const bad = await h.get('/insights-data', { authorization: 'Bearer ana-token' });
+  const { error } = (await bad.json()) as { error: string };
+  rmSync(join(h.home, 'own', 'runs.jsonl'), { recursive: true });
+  const after = await h.get('/version');
+  process.env.ANIMUS_HOME = prev;
+  h.stop();
+  assert.equal(bad.status, 500);
+  assert.ok(error && !error.includes('\n'));
+  assert.equal(after.status, 200);
 });
 
 // Protects: a job's details stay with the people on the Helix. Fails when: the job page's data answers without a valid token.

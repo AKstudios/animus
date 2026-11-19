@@ -190,10 +190,13 @@ const need = (j: Need) => `<article class="ask-card" data-key="j-${j.id}">
   <div class="ask-act"><code>${esc(j.command)}</code><a class="ask-btn" href="${esc(j.page)}">Open job</a></div>
 </article>`;
 
+/** The Fix tag's companion: the job a fix continues. */
+const fixOf = (f: NonNullable<Recent['fix']>) => `<span class="reason tone-mute">fix of <a href="${esc(f.page)}">${esc(f.title)}</a></span>`;
+
 const recent = (j: Recent) => `<div class="done-row" data-key="j-${j.id}">
-  ${j.href ? `<a class="tag tone-${j.tone}" href="${esc(j.href)}" target="_blank" rel="noopener noreferrer">${esc(j.tag)}</a>` : `<span class="tag tone-${j.tone}">${esc(j.tag)}</span>`}
+  <span>${j.href ? `<a class="tag tone-${j.tone}" href="${esc(j.href)}" target="_blank" rel="noopener noreferrer">${esc(j.tag)}</a>` : `<span class="tag tone-${j.tone}">${esc(j.tag)}</span>`}${j.fix ? '<span class="tag tone-mute">Fix</span>' : ''}</span>
   <a class="title" href="${esc(j.page)}">${esc(j.title)}</a><span class="by">${[ref(j.id), esc(j.repo), who(j), esc(j.meta)].filter(Boolean).join(' · ')}</span>
-  ${j.reason ? `<span class="reason tone-${j.tone}">${esc(j.reason)}</span>` : ''}
+  ${j.fix ? fixOf(j.fix) : ''}${j.reason ? `<span class="reason tone-${j.tone}">${esc(j.reason)}</span>` : ''}
 </div>`;
 
 const openPr = (p: Pr) => `<div class="done-row" data-key="pr-${esc(p.href)}">
@@ -342,7 +345,7 @@ function jobMain(id: number | string, now: number, local: boolean): string {
   const notice = jobNotice(id, readToken(storage) !== null, state.jobStatus, local);
   const v = state.job?.job.id === id ? jobView(state.job, now, local, state.display?.closed?.find((c) => c.job === id)) : undefined;
   const fixes = v?.facts.find((f) => f.k === 'fixes');
-  const lead = v && !notice ? `<div class="tag-row"><span class="tag tone-${v.tag.tone}">${esc(v.tag.text)}</span><span class="mute">${ref(id) ? `${ref(id)} · ` : ''}${v.lineParts.map((x) => (x.page ? `<a href="${esc(x.page)}">${esc(x.text)}</a>` : esc(x.text))).join(' · ')}${fixes?.page ? ` · fixes <a href="${esc(fixes.page)}">${esc(fixes.v)}</a>` : ''}</span></div>` : '';
+  const lead = v && !notice ? `<div class="tag-row"><span class="tag tone-${v.tag.tone}">${esc(v.tag.text)}</span>${fixes ? '<span class="tag tone-mute">Fix</span>' : ''}<span class="mute">${ref(id) ? `${ref(id)} · ` : ''}${v.lineParts.map((x) => (x.page ? `<a href="${esc(x.page)}">${esc(x.text)}</a>` : esc(x.text))).join(' · ')}${fixes?.page ? ` · fix of <a href="${esc(fixes.page)}">${esc(fixes.v)}</a>` : ''}</span></div>` : '';
   const scope = `<div class="scope"><div><h1>${esc(v?.title ?? `Job ${ref(id) || id}`)}</h1>${lead}</div></div>`;
   const body = notice ? `<div class="none boxed">${esc(notice.text)}</div>${notice.signIn ? signIn : ''}` : v ? jobSections(v) : '';
   const to = from ?? { name: 'Jobs', href: '/jobs' };
@@ -410,8 +413,8 @@ function jobsMain(local: boolean): string {
   const t = lv?.totals;
   const sum = t ? `<div class="sum"><div><b>${t.jobs}</b><span class="mute">jobs</span></div><div><b>${t.merged}</b><span class="mute">merged · ${t.mergedShare}</span></div><div><b>${t.failed}</b><span class="mute">failed</span></div><div><b class="mono">${t.spent}</b><span class="mute">spent</span></div><div><b class="mono">${t.tokens}</b><span class="mute">tokens</span></div><div><b class="mono">${t.perMerged}</b><span class="mute">per merged PR</span></div></div>` : '';
   const tr = (r: JobRow) => `<div class="tr" data-key="j-${r.id}">
-    ${r.href ? `<a class="tag tone-${r.tone}" href="${esc(r.href)}" target="_blank" rel="noopener noreferrer">${esc(r.tag)}</a>` : `<span class="tag tone-${r.tone}">${esc(r.tag)}</span>`}
-    <span class="job"><a class="title" href="${esc(r.page)}">${esc(r.title)}</a>${r.why ? `<span class="why tone-${r.tone === 'fail' || r.tone === 'ask' ? r.tone : 'mute'}">${esc(r.why)}</span>` : ''}</span>
+    <span>${r.href ? `<a class="tag tone-${r.tone}" href="${esc(r.href)}" target="_blank" rel="noopener noreferrer">${esc(r.tag)}</a>` : `<span class="tag tone-${r.tone}">${esc(r.tag)}</span>`}${r.fix ? '<span class="tag tone-mute">Fix</span>' : ''}</span>
+    <span class="job"><a class="title" href="${esc(r.page)}">${esc(r.title)}</a>${r.fix ? `<span class="why tone-mute">fix of <a href="${esc(r.fix.page)}">${esc(r.fix.title)}</a></span>` : ''}${r.why ? `<span class="why tone-${r.tone === 'fail' || r.tone === 'ask' ? r.tone : 'mute'}">${esc(r.why)}</span>` : ''}</span>
     <span class="mute">${esc(r.repo)}</span>${local ? '' : `<span class="mute">${who(r)}</span>`}
     <span class="n">${esc(r.took)}</span><span class="n">${esc(r.fixes)}</span><span class="n cost">${esc(r.cost)}</span><span class="n">${esc(r.tokens)}</span><span class="n">${esc(r.toMerge)}</span>
   </div>`;

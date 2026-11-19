@@ -9,7 +9,8 @@ this way is in [factory.md](factory.md).
 you, in Claude Code
   │  /animus:grill-with-docs, /animus:to-spec   (plugin/skills/)
   ▼
-spec.md ──► animus start ──┬─► animus run  (this machine, in the foreground)
+spec.md ──► animus start ──┬─► queue.db ──► the loop ──► animus run  (this machine,
+                           │                 detached from the session)
                            │
                            └─► animus submit ──HTTP──► Helix  (helix/)
                                                          │ queue in helix.db
@@ -27,7 +28,9 @@ spec.md ──► animus start ──┬─► animus run  (this machine, in the
   shared queue (`plugin/src/queue.ts`) over SQLite, an HTTP API, a display
   page, and one `animus run` process per job. A job whose `after:` spec has
   not merged is waiting in the queue, with no slot and no process, until
-  that spec's pull request merges. It imports from `plugin/` and is never
+  that spec's pull request merges. This machine runs the same queue in
+  `queue.db` under `ANIMUS_HOME`, with a detached loop of its own
+  (`plugin/src/local-loop.ts`) that exits when nothing is left. It imports from `plugin/` and is never
   shipped in the plugin. It holds no
   state of its own beyond `helix.db` and the job files, so a restart carries
   on from them. See [helix.md](helix.md).

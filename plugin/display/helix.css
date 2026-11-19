@@ -140,6 +140,7 @@ a.title:hover, a.card-title:hover, .back:hover { text-decoration: underline; }
 .ask-btn { padding: 8px 16px; border-radius: 8px; background: var(--ask-fill); color: var(--on-ask); font-weight: 600; font-size: 14px; text-decoration: none; }
 .section.needs { gap: 10px; }
 .facts { display: flex; flex-wrap: wrap; gap: 8px 28px; font-family: var(--mono); font-size: 14px; animation: hxIn 0.5s ease-out; }
+.facts > div { min-width: 0; }
 
 .empty { flex-grow: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 18px; padding: 48px 16px; text-align: center; border: 1px dashed var(--line); border-radius: 12px; }
 .empty h2 { font-size: 24px; font-weight: 600; }
@@ -483,7 +484,7 @@ a.tag:hover { opacity: 1; background: color-mix(in srgb, currentColor 22%, trans
 .shot-open:hover img { border-color: var(--acc-ink); }
 [data-lightbox] body { overflow: hidden; }
 .lightbox { position: fixed; inset: 0; z-index: 50; display: flex; flex-direction: column; gap: 12px; padding: 16px; box-sizing: border-box; background: rgba(5, 8, 10, 0.95); color: #e8eff2; }
-.lb-top { display: flex; align-items: center; gap: 12px; font-size: 14px; }
+.lb-top { flex: none; display: flex; align-items: center; gap: 12px; font-size: 14px; }
 .lb-top > :first-child { margin-right: auto; overflow-wrap: anywhere; }
 .lb-top .mute { color: #8d9ca6; }
 .lb-btn { min-height: 36px; padding: 6px 12px; border-radius: 8px; border: 1px solid rgba(255, 255, 255, 0.25); background: transparent; color: inherit; font-size: 13px; text-decoration: none; cursor: pointer; display: inline-flex; align-items: center; }
@@ -491,7 +492,7 @@ a.tag:hover { opacity: 1; background: color-mix(in srgb, currentColor 22%, trans
 .lb-stage img { max-width: calc(100% - 120px); max-height: 100%; object-fit: contain; border-radius: 8px; background: #fff; }
 .lb-nav { flex: none; width: 48px; height: 64px; border-radius: 10px; border: 1px solid rgba(255, 255, 255, 0.25); background: rgba(255, 255, 255, 0.06); color: inherit; font-size: 32px; line-height: 1; cursor: pointer; }
 .lb-nav:hover, .lb-btn:hover { background: rgba(255, 255, 255, 0.14); }
-.lb-strip { display: flex; gap: 8px; overflow-x: auto; justify-content: center; padding-bottom: 4px; }
+.lb-strip { flex: none; display: flex; gap: 8px; overflow-x: auto; justify-content: center; padding-bottom: 4px; }
 .lb-thumb { flex: none; width: 96px; height: 60px; padding: 0; border-radius: 6px; border: 2px solid transparent; background: rgba(255, 255, 255, 0.08); overflow: hidden; cursor: pointer; opacity: 0.6; }
 .lb-thumb[aria-current] { border-color: var(--accent); opacity: 1; }
 .lb-thumb img { width: 100%; height: 100%; object-fit: cover; object-position: top; display: block; }

@@ -18,10 +18,14 @@ import { describeRuns, describeTools, jobDir, loadState, readRuns, readTools, ty
 import { jobOf, onPath, runJob, uiJobOf } from './pipeline.ts';
 import { describeNumbers, numbers, refreshOutcomes } from './outcomes.ts';
 import { ghLogin, prFacts, publish, pushEvidence } from './pr.ts';
-import { personalFor, readSkillsFile, skillsForRole, snapshotSkills, whereToRun, type PersonalSkill, type Where } from './personal.ts';
+import { resolveAfter } from './after.ts';
+import { loopConfig, personalFor, readSkillsFile, skillsForRole, snapshotSkills, whereToRun, type PersonalSkill, type Where } from './personal.ts';
 import { accept, describeLessons, dismiss, readLessons } from './lessons.ts';
 import { runRetro } from './retro.ts';
 import { listenLocal, localServer } from './local-display.ts';
+import { enqueue, ensureLoop, openLocalQueue, queueFile, type LocalQueue } from './local-queue.ts';
+import { answerLocal, cancelLocal, describeLocalJob, describeLocalJobs, localJob, logTail, needsYou } from './local-status.ts';
+import { logFile, runLoop } from './local-loop.ts';
 import { loadProfile, PROFILE_PATH } from './profile.ts';
 import { describePlan, loadFactory, resolvePlan } from './profiles.ts';
 import { admitFile, describeAdmit } from './admit.ts';
@@ -40,8 +44,10 @@ const USAGE = `animus: a spec goes in, a pull request with proof comes out
         Start one job, here or on Helix. --local or --helix decides; without
         either, run: in ANIMUS_HOME/config.yaml does (the repository's entry,
         then the top); without that, Helix when this machine has joined one
-        that has the repository, and here otherwise. Here, it is animus run
-        and waits for the job; on Helix, it is animus submit and returns.
+        that has the repository, and here otherwise. Here, it queues the job,
+        makes sure this machine's loop is running and returns: the loop runs
+        the job whether or not this session stays open. On Helix, it is
+        animus submit and returns.
   animus start <pr> "<what to change>" [--local | --helix] [--repo <dir>] [--dry-run] [--keep]
         Change an open pull request a job opened (<pr> is its number or URL):
         a new job on its branch that proves every criterion again and pushes
@@ -153,12 +159,17 @@ With Helix, the machine that runs jobs for everyone:
         Queue the spec there, for the project with this checkout's GitHub
         address (or, failing that, named after its folder), with your own
         skills from ANIMUS_HOME/config.yaml.
-  animus status [<id>] [--all]
-        Your jobs there, or one job with the end of its log. --all: every
-        person's jobs, for the owner only.
+  animus status [<id>] [--local | --helix] [--all]
+        Your jobs: this machine's queue first, which lists what needs you
+        before the rest (questions, failures and pull requests opened since
+        you last looked; a job held for room says why), then Helix's when
+        this machine has joined one. Or one job with the end of its log.
+        --all: every person's jobs on Helix, for the owner only.
   animus result <id>        One job as JSON; exits 0 once it ended in a pull request.
   animus answer <id> <text> Answer a job's question; it is queued again.
-  animus cancel <id>        Your own job, or the owner cancels anyone's.
+  animus cancel <id>        Your own job, or the owner cancels anyone's on Helix.
+        These four take a job of this machine's queue, or one of Helix's: with
+        a Helix joined, --local names one here (and --helix one there).
   animus ui                 Show the jobs this machine ran in your browser, by
                             project, at 127.0.0.1 (port 7420 or the next free
                             one). Ctrl-C stops it.
@@ -222,6 +233,13 @@ function finish(run: Run): number {
   return run.outcome === 'pr' || run.outcome === 'dry-run' ? 0 : 1;
 }
 
+/** Any command starts the loop again while jobs are left and none runs it: after a reboot, a crash or a loop that was stopped. */
+function keepLoop(): void {
+  if (!existsSync(queueFile())) return;
+  const queue = openLocalQueue();
+  try { ensureLoop(queue); } catch (err) { say(`warning: the queue's loop could not be started: ${(err as Error).message}`); } finally { queue.close(); }
+}
+
 async function main(argv: string[]): Promise<number> {
   const [command, ...rest] = argv;
   const { values, positionals } = parseArgs({
@@ -232,7 +250,15 @@ async function main(argv: string[]): Promise<number> {
     },
   });
   const cwd = process.cwd();
-  const flags = { ...(values.draft ? { draft: true } : {}), ...(values['dry-run'] ? { dryRun: true } : {}), ...(values.keep ? { keep: true } : {}) };
+  if (command !== 'loop' && command !== 'session-start') keepLoop();
+  /** Whether a command about one job goes to Helix: --helix says so, --local says here, and otherwise Helix when this machine has joined one (a job here is then named with --local). */
+  const onHelix = () => (values.helix ? true : values.local ? false : helix.helixLogin() !== undefined);
+  const withQueue = <T>(fn: (queue: LocalQueue) => T): T => {
+    if (!existsSync(queueFile())) throw new AnimusError('no jobs have been queued on this machine');
+    const queue = openLocalQueue();
+    try { return fn(queue); } finally { queue.close(); }
+  };
+  const flags ={ ...(values.draft ? { draft: true } : {}), ...(values['dry-run'] ? { dryRun: true } : {}), ...(values.keep ? { keep: true } : {}) };
   const deps = () => {
     const factory = loadFactory();
     return { factory, agent: claudeAgent(factory), publish, evidence: pushEvidence, log: say };
@@ -295,7 +321,26 @@ async function main(argv: string[]): Promise<number> {
         return 0;
       }
       if (!values['dry-run'] && !onPath('gh')) throw new AnimusError('gh is not installed, so no pull request can be opened; install it or use --dry-run');
-      return finish(await runJob({ repo, specFile, personal: snapshotSkills(mine.skills), runsLine, ...flags }, deps()));
+      // Refused here, before it is queued, when its labels would not run or a skill of yours is missing.
+      const spec = loadSpec(specFile);
+      const { tier } = resolvePlan(loadFactory(), spec).implement;
+      snapshotSkills(mine.skills);
+      const after = resolveAfter(repo, specFile, spec.after);
+      loopConfig();
+      say(runsLine);
+      const queue = openLocalQueue();
+      try {
+        const job = enqueue(queue, { repo, spec: specFile, title: spec.title, tier, after, flags: [...(values.draft ? ['--draft'] : []), ...(values['dry-run'] ? ['--dry-run'] : []), ...(values.keep ? ['--keep'] : [])] });
+        ensureLoop(queue);
+        console.log(`job ${job.id} is queued on this machine: ${job.title}\nfollow it with: animus status ${job.id}${helix.helixLogin() ? ' --local' : ''}\nits output: ${logFile(job.id)}`);
+      } finally { queue.close(); }
+      return 0;
+    }
+    case 'loop': {
+      // What `animus` starts to run the queue on this machine, detached; not a command people type.
+      const queue = openLocalQueue();
+      try { await runLoop({ queue, version: animusVersion(), config: loopConfig(), say: (line) => console.log(`${new Date().toISOString()} ${line}`) }); } finally { queue.close(); }
+      return 0;
     }
     case 'plan': {
       if (!positionals[0]) throw new AnimusError('usage: animus plan <spec.md>');
@@ -372,25 +417,53 @@ async function main(argv: string[]): Promise<number> {
       }
       throw new AnimusError('usage: animus project add [<name>] | list | remove <name>');
     }
-    case 'status':
-      console.log(positionals[0] ? helix.describeJob(await helix.job(positionals[0])) : helix.describeJobs((await helix.jobs(Boolean(values.all))).jobs));
+    case 'status': {
+      if (values.local && values.helix) throw new AnimusError('--local or --helix, not both');
+      if (positionals[0]) {
+        if (!onHelix()) return withQueue((queue) => { console.log(describeLocalJob(localJob(queue, positionals[0]!), logTail(Number(positionals[0])))); return 0; });
+        console.log(helix.describeJob(await helix.job(positionals[0])));
+        return 0;
+      }
+      // Both lists where both exist: this machine's queue, which says first what needs you, then Helix's.
+      const parts: string[] = [];
+      if (!values.helix && existsSync(queueFile())) {
+        withQueue((queue) => {
+          parts.push(...needsYou(queue), '');
+          parts.push(describeLocalJobs(queue.list()));
+          queue.markSeen(new Date().toISOString());
+        });
+      }
+      if (!values.local && (values.helix || helix.helixLogin())) parts.push(...(parts.length ? ['', 'on Helix:'] : []), helix.describeJobs((await helix.jobs(Boolean(values.all))).jobs));
+      console.log(parts.join('\n').trim() || 'no jobs');
       return 0;
+    }
+    case 'session-start': {
+      // What the plugin's session-start hook runs: it reads the queue and prints what needs you, and starts nothing.
+      try { if (existsSync(queueFile())) withQueue((queue) => { const lines = needsYou(queue); if (lines.length) console.log([...lines, 'animus status shows them all'].join('\n')); }); } catch { /* a session starts without it */ }
+      return 0;
+    }
     case 'result': {
       if (!positionals[0]) throw new AnimusError('usage: animus result <id>');
-      const { log: _log, ...j } = await helix.job(positionals[0]);
-      console.log(JSON.stringify(j, null, 2));
+      const j = onHelix() ? await helix.job(positionals[0]) : withQueue((queue) => localJob(queue, positionals[0]!));
+      const { id, state, title, repo, outcome, pr, reason, question, cost_usd, animus_job, waiting } = j;
+      console.log(JSON.stringify({ id, state, title, repo, outcome, pr, reason, question, cost_usd, animus_job, waiting }, null, 2));
       return j.outcome === 'pr' ? 0 : 1;
     }
     case 'answer': {
       if (!positionals[0] || !positionals[1]) throw new AnimusError('usage: animus answer <id> <text>');
-      const j = await helix.answer(positionals[0], positionals.slice(1).join(' '));
-      console.log(`job ${j.id} is ${j.state} again with your answer`);
+      const text = positionals.slice(1).join(' ');
+      if (onHelix()) { const j = await helix.answer(positionals[0], text); console.log(`job ${j.id} is ${j.state} again with your answer`); return 0; }
+      withQueue((queue) => {
+        const j = answerLocal(queue, positionals[0]!, text);
+        ensureLoop(queue);
+        console.log(`job ${j.id} is ${j.state} again with your answer`);
+      });
       return 0;
     }
     case 'cancel': {
       if (!positionals[0]) throw new AnimusError('usage: animus cancel <id>');
-      const j = await helix.cancel(positionals[0]);
-      console.log(`job ${j.id} is cancelled`);
+      const id = onHelix() ? (await helix.cancel(positionals[0])).id : withQueue((queue) => cancelLocal(queue, positionals[0]!).id);
+      console.log(`job ${id} is cancelled`);
       return 0;
     }
     case 'init': {

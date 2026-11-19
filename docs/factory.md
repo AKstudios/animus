@@ -14,12 +14,12 @@ The interactive walkthrough of both modes is here: [Animus Factory Workflow](htt
 
 ## Two ways to run it
 
-Both modes call the same core command. Office mode is a queue and a container placed in front of `animus run`, so anything that works locally works remotely.
+Both modes call the same core command, behind the same queue. Office mode is a queue and a container placed in front of `animus run`; local mode is the same queue and room check (`slots`, `job_memory`, `reserve_memory`, `tier_limits`) in `queue.db` on your machine, run by a detached loop that starts when you start a job and exits when none is left. Jobs on either wait for an earlier spec's pull request without a process, and `animus status`, `answer` and `cancel` act on both. A Claude session starting in a project prints what needs you (questions, failures, new pull requests), so closing a session loses nothing. Anything that works locally works remotely.
 
 |  | Local mode | Office mode |
 | --- | --- | --- |
-| Start it with | `animus run spec.md` from a Claude Code session | `animus submit spec.md`, a Slack message, or a GitHub issue comment |
-| Your laptop | Stays on and awake until the PR opens | Free once the job is submitted, or never needed |
+| Start it with | `animus start spec.md` from a Claude Code session, which queues it and returns | `animus submit spec.md`, a Slack message, or a GitHub issue comment |
+| Your laptop | Awake while the job runs (a loop of its own runs it, with or without a session open; if it sleeps, the job resumes on wake) | Free once the job is submitted, or never needed |
 | Spec | Shaped with you in conversation | Shaped in conversation, drafted from a Slack message and confirmed in its thread, or the issue is the spec |
 | Jobs at once | One or two, limited by the laptop | Several, each in its own container, from several people |
 | Pipeline | Set up, implement, gates, review, catch up with the base, open the PR | The same |

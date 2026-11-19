@@ -6,17 +6,20 @@
 // otherwise. Served on 127.0.0.1 only, with no sign-in: whoever reaches this
 // machine's loopback is the person whose jobs these are, and there are no
 // people pages.
-import { createServer, type Server } from 'node:http';
-import { readdirSync, readFileSync, statSync } from 'node:fs';
+import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
+import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
 import type { AddressInfo } from 'node:net';
-import { hostname } from 'node:os';
+import { hostname, userInfo } from 'node:os';
 import { basename, join } from 'node:path';
 import { listJobs, RESULTS, type JobFilter, type Result } from '../display/job-list.ts';
 import type { Display, DisplayJob, JobListPage, JobPage, ListJob, PrState } from '../display/shape.ts';
 import { asset, CSP } from './assets.ts';
 import { afterOf, fixRounds, insightsData, lessonsCiting } from './insights-data.ts';
 import { folderParts, read, shotFile } from './job-folder.ts';
+import { logFile } from './local-loop.ts';
+import { openLocalQueue, queueFile, type LocalJob } from './local-queue.ts';
 import { readOutcomes, type Outcomes } from './outcomes.ts';
+import { tryGit } from './proc.ts';
 import { alive, animusHome, jobDir, loadProgress, loadState, readRuns, STAGES, type Run } from './log.ts';
 import { loadFactory } from './profiles.ts';
 import { personOf, profilesInfo, runTokens, usageOf } from './usage.ts';
@@ -28,13 +31,40 @@ const PLAIN = /^[A-Za-z0-9][\w.-]*$/;
 /** The project of a job that has no state and no run row: it never got far enough to name one. */
 const NO_PROJECT = 'unknown project';
 
-function jobOf(id: string, runs: readonly Run[]): DisplayJob | undefined {
+/** A person's name from their address: what is before the @. */
+const nameOf = (submitter: string): string => submitter.split('@')[0]!;
+
+/** Who runs a job here, by name: the repository's git user, else the user's login. */
+const runnerOf = (repo: string): string => tryGit(repo, ['config', 'user.name']) ?? nameOf(tryGit(repo, ['config', 'user.email']) ?? userInfo().username);
+
+/** This machine's queue (local-queue.ts), newest last; none when it has never had one. */
+function queued(): LocalJob[] {
+  if (!existsSync(queueFile())) return [];
+  const queue = openLocalQueue();
+  try { return queue.list(1000); } catch { return []; } finally { queue.close(); }
+}
+
+const readLog = (id: number): string => { try { return readFileSync(logFile(id), 'utf8'); } catch { return ''; } };
+
+/** A job of the queue, shown as it stands there: not yet a folder of its own, or one that ended without making it. */
+function queuedJob(q: LocalJob): DisplayJob {
+  return {
+    id: q.id, person: '', repo: basename(q.repo), title: q.title, submitted: q.submitted, state: q.state,
+    ...(q.queued ? { queued: q.queued } : {}), ...(q.started ? { started: q.started } : {}), ...(q.ended ? { ended: q.ended } : {}),
+    ...(q.waiting ? { waiting: q.waiting } : {}), ...(q.outcome ? { outcome: q.outcome } : {}), ...(q.pr ? { pr: q.pr } : {}),
+    ...(q.reason ? { reason: q.reason } : {}), ...(q.question ? { question: q.question } : {}), ...(q.cost_usd !== undefined ? { cost_usd: q.cost_usd } : {}),
+  };
+}
+
+function jobOf(id: string, runs: readonly Run[], from?: LocalJob): DisplayJob | undefined {
   const state = loadState(id);
   const progress = loadProgress(id);
   if (!state && !progress) return undefined;
   const mine = runs.filter((r) => r.job === id);
   const last = mine.at(-1);
   const fix = fixRounds(mine);
+  const fixOf = last?.fix_of ?? state?.fix_of;
+  const fixTitle = fixOf ? runs.findLast((r) => r.job === fixOf)?.title : undefined;
   let title = last?.title;
   if (!title && state) { try { title = /^# (.+)$/m.exec(readFileSync(state.spec, 'utf8'))?.[1]; } catch { /* the job's copy is gone */ } }
   const running = !state?.outcome && progress?.host === hostname() && progress.pid !== undefined && alive(progress.pid);
@@ -43,20 +73,26 @@ function jobOf(id: string, runs: readonly Run[]): DisplayJob | undefined {
   // A running job has no run row for this attempt until it ends: its time so far is from when its process began.
   const started = running ? progress?.started ?? (mine.length ? undefined : submitted) : last?.started;
   const tokens = mine.reduce((n, r) => n + runTokens(r), 0);
-  return {
+  // Queued again to resume (answered, or the loop stopped): the queue's word is newer than the folder's.
+  const again = from && (from.state === 'queued' || from.state === 'waiting' || from.state === 'running') ? from : undefined;
+  const job: DisplayJob = {
     // A job that has not ended yet is the machine's person's: the newest run says who that is.
-    id, person: personOf(last ?? runs.at(-1)), repo: state ? basename(state.repo) : last ? basename(last.repo) : NO_PROJECT, title: title ?? id, submitted,
+    id, person: running && state && !runs.length ? runnerOf(state.repo) : personOf(last ?? runs.at(-1)), repo: state ? basename(state.repo) : last ? basename(last.repo) : from ? basename(from.repo) : NO_PROJECT, title: title ?? id, submitted,
     state: state?.outcome ? 'ended' : running ? 'running' : 'stopped',
     ...(started ? { started } : {}), ...(last?.ended && !running ? { ended: last.ended } : {}),
     ...(tokens ? { tokens } : {}),
     ...(state?.outcome ? { outcome: state.outcome } : {}), ...(last?.pr ? { pr: last.pr } : {}),
     ...(last?.reason ? { reason: last.reason } : {}), ...(state?.question ? { question: state.question } : {}),
     ...(last && !running ? { cost_usd: last.cost_usd } : {}),
+    ...(fixOf ? { fix_of: fixOf, ...(fixTitle ? { fix_of_title: fixTitle } : {}) } : {}),
     ...(fix.has(id) ? { fix_rounds: fix.get(id)! } : {}),
     ...(running && progress ? { progress } : {}),
     // `animus resume` needs state.json, which is saved only after the worktree is made.
     ...(!state?.outcome && !running ? state ? { resume: `animus resume ${id}` } : { reason: 'It stopped during setup, before it had a worktree, so there is nothing to resume. Run its spec again.' } : {}),
   };
+  if (!again) return job;
+  const { outcome: _o, question: _q, reason: _r, resume: _s, ended: _e, ...kept } = job;
+  return { ...kept, state: again.state, ...(again.queued ? { queued: again.queued } : {}), ...(again.started ? { started: again.started } : {}), ...(again.waiting ? { waiting: again.waiting } : {}) };
 }
 
 /** Every job this machine's Animus has a folder for, newest first. */
@@ -64,7 +100,12 @@ export function localJobs(): DisplayJob[] {
   let names: string[] = [];
   try { names = readdirSync(join(animusHome(), 'jobs')); } catch { /* no jobs yet */ }
   const runs = readRuns();
-  return names.filter((n) => PLAIN.test(n)).flatMap((id) => jobOf(id, runs) ?? []).sort((a, b) => (a.submitted < b.submitted ? 1 : -1));
+  const queue = queued();
+  const folders = names.filter((n) => PLAIN.test(n)).flatMap((id) => jobOf(id, runs, queue.find((q) => q.animus_job === id)) ?? []);
+  // A queue job whose folder is shown is that folder's job; the rest show as the queue has them.
+  const shown = new Set(folders.map((j) => j.id));
+  const rest = queue.filter((q) => !q.animus_job || !shown.has(q.animus_job)).map(queuedJob);
+  return [...folders, ...rest].sort((a, b) => (a.submitted < b.submitted ? 1 : -1));
 }
 
 /** What the overview shows: the jobs, and a project for each repository they ran in. */
@@ -105,18 +146,22 @@ export function localJobList(f: Partial<JobFilter>, before?: string): JobListPag
   return { at: new Date().toISOString(), ...listJobs(jobs, { ...f, person: '' }, before) };
 }
 
-/** One job's page, or nothing when this machine has no such job. Its log is empty: `animus run` prints to its own terminal and keeps none. */
+/** One job's page, or nothing when this machine has no such job. Its log is what the loop kept of its output; empty for a job that ran before the queue. */
 export function localJobPage(id: string): JobPage | undefined {
   const runs = readRuns();
-  const job = PLAIN.test(id) ? jobOf(id, runs) : undefined;
+  const queue = queued();
+  // A number is a queue job's id; anything else is a job folder, which may be a queue job's.
+  const q = /^\d+$/.test(id) ? queue.find((j) => j.id === Number(id)) : queue.find((j) => j.animus_job === id);
+  const folder = PLAIN.test(id) ? jobOf(id, runs, q) : undefined;
+  const job = folder ?? (q ? queuedJob(q) : undefined);
   if (!job) return undefined;
-  const spec = read(loadState(id)?.spec ?? join(jobDir(id), 'spec.md'));
+  const spec = read(folder ? loadState(id)?.spec ?? join(jobDir(id), 'spec.md') : q!.spec);
   let outcomes: Outcomes = {};
   try { outcomes = readOutcomes(); } catch { /* unreadable: no PR is known */ }
   const o = job.pr ? outcomes[job.pr] : undefined;
   const pr: Partial<JobPage> = o ? { pr_state: o.state.toLowerCase() as PrState, pr_opened: o.opened, ...(o.state === 'MERGED' ? { pr_merged: o.closed ?? o.checked } : {}) } : {};
   const lessons = lessonsCiting(id);
-  return { at: new Date().toISOString(), stages: STAGES, job, ...pr, ...profiles(), ...(o ? { after: afterOf(o) } : {}), ...(lessons.length ? { lessons } : {}), ...(spec !== undefined ? { spec } : {}), log: '', ...folderParts(jobDir(id), runs.filter((r) => r.job === id)) };
+  return { at: new Date().toISOString(), stages: STAGES, job, ...pr, ...profiles(), ...(o ? { after: afterOf(o) } : {}), ...(lessons.length ? { lessons } : {}), ...(spec !== undefined ? { spec } : {}), log: q ? readLog(q.id) : '', ...(folder ? folderParts(jobDir(id), runs.filter((r) => r.job === id)) : {}) };
 }
 
 /** What every label means, for the job page; nothing when the profiles do not read. */
@@ -166,6 +211,17 @@ export function listenLocal(server: Server, port: number): Promise<number> {
 export function localServer(): Server {
   return createServer((req, res) => {
     const send = (status: number, value: unknown) => { res.writeHead(status, { 'content-type': 'application/json' }); res.end(`${JSON.stringify(value)}\n`); };
+    // An error in one request answers that request; it never ends the server.
+    try { answer(req, res, send); } catch (err) {
+      const reason = (err instanceof Error ? err.message : String(err)).split('\n')[0] || 'unknown error';
+      console.error(err);
+      if (res.headersSent) res.end(); else send(500, { error: `the display failed on this request: ${reason}` });
+    }
+  });
+}
+
+function answer(req: IncomingMessage, res: ServerResponse, send: (status: number, value: unknown) => void): unknown {
+  {
     // A page on another site could point its own name at 127.0.0.1 and read these jobs: only this machine's own names are answered.
     if (!/^(127\.0\.0\.1|localhost)(:\d+)?$/.test(req.headers.host ?? '') || req.method !== 'GET') return send(403, { error: 'this display answers GET requests for 127.0.0.1 only' });
     const url = new URL(req.url ?? '/', 'http://localhost');
@@ -200,5 +256,5 @@ export function localServer(): Server {
       if (image) { res.writeHead(200, { 'content-type': image.type, 'cache-control': 'private, no-cache', 'x-content-type-options': 'nosniff' }); return res.end(image.body); }
     }
     return send(404, { error: `nothing at ${url.pathname}` });
-  });
+  }
 }

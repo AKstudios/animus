@@ -131,6 +131,13 @@ test('the Jobs table shows each job\'s fix rounds, and a dash before the gates r
   assert.deepEqual(rows.map((r) => r.fixes), ['2', '0', '—']);
 });
 
+// Protects: a fix is told apart from the job it continues. Fails when a fix's row carries no link to that job, or the opening job gets one.
+test('the Jobs table marks a fix with the job it continues, and not the opening job', () => {
+  const job = (id: number, over: Partial<ListJob>): ListJob => ({ id, person: 'ana', repo: 'app', title: `J${id}`, submitted: `2026-11-17T10:0${id}:00Z`, state: 'ended', outcome: 'pr', pr: pull(9), pr_state: 'merged', ...over });
+  const rows = jobListView({ at: '2026-11-17T12:00:00Z', jobs: [job(2, { fix_of: 1, fix_of_title: 'Add the button' }), job(1, {})], more: false, totals: { jobs: 2, merged: 2, failed: 0, cost_usd: 0 } } as JobListPage, false).rows;
+  assert.deepEqual(rows.map((r) => [r.tag, r.fix]), [['Merged #9', { title: 'Add the button', page: '/jobs/1' }], ['Merged #9', undefined]]);
+});
+
 // Protects: criterion 9 in the Jobs table. Fails when: a job's tokens or the total are unabbreviated, a job with none shows 0, or a local job's person has no link.
 test('the Jobs table shows tokens per job and in total, a dash for none, and links a local job\'s person', () => {
   const job = (id: number, tokens?: number): ListJob => ({ id, person: 'ana', repo: 'app', title: `J${id}`, submitted: `2026-11-17T10:0${id}:00Z`, state: 'ended', outcome: 'failed', ...(tokens ? { tokens } : {}) });

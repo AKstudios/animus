@@ -29,15 +29,54 @@ Where a job from a spec runs is decided in this order:
 3. Helix, when this machine has joined one that has the repository.
 4. Otherwise here.
 
-Here, it is `animus run` and waits for the job to end. On Helix, it is
-`animus submit` and returns at once. `/animus:to-spec` starts jobs with
-this command.
+Here, it checks the spec as `animus run` would, queues the job on this
+machine ([below](#the-queue-on-this-machine)), makes sure this machine's loop
+is running and returns at once: the job runs to its end whether or not the
+session that started it stays open. On Helix, it is `animus submit` and
+returns at once. `/animus:to-spec` starts jobs with this command.
 
-Either way it says where to watch the job. On this machine, right after the
-job's line: `watch it: animus ui, then open /jobs/<job>` (the display picks
-its port when it starts, so only the path is named). On Helix, its job page
-at each address Helix has set, labelled Tailscale and office network, never
-with a token.
+Either way it says where to watch the job. On this machine it prints the
+job's number, `animus status <job>` to follow it and the log file its output
+goes to (`--local` is added to that line when this machine has joined a Helix,
+to tell the two apart); the local display shows it at `/jobs/<job>` (run
+`animus ui`; it picks its port when it starts). On Helix, its job page at each
+address Helix has set, labelled Tailscale and office network, never with a
+token.
+
+#### The queue on this machine
+
+Jobs started here wait in `queue.db` under `ANIMUS_HOME`, the plugin's queue
+that Helix also runs on, with the same states (queued, waiting, running,
+ended, cancelled) and the same room check. One loop, a detached Node process
+started by `animus` on any operating system (no launchd, systemd or scheduled
+task), starts them:
+
+- **One loop per machine.** It holds a lock row in `queue.db` with its pid
+  and version, so two `animus start` at once start one loop. It runs with the
+  environment of the `animus` that started it and keeps no tokens: `gh` and
+  `claude` sign in as they do for you. `animus doctor` warns when that
+  environment lacks a variable your shell has; the loop picks up the new
+  environment when it next starts.
+- **It starts a job only when it fits**, by `slots`, `job_memory`,
+  `reserve_memory` and `tier_limits` of `run:` in `~/.animus/config.yaml`
+  ([configuration.md](configuration.md#the-queue-on-this-machine)). A job held
+  for room says why in `animus status <job>` and on the display.
+- **A spec with `after:` waits with no process** until its earlier pull
+  request merges, then starts from a base that holds it. If that pull request
+  was closed unmerged, the job ends failed and says so. If GitHub cannot say,
+  it keeps waiting.
+- **It exits when nothing is queued, waiting or running**, and any `animus`
+  command starts it again while work is left. A job that was running when the
+  loop stopped (the machine slept, crashed or restarted) is resumed, as Helix
+  resumes jobs after a restart.
+- **A newer `animus` replaces an older loop.** It tells the old loop to start
+  nothing more, waits for that loop's running jobs, and then starts its own,
+  as `helix upgrade` drains Helix.
+- **Each job writes its output** to `ANIMUS_HOME/queue/<job>/log.txt`, which
+  the local display shows on the job's page.
+
+Job folders from before the queue stay readable on the display as they were;
+nothing was moved into it.
 
 #### `animus run <spec.md> [--repo <dir>] [--dry-run] [--draft] [--keep] [--skills <file>]`
 
@@ -260,7 +299,8 @@ already, so the repository is unchanged.
 Checks that this machine can run and submit jobs: Node, Claude Code, git,
 `gh`, the repository's profile, your config, Helix and its version, and
 anything in your own setup that would reach a job (orbit's plugin, git
-hooks, commit signing). Exits 1 if anything would stop a job.
+hooks, commit signing), and warns when the loop on this machine started
+without an environment variable your shell has. Exits 1 if anything would stop a job.
 
 #### `animus skills`
 
@@ -336,12 +376,28 @@ want>` as a comment on an issue in the project gets a draft spec as a comment,
 `/animus cancel` act as their commands here do. See
 [helix.md](helix.md#github-comments).
 
-#### `animus status [<id>] [--all]`
+#### `animus status [<id>] [--local | --helix] [--all]`
 
-With no id, your jobs on Helix. With one, that job, the same `watch it:`
-links, and the end of its log.
-`--all` lists every person's jobs, with whose each is; only the owner may
-use it.
+With no id, your jobs: this machine's queue first, then Helix's when this
+machine has joined one. This machine's list begins with what needs you:
+questions jobs are waiting on, then failures and pull requests opened since
+the last time you ran `animus status`. A job held for room, or waiting for an
+earlier spec, says why on its line. With an id, that job, and the end of its
+log (on Helix, the same `watch it:` links).
+`--all` lists every person's jobs on Helix, with whose each is; only the owner
+may use it.
+
+With a Helix joined, a job id means Helix's unless `--local` names one of this
+machine's; `--helix` and `--local` also pick which list prints. The same goes
+for `result`, `answer` and `cancel`.
+
+#### The list at the start of a session
+
+The plugin's SessionStart hook runs `animus session-start`, which prints that
+same needs-you list when it is not empty, followed by a pointer to
+`animus status`, and prints nothing otherwise. It only reads the queue: it
+starts no loop and does not mark anything as seen, so the list stays until
+`animus status` shows it.
 
 #### `animus result <id>`
 
@@ -349,11 +405,14 @@ One job as JSON. Exits 0 once it has ended in a PR.
 
 #### `animus answer <id> <text>`
 
-Answers a job's question. The job is queued again and resumes with it.
+Answers a job's question. The job is queued again and resumes with it; on this
+machine, the loop is started again if it had exited.
 
 #### `animus cancel <id>`
 
-Cancels a queued or running job of yours, or anyone's for the owner.
+Cancels a queued, waiting or running job of yours, or anyone's for the owner
+on Helix. On this machine a running job's process ends too, whichever process
+started it.
 
 #### `animus ui`
 
@@ -362,8 +421,11 @@ opens it in your browser and runs until Ctrl-C. It shows every job this machine
 ran, read from `~/.animus`, grouped by project and newest first, each with its
 job page. A job whose process is gone and that has no outcome shows as stopped,
 with `animus resume <job>`. Its Jobs page (`/jobs`, linked from the header) lists them 30 at a time with filters by result and project in the address; merged and closed tags come from `outcomes.json`. It has no sign-in and no people pages, and answers
-only GET and only for the host names `127.0.0.1` and `localhost`. There is no
-run log to show, so a job page's log is empty.
+only GET and only for the host names `127.0.0.1` and `localhost`. Jobs in
+this machine's queue are listed too, queued and waiting ones with their project
+and what they wait for or the room reason, and a job's page shows the log the
+loop kept for it. There is no run log to show beyond that for a job started
+outside the queue.
 
 #### `animus ui --helix`
 

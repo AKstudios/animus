@@ -4,10 +4,11 @@
 // then starts from a base that holds it. The earlier job is found in the run
 // log by the spec file it ran.
 import { existsSync } from 'node:fs';
-import { dirname, resolve } from 'node:path';
+import { dirname, relative, resolve } from 'node:path';
 import { readRuns } from './log.ts';
 import type { PrFind, PrLookup } from './pr.ts';
 import { AnimusError } from './proc.ts';
+import type { Earlier } from './queue.ts';
 import { loadSpec } from './spec.ts';
 
 const POLL_MS = 60_000;
@@ -66,4 +67,24 @@ export async function waitForMerged(p: { repo: string; files: readonly string[];
       await sleep(POLL_MS);
     }
   }
+}
+
+/** Where the pull request of each of these earlier spec files stands, found as `waitForMerged` finds it: the first one not merged says what to wait for, and one closed unmerged ends the wait. */
+export function earlierOf(p: { repo: string; files: readonly string[]; lookup: PrLookup; find: PrFind }): Earlier {
+  let open: string | undefined;
+  for (const file of p.files) {
+    let pr = readRuns().findLast((r) => r.repo === p.repo && r.spec_file === file && r.pr)?.pr;
+    let state = pr ? p.lookup(pr, p.repo) : undefined;
+    if (!pr) {
+      let title: string | undefined;
+      // A file that cannot be read has no title to look for: it is looked at again next time.
+      try { title = existsSync(file) ? loadSpec(file).title : undefined; } catch (e) { if (!(e instanceof AnimusError)) throw e; }
+      const found = title ? p.find(title, p.repo) : undefined;
+      pr = found?.url;
+      state = found?.state;
+    }
+    if (state === 'CLOSED') return { state: 'closed', reason: `this spec runs after ${file}, whose pull request ${pr} was closed without merging` };
+    if (state !== 'MERGED') open ??= `waiting for ${relative(p.repo, file)}'s pull request`;
+  }
+  return open ? { state: 'open', waiting: open } : { state: 'merged' };
 }

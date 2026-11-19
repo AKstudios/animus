@@ -9,6 +9,20 @@ clients with how to update.
 
 ## Unreleased
 
+## 0.6.1 (2026-11-19)
+
+- A person's facts and the screenshot viewer fit their space ([#44](https://github.com/AKstudios/animus/pull/44))
+- The display tells fixes apart and shows a running job as it is ([#46](https://github.com/AKstudios/animus/pull/46))
+- Jobs on this machine run from the same queue as Helix, without a session ([#43](https://github.com/AKstudios/animus/pull/43))
+- Design: a project's own image, env and secrets, and provision jobs ([#45](https://github.com/AKstudios/animus/pull/45))
+- The display shows names, usage and tokens, and finds its way back ([#42](https://github.com/AKstudios/animus/pull/42))
+- Tests no longer write into the real Animus home ([#40](https://github.com/AKstudios/animus/pull/40))
+- Helix holds a waiting job in its queue until the spec it builds on merges ([#41](https://github.com/AKstudios/animus/pull/41))
+- Glossary, ADR and rule for one queue on Helix and on one machine ([#39](https://github.com/AKstudios/animus/pull/39))
+- Fix any Animus pull request, from wherever it was opened ([#38](https://github.com/AKstudios/animus/pull/38))
+- Display fixture names tiers; npm run changelog removed ([#37](https://github.com/AKstudios/animus/pull/37))
+- Helix jobs started together no longer fail setting up with ENOTEMPTY ([#36](https://github.com/AKstudios/animus/pull/36))
+
 ## 0.6.0 (2026-11-19)
 
 - Pull requests no longer touch CHANGELOG.md: `npm run release` writes the release's notes from the merged pull requests, and a job's pull request has a `## Breaking` section when its implementer reports a breaking change (the report gains an optional `breaking`). The `changelog` gate is gone; `npm run changelog` stays as a no-op until a later change drops it.

@@ -43,8 +43,8 @@ Then ask Claude to run `animus doctor`. It lists anything missing.
       spec from the conversation.
 3. The job starts on its own. Say "run it locally" or "run it on Helix" to
    choose where.
-4. Wait for the PR. Locally, keep the session open; on Helix, you can close
-   it.
+4. Wait for the PR. You can close the session: a job runs on without it,
+   locally or on Helix, and a new session says what needs you.
 5. Review the PR and merge.
 
 ```mermaid

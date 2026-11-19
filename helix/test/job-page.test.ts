@@ -90,7 +90,7 @@ function animusFolder(animus: string, job: string): void {
     { job, ms: ms({ setup: 4_000, plan: 50_000, implement: 600_000 }) },
     { job: 'someone-else', ms: ms({ setup: 99_000_000 }) },
     { job, ms: ms({ setup: 2_000, implement: 720_000, gates: 95_000, review: 130_000, pr: 9_000 }) },
-  ].map((r) => JSON.stringify(r)).join('\n'));
+  ].map((r) => JSON.stringify({ repo: 'app', ...r })).join('\n'));
 }
 
 // Protects: criterion 4, what a job page shows. Fails when: any part of the job's folder or row is left off its page, or a failed check's output is lost.
