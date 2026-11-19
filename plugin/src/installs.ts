@@ -9,7 +9,7 @@
 // almost no disk. The cache is filled by what the install command itself
 // made in a clean worktree, never by the person's own checkout, so it holds
 // exactly what a fresh install would.
-import { createHash } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { existsSync, mkdirSync, readdirSync, readFileSync, readlinkSync, realpathSync, renameSync, rmSync, statSync, utimesSync, writeFileSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
 import { dirname, isAbsolute, join, matchesGlob } from 'node:path';
@@ -146,8 +146,10 @@ function save(worktree: string, i: Install, entry: string): string | undefined {
   if (!dirs.length) return `${i.run} made nothing at ${i.path}`;
   const pinned = pinnedTo(worktree, dirs);
   if (pinned) return `${pinned} links to the worktree by its absolute path, so a clone elsewhere would break`;
-  const tmp = `${entry}.tmp-${process.pid}`;
-  rmSync(tmp, { recursive: true, force: true });
+  // Not the pid alone: each Helix job runs in a container of its own, where
+  // every job's animus has the same pid, and they share the clone's cache.
+  // Two saves of one key at once would then write and remove the same folder.
+  const tmp = `${entry}.tmp-${process.pid}-${randomUUID()}`;
   for (const d of dirs) {
     if (!cloneDir(join(worktree, d), join(tmp, 'files', d))) {
       rmSync(tmp, { recursive: true, force: true });
