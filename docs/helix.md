@@ -278,10 +278,18 @@ session need not stay open.
 
 Anyone on Helix adds a project from a checkout of it, with `animus project
 add` or by asking Claude to. Helix clones it with that person's token, checks
-the token may push, reads its `.animus/animus.yaml`, and runs the profile's
-installs and setup once on its base branch, in the job image when jobs run in
-containers. Only then are jobs taken for it. A project that fails the check
-says why and can be added again.
+the token may push, reads its `.animus/animus.yaml`, and checks its base
+branch as a job would find it. With containers, it builds the project image
+from the base branch's `.animus/Dockerfile` first, or says the project uses
+the job image when it has none ([project images](#project-images)). Then,
+in that image under a job's memory and cpu limits, it runs the profile's
+installs and setup, and every gate in full: each command's `run`, never
+its `affected`, whatever its `paths`. A gate that fails once and passes when
+run again counts as passed, as in a job. Only when all of it passes are jobs
+taken for it. A project that fails the check (a Dockerfile refused or not
+built, setup failing, or a gate failing, with the gate's name and the end
+of its output) says why and can be added again. A project already ready
+before this check ran every gate stays ready; adding it again runs it.
 
 GitHub is the member list: anyone on Helix whose token may push to a project
 may submit for it. Only whoever added a project, or the owner, removes it
@@ -297,6 +305,27 @@ Docker container of its own, from the image `helix image` builds
 read-only and their credentials, with no Docker socket and no published port.
 Without it, jobs run in worktrees on the machine and share its tools, ports
 and network.
+
+### Project images
+
+A project whose base branch has `.animus/Dockerfile` (how to write one:
+[configuration.md](configuration.md#the-project-image)) runs its jobs in
+its own image, built on the job image: `animus-project:<hash>`, the hash of
+the Dockerfile's text and the job image's ID. A release that leaves the job
+image as it was rebuilds nothing. Helix builds it with `docker build -`, the
+Dockerfile on standard input and `--build-arg ANIMUS_JOB=animus-job:<version>`,
+in its own environment, so no one's tokens reach it, and stops it after 30
+minutes. It builds it:
+
+- at the project's add check, whose log shows the build;
+- before a job, when the image is missing because the Dockerfile changed on
+  the base branch or the job image did. The job holds its slot while it
+  builds, and the build is in its log. A build that fails ends the job as
+  failed, with cause setup and the end of the build's output.
+
+A job reads the Dockerfile from its project's base branch as GitHub has it,
+like the profile, so it never runs in an image built from its own branch.
+Without containers the Dockerfile is not read.
 
 ## Running unattended
 
@@ -396,8 +425,11 @@ once a day, in a process of its own; `helix cleanup [--days <n>]
   closed PR's worktree goes at once and its branches `--days` after it
   ended (default 30). Without containers it runs once, as the machine's
   account.
-- removes `animus-job` images of other releases. Docker refuses one a
-  container still uses, and the next run tries again.
+- removes `animus-job` images of other releases, and `animus-project`
+  images no project's current Dockerfile (its base branch as Helix's clone
+  last fetched it) and job image give. Docker refuses one a container still
+  uses, and the next run tries again. `--dry-run` says what it would remove
+  and removes nothing.
 
 Every job's record stays for analysis: Helix's own folder of it
 (`~/.helix/jobs/<id>/`: the spec and `log.txt`), its row in `helix.db`,
