@@ -9,6 +9,16 @@ clients with how to update.
 
 ## Unreleased
 
+## 0.6.2 (2026-11-19)
+
+- A job page shows what is happening now and every stage the job went through ([#53](https://github.com/AKstudios/animus/pull/53))
+- A failed add check starts a provision job that fixes the project's environment ([#52](https://github.com/AKstudios/animus/pull/52))
+- Overview: finished and open PR rows show project, submitter and time taken ([#51](https://github.com/AKstudios/animus/pull/51))
+- One name per person, People that loads, headings on their own row and a clear labels dialog ([#50](https://github.com/AKstudios/animus/pull/50))
+- A project's profile names its environment variables and secrets ([#49](https://github.com/AKstudios/animus/pull/49))
+- Glossary: one name per person, labels, stages and agent sessions ([#48](https://github.com/AKstudios/animus/pull/48))
+- A project runs in its own image, and adding it runs every gate ([#47](https://github.com/AKstudios/animus/pull/47))
+
 ## 0.6.1 (2026-11-19)
 
 - A person's facts and the screenshot viewer fit their space ([#44](https://github.com/AKstudios/animus/pull/44))
