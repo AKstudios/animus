@@ -20,7 +20,7 @@ import { addPerson, addRepo, configFile, envFileVars, helixHome, identityEnv, im
 import { ensureSetup } from '../../plugin/src/workspace.ts';
 import { loadProfile } from '../../plugin/src/profile.ts';
 import { checkInChild, checkProject, failInterruptedChecks, forgetProject, setupAndGates, setupHere, setupInContainer } from './projects.ts';
-import { projectImage } from './project-image.ts';
+import { jobImageOf, projectImage } from './project-image.ts';
 import { INVITE_HOURS, invite, takeOff } from './join.ts';
 import { ask } from '../../plugin/src/join.ts';
 import { describeInvite, describeRemoval } from '../../plugin/src/remote.ts';
@@ -186,6 +186,7 @@ function main(argv: string[]): number | undefined | Promise<number> {
         if (problem) throw new AnimusError(`config.yaml asks for containers, but ${problem}`);
         isolation = {
           launch: containerLaunch({ home, animusRoot: ROOT, image, limits: config.container, uid: uid(), gid: gid() }),
+          image: jobImageOf({ jobImage: image }),
           reap: removeContainer,
           animusHomeOf: (person: string) => personDirs(home, person).animus,
         };

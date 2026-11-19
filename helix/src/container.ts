@@ -154,7 +154,7 @@ export function draftLaunch(opts: { home: string; animusRoot: string; image: str
  * with goes in, by name; the machine's own environment stays outside.
  */
 export function containerLaunch(opts: { home: string; animusRoot: string; image: string; limits: ContainerConfig; uid: number; gid: number }): Launch {
-  return (job, repoDir, env) => {
+  return (job, repoDir, env, image = opts.image) => {
     const person = personDirs(opts.home, job.person);
     makePersonDirs(person);
     const clone = join(person.repos, job.repo);
@@ -167,7 +167,7 @@ export function containerLaunch(opts: { home: string; animusRoot: string; image:
     });
     const envNames = [...new Set([...Object.keys(env), ...Object.keys(extra)])].sort();
     const tokens = env.ANIMUS_GH_TOKEN_FILE ? dirname(env.ANIMUS_GH_TOKEN_FILE) : undefined;
-    const args = dockerArgs({ job, image: opts.image, limits: opts.limits, uid: opts.uid, gid: opts.gid, animusRoot: opts.animusRoot, person, specDir: dirname(job.spec), envNames, command, ...(tokens ? { tokens } : {}), ...(lessons ? { lessons } : {}) });
+    const args = dockerArgs({ job, image, limits: opts.limits, uid: opts.uid, gid: opts.gid, animusRoot: opts.animusRoot, person, specDir: dirname(job.spec), envNames, command, ...(tokens ? { tokens } : {}), ...(lessons ? { lessons } : {}) });
     return { command: 'docker', args, env: extra, cwd: opts.home };
   };
 }

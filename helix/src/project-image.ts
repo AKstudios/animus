@@ -7,16 +7,17 @@ import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { AnimusError, failureExcerpt } from '../../plugin/src/proc.ts';
 import { docker as realDocker, type Docker } from './container.ts';
+import { freshBase } from './fresh.ts';
 
 export const DOCKERFILE = '.animus/Dockerfile';
 /** The repository every project image is a tag of. */
 export const PROJECT_IMAGE = 'animus-project';
 const BUILD_MS = 30 * 60 * 1000;
 
-/** The Dockerfile on the base branch as last fetched (origin/<base>), never a job's branch; undefined when it has none. */
-export function readDockerfile(clone: string, base: string): string | undefined {
+/** The Dockerfile at a commit of the base branch as fetched (origin/<base>, or the commit freshBase gives), never a job's branch; undefined when it has none. */
+export function readDockerfile(clone: string, commit: string): string | undefined {
   // Not tryGit: its output is trimmed, and the name hashes the text as committed.
-  const r = spawnSync('git', ['show', `origin/${base}:${DOCKERFILE}`], { cwd: clone, encoding: 'utf8' });
+  const r = spawnSync('git', ['show', `${commit}:${DOCKERFILE}`], { cwd: clone, encoding: 'utf8' });
   return r.status === 0 ? r.stdout : undefined;
 }
 
@@ -30,36 +31,54 @@ function startsFromJobImage(dockerfile: string): boolean {
   return /^ARG\s+ANIMUS_JOB$/i.test(arg ?? '') && /^FROM\s+(\$ANIMUS_JOB|\$\{ANIMUS_JOB\})(\s+AS\s+\S+)?$/i.test(from ?? '');
 }
 
+/** A project image to build: this command, the Dockerfile on its stdin, stopped after timeout ms. */
+export type ImageBuild = { command: string; args: string[]; input: string; timeout: number };
+
+/** Why a build failed, with the end of its output. */
+export const didNotBuild = (output: string): string => `the project image did not build from ${DOCKERFILE}:\n${failureExcerpt(output, 30)}`;
+
 /**
  * The image a project's jobs run in: the job image when it has no
- * Dockerfile, else its project image, built here when Docker does not have
- * it. Says what it does, the build's output included. Throws why when the
- * Dockerfile is refused or does not build.
+ * Dockerfile, else its project image, with the build to run first when
+ * Docker does not have it. Throws why when the Dockerfile is refused or the
+ * job image is not there.
  */
-export function projectImage(opts: { dockerfile: string | undefined; jobImage: string; say: (line: string) => void; base?: string; docker?: Docker }): string {
-  const { dockerfile, jobImage, say } = opts;
-  const run = opts.docker ?? realDocker;
-  if (dockerfile === undefined) {
-    say(`no ${DOCKERFILE} on ${opts.base ?? 'the base branch'}: jobs run in the job image ${jobImage}`);
-    return jobImage;
-  }
+export function planProjectImage(opts: { dockerfile: string | undefined; jobImage: string; docker?: Docker }): { image: string; build?: ImageBuild } {
+  const { dockerfile, jobImage } = opts;
+  if (dockerfile === undefined) return { image: jobImage };
   if (!startsFromJobImage(dockerfile)) throw new AnimusError(`${DOCKERFILE} must start with ARG ANIMUS_JOB then FROM $ANIMUS_JOB, so the project image is built on the job image Helix gives it`);
+  const run = opts.docker ?? realDocker;
   const inspect = (image: string) => run(['image', 'inspect', '--format', '{{.Id}}', image]);
   const job = inspect(jobImage);
   if (!job) throw new AnimusError('docker is not installed or not on PATH');
   if (job.status !== 0) throw new AnimusError(`there is no image ${jobImage}: build it with helix image`);
   const image = projectImageName(dockerfile, job.stdout.trim());
-  if (inspect(image)?.status === 0) {
-    say(`the project image ${image} from ${DOCKERFILE} is built already`);
-    return image;
-  }
-  say(`building the project image ${image} from ${DOCKERFILE}, on ${jobImage}`);
+  if (inspect(image)?.status === 0) return { image };
   // No context, no secrets: the Dockerfile and the job image are all it is given.
-  const r = run(['build', '--tag', image, '--build-arg', `ANIMUS_JOB=${jobImage}`, '-'], { input: dockerfile, timeout: BUILD_MS });
+  return { image, build: { command: 'docker', args: ['build', '--tag', image, '--build-arg', `ANIMUS_JOB=${jobImage}`, '-'], input: dockerfile, timeout: BUILD_MS } };
+}
+
+/**
+ * The image a project's jobs run in, built here when Docker does not have
+ * it: what the add check runs in. Says what it does, the build's output
+ * included. Throws why when the Dockerfile is refused or does not build.
+ */
+export function projectImage(opts: { dockerfile: string | undefined; jobImage: string; say: (line: string) => void; base?: string; docker?: Docker }): string {
+  const { dockerfile, jobImage, say } = opts;
+  const { image, build } = planProjectImage(opts);
+  if (dockerfile === undefined) say(`no ${DOCKERFILE} on ${opts.base ?? 'the base branch'}: jobs run in the job image ${jobImage}`);
+  else if (!build) say(`the project image ${image} from ${DOCKERFILE} is built already`);
+  if (!build) return image;
+  say(`building the project image ${image} from ${DOCKERFILE}, on ${jobImage}`);
+  const r = (opts.docker ?? realDocker)(build.args, { input: build.input, timeout: build.timeout });
   const output = `${r?.stdout ?? ''}${r?.stderr ?? ''}`.trimEnd();
   // shortcut: the build's output is said once it ends, not as it goes; stream it if people watch long builds.
   for (const line of output.split('\n').filter(Boolean)) say(`  ${line}`);
-  if (r?.status !== 0) throw new AnimusError(`the project image did not build from ${DOCKERFILE}:\n${failureExcerpt(output, 30)}`);
+  if (r?.status !== 0) throw new AnimusError(didNotBuild(output));
   say(`built ${image}`);
   return image;
 }
+
+/** A job's image, for the supervisor: from its project's Dockerfile on the base branch as GitHub has it now, fetched with the job's credentials. */
+export const jobImageOf = (opts: { jobImage: string; docker?: Docker }) => (repoDir: string, env: Record<string, string>) =>
+  planProjectImage({ ...opts, dockerfile: readDockerfile(repoDir, freshBase(repoDir, env)) });

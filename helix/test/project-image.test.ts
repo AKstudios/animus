@@ -6,9 +6,10 @@ import { join } from 'node:path';
 import { test } from 'node:test';
 import { makeRepo, write } from '../../plugin/test/helpers.ts';
 import type { Docker } from '../src/container.ts';
-import { projectImage, projectImageName } from '../src/project-image.ts';
+import { jobImageOf, projectImage, projectImageName } from '../src/project-image.ts';
 import { checkProject, projectDir } from '../src/projects.ts';
 import { openStore } from '../src/store.ts';
+import { supervise, type Launch } from '../src/supervisor.ts';
 
 const git = (cwd: string, ...args: string[]) => execFileSync('git', args, { cwd, encoding: 'utf8' }).trim();
 const JOB = 'animus-job:0.7.0';
@@ -123,4 +124,74 @@ test('the add check fails a project whose Dockerfile is refused', () => {
   assert.equal(setupRan, false);
   assert.match(c.store.project('app')!.reason!, /must start with ARG ANIMUS_JOB/);
   c.store.close();
+});
+
+/**
+ * A Helix with one slot and one ready project whose base branch on GitHub (a
+ * bare repository) has DOCKERFILE, with the machine's clone of it. Its jobs
+ * run in a fake launch that records the image; a build that is needed runs a
+ * fake process that echoes the Dockerfile it was given and ends with status.
+ */
+function jobsOn(built: Set<string>, status = 0) {
+  const home = mkdtempSync(join(tmpdir(), 'helix-job-image-'));
+  const source = makeRepo();
+  write(source, '.animus/animus.yaml', 'commands:\n  test: "true"\n');
+  write(source, '.animus/Dockerfile', DOCKERFILE);
+  git(source, 'add', '-A');
+  git(source, 'commit', '-qm', 'profile');
+  const bare = join(home, 'origin.git');
+  git(home, 'clone', '-q', '--bare', source, bare);
+  git(source, 'remote', 'add', 'origin', bare);
+  const clone = join(home, 'clone');
+  git(home, 'clone', '-q', bare, clone);
+  const store = openStore(join(home, 'helix.db'));
+  store.putPerson('ana', { token_sha256: 'x' });
+  store.putProject({ name: 'app', url: bare, dir: clone, state: 'ready', added: '' });
+  const ranIn: (string | undefined)[] = [];
+  const launch: Launch = (_job, _dir, _env, image) => { ranIn.push(image); return { command: process.execPath, args: ['-e', 'console.error("job app-1: x"); console.log(\'{"outcome":"pr"}\')'] }; };
+  const build = `let s = ''; process.stdin.on('data', (d) => { s += d; }); process.stdin.on('end', () => { console.error(s + '#9 ${status ? 'ERROR: Unable to locate package golang-9' : 'DONE'}'); process.exitCode = ${status}; });`;
+  const { docker } = fakeDocker(built);
+  const supervisor = supervise({
+    store, config: { host: '', port: 0, slots: 1 }, home, launch,
+    image: (dir, env) => {
+      const planned = jobImageOf({ jobImage: JOB, docker })(dir, env);
+      return planned.build ? { ...planned, build: { ...planned.build, command: process.execPath, args: ['-e', build] } } : planned;
+    },
+  });
+  const run = async () => {
+    const { id } = supervisor.submit('ana', { repo: 'app', spec: '---\nsize: small\n---\n# Go\n\n## Acceptance criteria\n\n1. It works.\n', name: 'spec.md' });
+    for (let i = 0; i < 500 && store.get(id)!.state !== 'ended'; i++) await new Promise((r) => { setTimeout(r, 20); });
+    return { job: store.get(id)!, log: supervisor.log(id) };
+  };
+  /** Changes the Dockerfile on GitHub's base branch, after the machine's clone was made. */
+  const change = (text: string) => { write(source, '.animus/Dockerfile', text); git(source, 'commit', '-qam', 'dockerfile'); git(source, 'push', '-q', 'origin', 'HEAD:main'); };
+  return { run, change, ranIn, stop: () => { supervisor.stop(); store.close(); } };
+}
+
+// Protects: criterion 3. Fails when: a job runs in the job image, in a stale project image after its Dockerfile changed on GitHub, or a missing image is not built first with its build in the job's log.
+test('a job runs in its project\'s image, built before it starts when the base branch\'s Dockerfile changed', async () => {
+  const h = jobsOn(new Set([projectImageName(DOCKERFILE, 'sha256:job1')]));
+  const first = await h.run();
+  assert.equal(first.job.outcome, 'pr', first.job.reason);
+  assert.doesNotMatch(first.log, /building the project image/);
+
+  const changed = `${DOCKERFILE}RUN apt-get install -y libvips\n`;
+  h.change(changed);
+  const second = await h.run();
+  assert.equal(second.job.outcome, 'pr', second.job.reason);
+  assert.deepEqual(h.ranIn, [projectImageName(DOCKERFILE, 'sha256:job1'), projectImageName(changed, 'sha256:job1')]);
+  assert.match(second.log, /building the project image animus-project:[0-9a-f]{16} from \.animus\/Dockerfile[\s\S]*RUN apt-get install -y libvips\n#9 DONE[\s\S]*job app-1: x/);
+  h.stop();
+});
+
+// Protects: a broken build fails the job before it runs. Fails when: the job starts anyway, or ends without cause setup and the build's last lines.
+test('a project image that does not build ends the job failed with cause setup and the end of the build\'s output', async () => {
+  const h = jobsOn(new Set(), 1);
+  const { job, log } = await h.run();
+  assert.equal(job.outcome, 'failed');
+  assert.equal(job.cause, 'setup');
+  assert.match(job.reason!, /the project image did not build from \.animus\/Dockerfile:[\s\S]*Unable to locate package golang-9/);
+  assert.match(log, /Unable to locate package golang-9/);
+  assert.doesNotMatch(log, /job app-1: x/);
+  h.stop();
 });

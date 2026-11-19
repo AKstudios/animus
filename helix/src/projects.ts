@@ -194,7 +194,7 @@ export function checkProject(opts: {
     const fetched = git(['fetch', '--quiet', 'origin', profile.base], { cwd: dir, env: withToken });
     if (fetched.code !== 0) return fail(`its base branch ${profile.base} could not be fetched: ${fetched.out.split('\n').pop()}`);
     // Only with containers: on one machine the machine is the environment, and the Dockerfile is not read.
-    const image = opts.image?.(readDockerfile(dir, profile.base), profile.base);
+    const image = opts.image?.(readDockerfile(dir, `origin/${profile.base}`), profile.base);
 
     if (!profile.setup && !profile.installs.length && !Object.keys(profile.commands).length) {
       say('the profile has no installs, setup or gates to try');

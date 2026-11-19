@@ -7,6 +7,7 @@
 import { mkdirSync } from 'node:fs';
 import { dirname } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
+import type { Cause } from '../../plugin/src/log.ts';
 import type { Tier } from '../../plugin/src/profiles.ts';
 
 export type State = 'queued' | 'waiting' | 'running' | 'ended' | 'cancelled';
@@ -46,6 +47,8 @@ export type HelixJob = {
   ask?: string;
   /** How the run ended: Animus's outcome (pr, draft-pr, needs-input, failed). */
   outcome?: string;
+  /** Why a job Helix ended before animus ran failed, as Animus's run log says it (log.ts Cause): setup, when its project image did not build. */
+  cause?: Cause;
   pr?: string;
   reason?: string;
   question?: string;
