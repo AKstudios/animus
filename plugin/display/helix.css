@@ -392,15 +392,14 @@ a.tag:hover { opacity: 1; background: color-mix(in srgb, currentColor 22%, trans
 .grid th:first-child, .grid td:first-child { text-align: left; font: 14px var(--sans); }
 .grid td { padding: 11px 10px; border-bottom: 1px solid var(--soft); text-align: right; font: 13px var(--mono); }
 .grid .num { font-variant-numeric: tabular-nums; }
-.cause { display: grid; grid-template-columns: 150px minmax(0, 1fr) 64px; gap: 12px; align-items: center; padding: 6px 0; font-size: 13px; }
+.cause { display: grid; grid-template-columns: 150px minmax(0, 1fr) 36px; gap: 12px; align-items: center; padding: 7px 0; font-size: 13px; }
 .cause .mono { text-align: right; font-size: 12px; }
-.bar { display: block; width: 100%; height: 6px; border-radius: 3px; overflow: hidden; }
+.bar { display: block; width: 100%; height: 8px; border-radius: 4px; overflow: hidden; }
 .bar .rail { fill: var(--soft); }
 .bar .fill { fill: var(--mute); }
 .bar.tone-fail .fill { fill: var(--fail-ink); }
 .bar.tone-ask .fill { fill: var(--ask); }
-.note { font-size: 13px; color: var(--mute); }
-.note b { color: var(--ink); font-family: var(--mono); font-weight: 600; }
+.note { font-size: 12px; color: var(--mute); }
 .li { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: 4px 12px; align-items: center; padding: 10px 0; border-bottom: 1px solid var(--soft); font-size: 13px; }
 .li .r { font: 12px var(--mono); color: var(--mute); text-align: right; }
 .li .tt { overflow-wrap: anywhere; }
@@ -415,7 +414,6 @@ a.tag:hover { opacity: 1; background: color-mix(in srgb, currentColor 22%, trans
 }
 @media (max-width: 640px) {
   .tile b { font-size: 24px; }
-  .cause { grid-template-columns: 110px minmax(0, 1fr) 48px; }
   .lesson { grid-template-columns: minmax(0, 1fr); }
   .lesson .cmd { grid-row: auto; grid-column: 1; justify-self: start; }
   .li { grid-template-columns: auto minmax(0, 1fr); } .li .r { grid-column: 1 / -1; text-align: left; }
