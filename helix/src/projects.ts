@@ -195,7 +195,8 @@ export function checkProject(opts: {
   // fixable: the environment failed (image build, setup, a gate), which a provision job may fix; the project's adder gets one unless it has one already.
   const fail = (why: string, fixable = false) => {
     say(`failed: ${why}`);
-    if (fixable && project.added_by && store.project(name)?.added === project.added) {
+    if (project.after_provision && fixable) say(`this check followed the merge of provision job ${project.after_provision}: no second provision job is queued`);
+    else if (fixable && project.added_by && store.project(name)?.added === project.added) {
       const have = provisionOf(store, name);
       if (have) say(`${describeExisting(have)}: no second one is queued`);
       else say(`queued provision job ${queueProvision({ store, home, project, why: mask(why, Object.values(given)) }).id} for ${project.added_by} to fix its environment`);

@@ -4,7 +4,8 @@
 // Nothing is kept but the last answer per project, for a minute.
 import type { DisplayClosed, DisplayPr } from '../../plugin/display/shape.ts';
 import { personEnv } from './config.ts';
-import type { Store } from './store.ts';
+import { provisionOf } from './provision.ts';
+import type { Project, Store } from './store.ts';
 
 /** The part of a GitHub pull request this needs. */
 export type GithubPr = { html_url: string; number: number; title: string; draft?: boolean; created_at: string; closed_at?: string | null; merged_at?: string | null };
@@ -40,7 +41,11 @@ export type OpenPrs = { (): Promise<DisplayPr[]>; closed(): Promise<DisplayClose
  * minute. A PR whose person has left Helix, or has no GitHub token, is not asked
  * about and is not listed.
  */
-export function openPrs(opts: { store: Store; list?: ListPrs; listClosed?: ListPrs; now?: () => number; fresh?: (person: string) => Promise<unknown> }): OpenPrs {
+export function openPrs(opts: {
+  store: Store; list?: ListPrs; listClosed?: ListPrs; now?: () => number; fresh?: (person: string) => Promise<unknown>;
+  /** Told of each closed PR that a job of Helix's opened, by the job's id: merged, or closed without. */
+  ended?: (job: number, merged: boolean) => void;
+}): OpenPrs {
   const { store } = opts;
   const list = opts.list ?? listOpenPrs;
   // A fake `list` without a fake `listClosed` must not send the closed call to GitHub itself.
@@ -52,7 +57,9 @@ export function openPrs(opts: { store: Store; list?: ListPrs; listClosed?: ListP
     const kept = new Map<string, { at: number; got: Promise<T[]> }>();
     return async () => {
       const at = now();
-      const all = await Promise.all(store.projects().filter((p) => p.state === 'ready').map((p) => {
+      // A failed project whose provision job opened a pull request is asked about too: its merge is what makes the project ready.
+      const watched = (p: Project) => p.state === 'ready' || (p.state === 'failed' && !!provisionOf(store, p.name)?.pr);
+      const all = await Promise.all(store.projects().filter(watched).map((p) => {
         const known = kept.get(p.name);
         if (known && at - known.at < KEPT_MS) return known.got;
         const got = fetch(p.name, p.url).catch(() => []);
@@ -88,6 +95,9 @@ export function openPrs(opts: { store: Store; list?: ListPrs; listClosed?: ListP
   };
 
   const open = cached((name, url) => ask(name, url, list, (pr, job): DisplayPr => ({ job: job.id, repo: name, person: job.person, number: pr.number, title: pr.title, url: pr.html_url, draft: pr.draft === true, created: pr.created_at })));
-  const closed = cached((name, url) => ask(name, url, listClosed, (pr, job): DisplayClosed => ({ job: job.id, number: pr.number, merged: !!pr.merged_at, at: pr.merged_at ?? pr.closed_at ?? pr.created_at })));
+  const closed = cached((name, url) => ask(name, url, listClosed, (pr, job): DisplayClosed => {
+    opts.ended?.(job.id, !!pr.merged_at);
+    return { job: job.id, number: pr.number, merged: !!pr.merged_at, at: pr.merged_at ?? pr.closed_at ?? pr.created_at };
+  }));
   return Object.assign(open, { closed });
 }

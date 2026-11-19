@@ -47,6 +47,8 @@ export type HelixJob = {
   ask?: string;
   /** A provision job (provision.ts): queued by a failed add check to fix its project's environment; its spec is Helix's. */
   provision?: boolean;
+  /** A provision job's pull request, once Helix has seen it merged or closed (provision.ts provisionEnded). */
+  pr_done?: 'merged' | 'closed';
   /** How the run ended: Animus's outcome (pr, draft-pr, needs-input, failed). */
   outcome?: string;
   /** Why a job Helix ended before animus ran failed, as Animus's run log says it (log.ts Cause): setup, when its project image did not build. */
@@ -85,6 +87,8 @@ export type Activity = { id: number; who: string; at: string; kind: ActivityKind
 export type Project = {
   name: string; url: string; dir: string; state: 'checking' | 'ready' | 'failed';
   added: string; added_by?: string; reason?: string;
+  /** The provision job whose merged pull request started this check: a check that fails again queues no second job. */
+  after_provision?: number;
 };
 
 /**

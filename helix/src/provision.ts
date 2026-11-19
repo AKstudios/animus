@@ -15,8 +15,25 @@ export type Provision = { job: number; state: HelixJob['state']; pr?: string };
 export function provisionOf(store: Store, name: string): HelixJob | undefined {
   const mine = (jobs: HelixJob[]) => jobs.filter((j) => j.provision && j.repo === name);
   const active = mine([...store.inState('queued'), ...store.inState('waiting'), ...store.inState('running')])[0];
-  // shortcut: a pull request counts as open until it is merged or closed and Helix has seen that, which the merge check marks on the job; one closed by hand blocks provisioning until then.
-  return active ?? mine(store.inState('ended')).filter((j) => j.pr && (j.outcome === 'pr' || j.outcome === 'draft-pr')).pop();
+  // A pull request counts as open until Helix has seen it merged or closed (provisionEnded); one closed by hand blocks provisioning until it does.
+  return active ?? mine(store.inState('ended')).filter((j) => j.pr && !j.pr_done && (j.outcome === 'pr' || j.outcome === 'draft-pr')).pop();
+}
+
+/**
+ * Helix has seen a provision job's pull request merged or closed (open-prs.ts).
+ * Merged, and its project still failed: the add check runs again on the base
+ * branch, which no second provision job follows. Once per pull request.
+ */
+export function provisionEnded(opts: { store: Store; startCheck: (name: string) => void }, jobId: number, merged: boolean): void {
+  const { store } = opts;
+  const job = store.get(jobId);
+  if (!job?.provision || job.pr_done) return;
+  store.save({ ...job, pr_done: merged ? 'merged' : 'closed' });
+  const project = store.project(job.repo);
+  if (!merged || project?.state !== 'failed') return;
+  const { reason: _old, ...rest } = project;
+  store.putProject({ ...rest, state: 'checking', after_provision: job.id });
+  opts.startCheck(project.name);
 }
 
 export const provisionView = (store: Store, name: string): { provision?: Provision } => {
