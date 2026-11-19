@@ -6,12 +6,13 @@ const pulls: Record<number, Pull> = {
   1: { number: 1, title: 'Add a thing', body: 'Details.\n\n## Review here\n\nNothing.', url: 'https://x/pull/1' },
   2: { number: 2, title: 'Rename a field', body: 'Intro\n\n## Breaking\n\nThe field `a` is now `b`.\nRename it in your specs.\n\n## Review here\n\nx', url: 'https://x/pull/2' },
 };
+// A git that fails where real git does. release.ts's helper exits the process on any failure, so a
+// failing call here throws an error collect() does not catch: a try/catch around git would not save it.
 const fake = (log: string, tag = 'v0.1.0') => ({
   git: (...args: string[]) => {
-    // Like release.ts's helper, which exits on any git failure: a command that would fail has no answer here.
-    if (args[0] === 'describe') throw new Error('git describe fails when there is no tag');
     if (args[0] === 'tag') return tag;
-    assert.deepEqual(args.slice(-1), tag ? [`${tag}..HEAD`] : ['--format=%s']);
+    const range = args.find((a) => a.endsWith('..HEAD'));
+    if (range && range !== `${tag}..HEAD`) throw new Error(`git log ${range}: unknown revision`);
     return log;
   },
   pull: (n: number) => pulls[n]!,
