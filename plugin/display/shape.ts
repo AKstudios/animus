@@ -111,7 +111,7 @@ export type JobRun = {
   fix_rounds: number;
   gates: { flaky: string[] }[];
   /** Each agent session in the order it ran, with its stage, model, wall time and tokens. */
-  agents: { stage: string; role: string; tier: string; model: string; effort: string; ok: boolean; ms: number; turns: number; tokens: TokenCount; cost_usd: number; calls: number; errors: number }[];
+  agents: { stage: string; role: string; tier: string; model: string; effort: string; /** When it began (ISO); left out of a run recorded before that was kept. */ started?: string; ok: boolean; ms: number; turns: number; tokens: TokenCount; cost_usd: number; calls: number; errors: number }[];
   findings: { round: number; severity: string; fate: 'fixed' | 'open' | 'not-acted-on' }[];
   tools: { calls: number; errors: number; text: string };
 };

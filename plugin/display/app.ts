@@ -264,14 +264,19 @@ function jobSections(v: JobPageView): string {
     <div class="timekey">${v.bar.map((s) => `<span class="${s.on ? 'on' : ''}"><i class="st-${esc(s.name)}"></i>${esc(s.name)} <code>${s.on ? 'now' : esc(s.took)}</code></span>`).join('')}</div>` : '';
   const t = v.timeline;
   const stageRows = t.stages.map((s) => `<tr><td><i class="st-${esc(s.name)}"></i>${esc(s.name)}</td><td class="num">${esc(s.took)}</td><td class="num">${esc(s.share)}</td><td class="num">${s.sessions || '–'}</td><td class="num">${esc(s.tokens)}</td><td class="num">${esc(s.cost)}</td></tr>`).join('');
+  // One row per agent session, as Orbit's Workflow view draws them: the square blinks (CSS only) while the session works.
   const sessions = t.sessions.map((a, i) => `<div class="sess" data-key="sess-${i}">
-    <div class="sess-head"><span class="sess-name">${esc(a.name)}${a.ok ? '' : ' <span class="tone-fail">· ended badly</span>'}</span><span class="mono mute">${esc(a.took)} · ${esc(a.tokens)} tokens · ${esc(a.cost)}</span></div>
+    <span class="sq ${a.live ? 'live' : a.ok ? 'done' : 'bad'}" role="img" aria-label="${a.live ? 'working' : a.ok ? 'ended' : 'ended badly'}"></span>
+    <span class="sess-who"><span class="sess-name">${esc(a.role)}</span> <span class="mute">${esc([a.model, a.effort ? `${a.effort} effort` : ''].filter(Boolean).join(', '))}</span></span>
     <svg class="sess-bar" aria-hidden="true"><rect class="rail" width="100%" height="100%"/><rect class="st-${esc(a.stage)}" x="${a.at}%" width="${Math.max(a.pct, 0.4)}%" height="100%"/></svg>
-    <div class="sess-detail">${esc(a.stage)} · ${esc(a.tier)}${a.effort ? `, ${esc(a.effort)} effort` : ''} · ${esc(a.detail)}</div>
+    <span class="mono">${esc(a.took)}</span>
+    <span class="mono${a.errors ? ' tone-fail' : ''}">${a.calls} ${a.calls === 1 ? 'call' : 'calls'}${a.errors ? ' !' : ''}</span>
+    <span class="mono mute">${esc(a.tokens)} tokens</span>
+    ${a.live && a.tool ? `<span class="sess-tool mono">${esc(a.tool)} ${esc(a.target ?? '')}</span>` : ''}
   </div>`).join('');
+  const agentSessions = sessions ? section('sessions', `Agent sessions${t.note ? ` <span class="count">${esc(t.note)}</span>` : ''}`, `<div class="sessions">${sessions}</div>`) : '';
   const detail = `<div class="timeline">
     <div class="scroll"><table class="grid"><thead><tr><th>Stage</th><th class="num">Took</th><th class="num">Share</th><th class="num">Sessions</th><th class="num">Tokens</th><th class="num">Cost</th></tr></thead><tbody>${stageRows}</tbody></table></div>
-    ${sessions ? `<h3>Agent sessions <span class="count">in the order they ran, on the same bar</span></h3><div class="sessions">${sessions}</div>` : none('No agent session has ended yet.')}
   </div>`;
   // Closed, the heading and the bar are its summary, so the bar shows and a click on it opens the detail.
   const stages = bar ? `<details class="section fold-section stages" data-key="fs-stages"><summary><div class="section-head"><h2>Where the time went</h2><span class="hint">agents and tokens</span><span class="chev" aria-hidden="true"></span></div><div class="timebar-wrap">${bar}</div></summary>${detail}</details>`
@@ -297,6 +302,7 @@ function jobSections(v: JobPageView): string {
     v.reason ? `<pre class="text why">${esc(v.reason)}</pre>` : '',
     `<div class="numbers">${v.numbers.map((n) => `<div><code class="num">${esc(n.v)}</code><span class="mute">${esc(n.k)}</span></div>`).join('')}</div>`,
     slices ? section('slice-list', `Slices${note(`${v.slices.filter((s) => s.done).length} of ${v.slices.length} passed`)}`, `<div class="list">${slices}</div>`) : '',
+    agentSessions,
     stages,
     criteria ? foldSection('criteria', `Acceptance criteria${note(v.notes.criteria)}`, `<div class="list">${criteria}</div>`) : '',
     section('checks', `Checks${note(v.notes.checks)}`, (checks ? `<div class="list">${checks}</div>` : none(criteria ? 'No other checks.' : 'No checks have run yet.')) + flaky),
@@ -352,7 +358,7 @@ function jobMain(id: number | string, now: number, local: boolean): string {
   const v = state.job?.job.id === id ? jobView(state.job, now, local, state.display?.closed?.find((c) => c.job === id)) : undefined;
   const fixes = v?.facts.find((f) => f.k === 'fixes');
   const lead = v && !notice ? `<div class="tag-row"><span class="tag tone-${v.tag.tone}">${esc(v.tag.text)}</span>${fixes ? '<span class="tag tone-mute">Fix</span>' : ''}<span class="mute">${ref(id) ? `${ref(id)} · ` : ''}${v.lineParts.map((x) => (x.page ? `<a href="${esc(x.page)}">${esc(x.text)}</a>` : esc(x.text))).join(' · ')}${fixes?.page ? ` · fix of <a href="${esc(fixes.page)}">${esc(fixes.v)}</a>` : ''}</span></div>` : '';
-  const scope = `<div class="scope"><div><h1>${esc(v?.title ?? `Job ${ref(id) || id}`)}</h1>${lead}</div></div>`;
+  const scope = `<div class="scope"><div><h1>${esc(v?.title ?? `Job ${ref(id) || id}`)}</h1>${lead}${v?.now && !notice ? `<p class="now-line mono" data-now>${esc(v.now)}</p>` : ''}</div></div>`;
   const body = notice ? `<div class="none boxed">${esc(notice.text)}</div>${notice.signIn ? signIn : ''}` : v ? jobSections(v) : '';
   const to = from ?? { name: 'Jobs', href: '/jobs' };
   const trail = v && !notice ? `<nav class="crumb" aria-label="Trail"><a class="crumb-back" href="${esc(to.href)}">&larr; ${esc(to.name)}</a> / ${esc(v.trail.project)} / <code>${esc(v.trail.job)}</code></nav>` : back(to.href, to.name);

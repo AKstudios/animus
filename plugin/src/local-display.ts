@@ -7,20 +7,20 @@
 // machine's loopback is the person whose jobs these are, and there are no
 // people pages.
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
-import { closeSync, existsSync, openSync, readdirSync, readFileSync, readSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import type { AddressInfo } from 'node:net';
 import { homedir, hostname, userInfo } from 'node:os';
 import { basename, join } from 'node:path';
 import { listJobs, RESULTS, type JobFilter, type Result } from '../display/job-list.ts';
-import type { Display, DisplayJob, JobListPage, JobPage, ListJob, LiveSession, PrState } from '../display/shape.ts';
+import type { Display, DisplayJob, JobListPage, JobPage, ListJob, PrState } from '../display/shape.ts';
 import { asset, CSP } from './assets.ts';
 import { afterOf, fixRounds, insightsData, lessonsCiting } from './insights-data.ts';
-import { folderParts, read, shotFile } from './job-folder.ts';
+import { folderParts, forgetTools, liveSessions, read, shotFile } from './job-folder.ts';
 import { logFile } from './local-loop.ts';
 import { newerThan, openLocalQueue, queueFile, type LocalJob } from './local-queue.ts';
 import { readOutcomes, type Outcomes } from './outcomes.ts';
 import { tryGit } from './proc.ts';
-import { alive, animusHome, jobDir, loadProgress, loadState, readRuns, STAGES, toolsLog, type Progress, type Run, type ToolLine } from './log.ts';
+import { alive, animusHome, jobDir, loadProgress, loadState, readRuns, STAGES, toolsLog, type Run } from './log.ts';
 import { loadFactory } from './profiles.ts';
 import { animusVersion } from './version.ts';
 import { personNamer, profilesInfo, runTokens, usageOf } from './usage.ts';
@@ -160,57 +160,6 @@ export function localJobList(f: Partial<JobFilter>, before?: string): JobListPag
   return { at: new Date().toISOString(), ...listJobs(jobs, { ...f, person: '' }, before) };
 }
 
-/** Each running job's tool-call log read so far: how many bytes, and the lines in them. */
-const toolsRead = new Map<string, { offset: number; lines: ToolLine[] }>();
-
-/** A job's tool-call log, reading only what was appended since the last call; a log that shrank is read again. */
-function toolsSoFar(id: string): ToolLine[] {
-  let seen = toolsRead.get(id);
-  let size = 0;
-  try { size = statSync(toolsLog(id)).size; } catch { /* no log yet */ }
-  if (!seen || size < seen.offset) { seen = { offset: 0, lines: [] }; toolsRead.set(id, seen); }
-  if (size > seen.offset) {
-    const fd = openSync(toolsLog(id), 'r');
-    try {
-      const buf = Buffer.alloc(size - seen.offset);
-      readSync(fd, buf, 0, buf.length, seen.offset);
-      const whole = buf.subarray(0, buf.lastIndexOf(10) + 1);
-      seen.offset += whole.length;
-      for (const line of whole.toString('utf8').split('\n').filter(Boolean)) { try { seen.lines.push(JSON.parse(line) as ToolLine); } catch { /* a line that is not a call */ } }
-    } finally { closeSync(fd); }
-  }
-  return seen.lines;
-}
-
-/**
- * The sessions of a job's first attempt, before its run record: the ones the
- * tool-call log shows ended (a session's calls are logged when it ends, as one
- * run of lines of one stage and role), and the one progress says is working,
- * which owns the calls logged since progress last moved.
- */
-function liveSessions(id: string, p: Progress, now: number): LiveSession[] {
-  const lines = toolsSoFar(id);
-  const since = Date.parse(p.at);
-  const ended: LiveSession[] = [];
-  let prev: ToolLine | undefined;
-  for (const l of lines.filter((l) => !(Date.parse(l.at) >= since))) {
-    const s = ended.at(-1);
-    if (s && prev && prev.stage === l.stage && prev.role === l.role && prev.session === l.session) {
-      s.calls++; s.errors += l.ok ? 0 : 1; s.ms = Math.max(s.ms, Date.parse(l.at) + l.ms - Date.parse(s.started));
-    } else ended.push({ stage: l.stage, role: l.role, model: '', effort: '', started: l.at, ms: l.ms, calls: 1, errors: l.ok ? 0 : 1, live: false });
-    prev = l;
-  }
-  const mine = lines.filter((l) => Date.parse(l.at) >= since);
-  const last = mine.at(-1);
-  const role = p.who.split(' · ')[0]!;
-  const working: LiveSession = {
-    stage: p.stage, role, model: p.model ?? '', effort: p.effort ?? '', started: p.at, ms: Math.max(0, now - since), calls: mine.length, errors: mine.filter((l) => !l.ok).length, live: true,
-    ...(last ? { tool: last.tool, target: last.target } : {}),
-  };
-  // Only a stage with an agent has a session to show.
-  return p.model ? [...ended, working] : ended;
-}
-
 /** One job's page, or nothing when this machine has no such job. Its log is what the loop kept of its output; empty for a job that ran before the queue. */
 export function localJobPage(id: string): JobPage | undefined {
   const runs = readRuns();
@@ -228,8 +177,8 @@ export function localJobPage(id: string): JobPage | undefined {
   const pr: Partial<JobPage> = o ? { pr_state: o.state.toLowerCase() as PrState, pr_opened: o.opened, ...(o.state === 'MERGED' ? { pr_merged: o.closed ?? o.checked } : {}) } : {};
   const lessons = lessonsCiting(id);
   // A job that is not running keeps no log in memory; one with a run record has its sessions there.
-  const sessions = folder && job.state === 'running' && job.progress && !runs.some((r) => r.job === id) ? liveSessions(id, job.progress, Date.now()) : undefined;
-  if (job.state !== 'running') toolsRead.delete(id);
+  const sessions = folder && job.state === 'running' && job.progress && !runs.some((r) => r.job === id) ? liveSessions(toolsLog(id), job.progress, Date.now()) : undefined;
+  if (job.state !== 'running') forgetTools(toolsLog(id));
   return { at: new Date().toISOString(), stages: STAGES, job, ...(sessions?.length ? { sessions } : {}), ...pr, ...profiles(), ...(o ? { after: afterOf(o) } : {}), ...(lessons.length ? { lessons } : {}), ...(spec !== undefined ? { spec } : {}), log: q ? readLog(q.id) : '', ...(folder ? folderParts(jobDir(id), runs.filter((r) => r.job === id)) : {}) };
 }
 

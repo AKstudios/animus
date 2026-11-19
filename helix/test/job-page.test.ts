@@ -450,3 +450,32 @@ test('the labels dialog markup has its three ways to close and the folded table'
   assert.match(app, /state\.labels && event\.key === 'Escape'/);
   assert.match(app, /<details class="all-labels">/);
 });
+
+// Protects: criterion 1. Fails when: the Now line misses the stage, agent, model, effort, time on the stage or the current tool, or a job that is not running has one.
+test('a running job\'s page has a Now line from its progress and last tool call, and a job that is not running has none', () => {
+  const progress = { stage: 'implement' as const, who: 'implementer · deep tier · slice 2 of 3', at: '2026-11-17T11:56:00Z', model: 'opus', effort: 'high' };
+  const live = { stage: 'implement', role: 'implementer', model: 'opus', effort: 'high', started: progress.at, ms: 240_000, calls: 3, errors: 0, live: true, tool: 'Edit', target: 'plugin/display/app.ts' };
+  assert.equal(jobView(page({ progress }, { sessions: [live] }), NOW).now, 'Implementing slice 2 of 3 · implementer · opus, high effort · 4m · now: Edit plugin/display/app.ts');
+  assert.equal(jobView(page({ progress: { stage: 'gates', who: 'gates · attempt 1', at: '2026-11-17T11:59:00Z' } }), NOW).now, 'Running the gates · 1m');
+  assert.equal(jobView(page({ state: 'ended', progress }), NOW).now, undefined);
+});
+
+// Protects: criterion 4. Fails when: a session with a start time is not placed by it on the job's span, a live row loses its tool, "!" is missing on a failure, or an old record's sessions are not laid end to end under the note.
+test('agent sessions sit on the job\'s time span by their start, and an old record lays them end to end under a note', () => {
+  const t = { input: 1, output: 2, cache_read: 0, cache_write: 0 };
+  const base = { ...session, role: 'implementer', model: 'opus', tier: 'deep', effort: 'high', tokens: t, cost_usd: 1, calls: 4 };
+  const run = (agents: NonNullable<JobPage['run']>['agents']) => ({ fix_rounds: 0, gates: [], findings: [], tools: { calls: 0, errors: 0, text: '' }, agents });
+  const job = { state: 'ended' as const, started: '2026-11-17T10:00:00Z', ended: '2026-11-17T10:10:00Z' };
+  const timed = jobView(page(job, { ms: { implement: 600_000 }, run: run([
+    { ...base, stage: 'implement', started: '2026-11-17T10:02:00Z', ms: 120_000, errors: 1 },
+    { ...base, stage: 'implement', started: '2026-11-17T10:06:00Z', ms: 60_000 },
+  ]) }), NOW).timeline;
+  assert.deepEqual(timed.sessions.map((s) => [s.at, s.pct, s.calls, s.errors]), [[20, 20, 4, 1], [60, 10, 4, 0]]);
+  assert.equal(timed.note, undefined);
+  const old = jobView(page(job, { ms: { implement: 600_000 }, run: run([{ ...base, stage: 'implement', ms: 120_000 }, { ...base, stage: 'implement', ms: 60_000 }]) }), NOW).timeline;
+  assert.deepEqual(old.sessions.map((s) => [s.at, s.pct]), [[0, 20], [20, 10]]);
+  assert.equal(old.note, 'times are durations only');
+  const running = { stage: 'implement', role: 'implementer', model: 'opus', effort: 'high', started: '2026-11-17T11:55:00Z', ms: 300_000, calls: 2, errors: 0, live: true, tool: 'Bash', target: 'npm test' };
+  const first = jobView(page({ started: '2026-11-17T11:50:00Z' }, { sessions: [running] }), NOW).timeline.sessions;
+  assert.deepEqual(first.map((s) => [s.at, s.pct, s.live, s.tool, s.target, s.tokens, s.cost]), [[50, 50, true, 'Bash', 'npm test', '–', '–']]);
+});

@@ -445,13 +445,18 @@ a.tag:hover { opacity: 1; background: color-mix(in srgb, currentColor 22%, trans
 .timeline h3 { margin: 6px 0 0; font-size: 14px; font-weight: 600; }
 .timeline .grid td i, .timeline .grid td:first-child i { display: inline-block; width: 10px; height: 10px; border-radius: 3px; margin-right: 8px; vertical-align: -1px; }
 .sessions { display: flex; flex-direction: column; }
-.sess { display: flex; flex-direction: column; gap: 5px; padding: 10px 0; border-bottom: 1px solid var(--soft); }
-.sess-head { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 4px 12px; font-size: 14px; }
+/* An agent session, one row: square, who, its place on the job's time, then time, calls and tokens; a live one has its tool under it. */
+.sess { display: grid; grid-template-columns: 12px minmax(150px, 220px) minmax(80px, 1fr) 50px 90px 110px; align-items: center; gap: 4px 14px; padding: 10px 0; border-bottom: 1px solid var(--soft); font-size: 14px; }
+.sess .mono { font-size: 12px; text-align: right; white-space: nowrap; }
 .sess-name { font-weight: 600; }
-.sess-head .mono { font-size: 12px; }
+.sq { width: 10px; height: 10px; border-radius: 2px; background: var(--ink); }
+.sq.bad { background: var(--fail-ink); }
+.sq.live { background: var(--fill); animation: hxPulse 1.2s ease-in-out infinite; }
 .sess-bar { display: block; width: 100%; height: 8px; border-radius: 4px; overflow: hidden; }
 .sess-bar .rail { fill: var(--soft); }
-.sess-detail { font: 12px var(--mono); color: var(--mute); overflow-wrap: anywhere; }
+.sess-tool { grid-column: 2 / -1; text-align: left !important; color: var(--acc-ink); overflow-wrap: anywhere; }
+.now-line { margin: 10px 0 0; font-size: 13px; color: var(--acc-ink); overflow-wrap: anywhere; }
+@media (max-width: 720px) { .sess { grid-template-columns: 12px minmax(0, 1fr) auto auto; } .sess-bar { grid-column: 2 / -1; grid-row: 2; } .sess-tool { grid-row: 3; } }
 .slice .what p { margin: 0; }
 .slice.next .what, .slice.left .what { color: var(--mute); }
 .slice .dot { display: inline-block; width: 10px; height: 10px; margin: 5px 0 0 3px; border-radius: 50%; border: 2px solid var(--line); box-sizing: border-box; }
