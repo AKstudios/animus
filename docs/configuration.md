@@ -4,7 +4,7 @@ Three files decide what a job does:
 
 | File | Whose | What it holds |
 | --- | --- | --- |
-| `.animus/animus.yaml` in the target repository | The project's, committed | Setup, the gate commands, UI targets: what a job is checked against |
+| `.animus/animus.yaml` in the target repository | The project's, committed | Setup, the gate commands, UI targets, env and secret names: what a job is checked against |
 | `plugin/config/profiles.yaml` in Animus | Animus's | What each size, difficulty and type runs, model tiers, limits, skill grants |
 | `~/.animus/config.yaml` | Yours, never in a repository | Where your jobs run, and skills of your own |
 
@@ -41,6 +41,8 @@ ui:
 | `issue_link` | `closes` (default) or `refs`. A job started from a GitHub issue opens its PR with `Closes #N`, or with `Refs #N` for a project whose issues a person closes. A spec cannot override it. |
 | `ui.targets` | What a UI job can show. A web target has `serve` and `url` (with `$PORT`) and is screenshot by agent-browser at each viewport; an app target has a `capture` command that writes PNGs into `$ANIMUS_SHOTS`. Each has `pages`, and optionally `paths`, `ready`, `viewports` and design `references`. |
 | `ui.human_review` | Read but not used yet. Default true. |
+| `env` | Plain settings, name to value, that every step of a job runs with: setup, installs, gates, a UI target's commands and the agent sessions. See [below](#env-and-secrets). |
+| `secrets` | Names, never values, of the project's secrets. A job gets each one's value from where it runs. See [below](#env-and-secrets). |
 
 A spec is admitted against this file before it runs ([specs.md](specs.md#checking-a-spec)):
 its pages must be pages of the target or paths, its target must exist, its
@@ -48,6 +50,43 @@ base branch must exist. Each profile problem comes with the YAML to add. On
 your machine the profile is read from your checkout; on Helix, from the
 project's base branch as GitHub has it, so a profile fix counts once it is
 pushed.
+
+### env and secrets
+
+```yaml
+env:
+  STAGE: test
+  API_URL: http://127.0.0.1:4000
+secrets: [STRIPE_TEST_KEY, MAPS_API_KEY]
+```
+
+`env:` holds settings that are fine to commit. `secrets:` lists the names of
+values that are not, and the profile never holds those values. Both are
+checked when the profile is loaded: a name in both is refused, and so is a
+name Animus or Helix sets itself (the person's tokens, `ANIMUS_*`, `HELIX_*`,
+`HOME`, `PATH`, `CI`, `PORT`, git's identity).
+
+Where a secret's value comes from depends on where the job runs:
+
+- **On your machine**, from the environment of the process that runs the
+  queue. Export it in the shell you start `animus` from. A spec is refused at
+  admit while one of the names is unset, and the refusal names it; the queue's
+  loop keeps the environment it started with, so stop it after exporting a
+  new one.
+- **On Helix**, from the values kept with `animus project secret set
+  <project> <NAME>` ([helix.md](helix.md#project-secrets)). A job gets only
+  the names its base branch's `secrets:` lists, the person's own value before
+  the shared one. A spec is refused at admit, and the project's add check
+  fails before setup, while a name has neither, both naming the secret and
+  that command.
+
+A value of 8 characters or more shows as `***` in a job's log, its files,
+the display, the add check's output and the pull request. A shorter one is
+shown as it is; `set` says so.
+
+**The model can read every secret a job gets.** The agent writes the code
+the gates run, so nothing hides a secret from it. A project secret is for
+test keys and sandbox accounts, never a live or deploy credential.
 
 ## The project image
 

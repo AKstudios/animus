@@ -251,6 +251,9 @@ cannot give a job an old profile.
   changed while it waited. One that no longer passes ends as `refused`, before
   any work, with the list, and reports it where it reports (Slack, the issue).
   A job that is resumed was admitted when it first started.
+- A name in the profile's `secrets:` with neither a shared value nor the
+  person's own is a profile problem, naming it and `animus project secret set`
+  ([project secrets](#project-secrets)).
 - A base branch GitHub cannot be reached for, or one with no profile, ends the
   job or draft before any work, with the reason.
 
@@ -294,7 +297,52 @@ before this check ran every gate stays ready; adding it again runs it.
 GitHub is the member list: anyone on Helix whose token may push to a project
 may submit for it. Only whoever added a project, or the owner, removes it
 over the API; `helix remove-repo` removes any. Removing one deletes the clones Helix and
-people's jobs made of it, and keeps a clone added with `add-repo`.
+people's jobs made of it and its secrets, and keeps a clone added with `add-repo`.
+
+### Project secrets
+
+A project's profile lists the names of its secrets under `secrets:`, and its
+plain settings under `env:` ([configuration.md](configuration.md#env-and-secrets)).
+Helix keeps the secrets' values, set from a laptop:
+
+```sh
+animus project secret set app STRIPE_TEST_KEY          # typed at a prompt
+printf %s "$KEY" | animus project secret set app STRIPE_TEST_KEY --mine
+animus project secret list app
+animus project secret remove app STRIPE_TEST_KEY --mine
+```
+
+- `set` reads the value from a prompt, or from standard input when it is
+  piped, never from an argument, which shell history and the process list
+  keep. It says when a value is under 8 characters and so too short to be
+  masked, and each time prints that the model can read every secret a job
+  gets.
+- A shared value is set or removed only by whoever added the project, or the
+  owner. With `--mine`, anyone keeps their own value for the project, which
+  their jobs get before the shared one.
+- `list` shows each name, whether it is shared or yours, and who set it;
+  never a value.
+- Helix keeps them under its home in `secrets/<project>/`: `shared.json`,
+  and `people/<person>.json` for each person's own, mode 600 in 700 folders,
+  as it keeps credentials, and not encrypted. Removing the project removes
+  them.
+
+A job gets only the names its base branch's `secrets:` lists, by name in its
+environment (its container's, with containers), as it gets its person's
+credentials, and never another project's. A project image's build never gets
+them. The add check runs with the values a job of the adder's would get. A
+listed name with neither a shared value nor the person's own refuses the spec
+at [admit](#admit), and fails the add check before setup; both name the
+secret and the `animus project secret set` command, and the project can be
+added again once it is set.
+
+A value of 8 characters or more is written as `***` in the job's log, its job
+files (so the display), the add check's output and the pull request.
+
+**The model can read every secret a job gets**: the agent writes the code
+the gates run, so nothing hides one from it. A project secret is never a
+live or deploy credential; keep test keys and sandbox accounts there. What a
+person's credentials file sends into their jobs is unchanged.
 
 ## Containers
 
@@ -517,6 +565,9 @@ the display's own request for a job page's data sends none.
 | `POST /projects` | Add a project; its check runs in the background (202) |
 | `GET /projects/<name>` | One project, with its check's log |
 | `DELETE /projects/<name>` | Remove a project you added, or any for the owner |
+| `GET /projects/<name>/secrets` | `{ secrets }`: the shared ones and your own, each `name`, `scope` (`shared` or `mine`) and `by`; never a value |
+| `POST /projects/<name>/secrets` | Set one: `name`, `value`, and `mine` (true for your own). A shared one only by whoever added the project or the owner (403). Answers `{ project, name, mine, masked }`, `masked` false for a value too short to be shown as `***` |
+| `DELETE /projects/<name>/secrets/<NAME>[?mine]` | Remove a shared one (whoever added the project, or the owner), or with `?mine` your own |
 | `GET /lessons[?project=<name>]` | The lessons in Helix's Animus home, with a project's and the factory's only when one is named: `{ lessons }` |
 | `POST /lessons/<id>` | `action`: `accept` or `dismiss` (404 for an unknown id, 409 for one that cannot change that way); the lesson |
 | `GET /jobs` | The slots and your jobs; `?all`, every person's, for the owner only |

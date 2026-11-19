@@ -361,7 +361,26 @@ The projects on Helix: state (ready, checking or failed, with the reason), GitHu
 #### `animus project remove <name>`
 
 Removes a project you added, or any project for the owner. Refused while any
-of its jobs is queued or running. The clones Helix and people's jobs made of it are deleted.
+of its jobs is queued or running. The clones Helix and people's jobs made of it, and its secrets, are deleted.
+
+#### `animus project secret set <project> <NAME> [--mine]`
+
+Keeps a value on Helix that the project's jobs get as `NAME` when its
+profile's `secrets:` lists it. The value is typed at a prompt or piped in,
+never given as an argument. A shared value is set by whoever added the
+project, or the owner; with `--mine`, your own, which your jobs get first.
+Says when the value is too short (under 8 characters) to be shown as `***`,
+and each time that the model can read every secret a job gets, so a project
+secret is never a live or deploy credential
+([helix.md](helix.md#project-secrets)).
+
+#### `animus project secret list <project>`
+
+Each secret's name, whether it is shared or yours, and who set it; never a value.
+
+#### `animus project secret remove <project> <NAME> [--mine]`
+
+Removes the shared value (whoever added the project, or the owner), or with `--mine` your own.
 
 #### `animus submit <spec.md> [--repo <dir>] [--draft]`
 
