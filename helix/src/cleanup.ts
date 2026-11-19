@@ -10,7 +10,7 @@ import { existsSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { credentialEnv, personEnv } from './config.ts';
-import { imageName, personDirs } from './container.ts';
+import { docker, imageName, personDirs, type Docker } from './container.ts';
 import type { Store } from './store.ts';
 
 const CLI = join(dirname(fileURLToPath(import.meta.url)), '..', '..', 'plugin', 'src', 'cli.ts');
@@ -18,14 +18,6 @@ const CLI = join(dirname(fileURLToPath(import.meta.url)), '..', '..', 'plugin', 
 /** How often `helix serve` cleans up, and how long after it starts it first does. */
 export const CLEANUP_EVERY_MS = 24 * 60 * 60 * 1000;
 export const CLEANUP_FIRST_MS = 10 * 60 * 1000;
-
-/** Runs docker; undefined when it is not there. Replaced in tests. */
-export type Docker = (args: string[]) => { status: number | null; stdout: string } | undefined;
-
-const docker: Docker = (args) => {
-  const r = spawnSync('docker', args, { encoding: 'utf8' });
-  return r.error ? undefined : { status: r.status, stdout: r.stdout ?? '' };
-};
 
 export type CleanupOptions = { home: string; contained: boolean; days: number; dryRun: boolean; docker?: Docker; fresh?: (person: string) => Promise<unknown> };
 

@@ -29,6 +29,15 @@ export const personHomes = (home: string): string[] => existsSync(join(home, 'pe
 export const containerName =(id: number) => `helix-job-${id}`;
 export const imageName = (version: string) => `animus-job:${version}`;
 
+/** Runs docker, with input on its stdin; undefined when it is not there. Replaced in tests. */
+export type Docker = (args: string[], opts?: { input?: string; timeout?: number }) => { status: number | null; stdout: string; stderr?: string } | undefined;
+
+export const docker: Docker = (args, opts = {}) => {
+  const r = spawnSync('docker', args, { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024, ...opts });
+  if ((r.error as NodeJS.ErrnoException | undefined)?.code === 'ENOENT') return undefined;
+  return { status: r.status, stdout: r.stdout ?? '', stderr: `${r.stderr ?? ''}${r.error ? `\n${r.error.message}` : ''}` };
+};
+
 export type Mount = { path: string; readOnly?: boolean };
 
 /**

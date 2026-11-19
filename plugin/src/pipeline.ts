@@ -11,7 +11,7 @@ import { userInfo } from 'node:os';
 import { basename, dirname, join, resolve } from 'node:path';
 import { resolveAfter, waitForMerged } from './after.ts';
 import type { Agent, AgentResult } from './agent.ts';
-import { describe, failsOnBase, gateReport, jobChecks, LATER_SLICE, runChecks, type CheckResult } from './gates.ts';
+import { describe, failsOnBase, gateReport, jobChecks, LATER_SLICE, restore, runGates, type CheckResult } from './gates.ts';
 import { commitAll, mainCheckout, matchesAny, touchedFiles } from './git.ts';
 import { appendRun, CANCELLED_MARKER, jobDir, toolsLog, saveProgress, saveState, writeJson, type Cause, type FindingLog, type JobState, type Outcome, type Run, type Stage } from './log.ts';
 import { evidenceBranch, findPrByTitle, prBody, prDraft, prState, PushRejected, type DraftLookup, type PrFind, type Evidence, type PrLookup, type Publish } from './pr.ts';
@@ -101,12 +101,6 @@ export function jobOf(cwd: string): string | undefined {
   const dir = tryGit(cwd, ['rev-parse', '--absolute-git-dir']);
   if (!dir || !existsSync(join(dir, MARKER))) return undefined;
   return (JSON.parse(readFileSync(join(dir, MARKER), 'utf8')) as { job: string }).job;
-}
-
-/** Puts the worktree back to its last commit: what the gates or a reviewer changed is not the job's work. */
-function restore(worktree: string): void {
-  tryGit(worktree, ['checkout', '--quiet', '--', '.']);
-  tryGit(worktree, ['clean', '-fdq']);
 }
 
 /** The git user name for the run log's submitter_name, where git has one. */
@@ -431,18 +425,7 @@ async function runJobWith(opts: RunOptions, deps: Deps, live: { run?: Run; start
       at('gates', `gates${of} · attempt ${attempt}${run.fix_rounds ? ` after ${run.fix_rounds === 1 ? 'a fix round' : `${run.fix_rounds} fix rounds`}` : ''}`);
       const t = Date.now();
       lastGates = await timed('gates', () => {
-        const results = runChecks(wt, checks, job);
-        // A failed check runs once more on the same tree: passing then, it was flaky and counts as passed.
-        const failed = results.filter((r) => !r.ok);
-        if (failed.length) {
-          restore(wt);
-          const again = runChecks(wt, checks.filter((c) => failed.some((r) => r.name === c.name)), job);
-          for (const r of again) {
-            if (!r.ok) continue;
-            results[results.findIndex((x) => x.name === r.name)] = { ...r, flaky: true };
-            log(`flaky: ${r.name} failed, then passed on the same code`);
-          }
-        }
+        const results = runGates(wt, checks, job, log);
         // The proof that the tests fail without the change is for the whole job: it runs on the finished branch.
         if (!plan.prove || slice) return results;
         return [...results, failsOnBase({ repo, profile: repoProfile, spec, base: ws.base, head, files: touchedFiles(wt, ws.base, head), job, green: results.every((r) => r.ok) })];

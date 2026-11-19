@@ -83,6 +83,26 @@ export function runChecks(worktree: string, checks: readonly Check[], job: strin
   });
 }
 
+/** Puts the worktree back to its last commit: what the gates or a reviewer changed is not the job's work. */
+export function restore(worktree: string): void {
+  tryGit(worktree, ['checkout', '--quiet', '--', '.']);
+  tryGit(worktree, ['clean', '-fdq']);
+}
+
+/** runChecks, then each failed check once more on the same tree: passing then, it was flaky and counts as passed. */
+export function runGates(worktree: string, checks: readonly Check[], job: string, log: (line: string) => void = () => {}): CheckResult[] {
+  const results = runChecks(worktree, checks, job);
+  const failed = results.filter((r) => !r.ok);
+  if (!failed.length) return results;
+  restore(worktree);
+  for (const r of runChecks(worktree, checks.filter((c) => failed.some((f) => f.name === c.name)), job)) {
+    if (!r.ok) continue;
+    results[results.findIndex((x) => x.name === r.name)] = { ...r, flaky: true };
+    log(`flaky: ${r.name} failed, then passed on the same code`);
+  }
+  return results;
+}
+
 export const FAILS_ON_BASE = 'fails-on-base';
 
 /**

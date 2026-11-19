@@ -3,15 +3,19 @@
 // GitHub is the member list, so Helix keeps none. A project is taken only
 // once it has been checked in a process of its own: Helix clones it with the
 // adder's token, sees that token may push, reads its profile, and runs the
-// profile's installs and setup once as a job would, in a container when jobs
-// run in one. A project that fails the check says why and can be added again.
-import { spawn, spawnSync } from 'node:child_process';
-import { appendFileSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync } from 'node:fs';
+// profile's installs and setup, then every gate, on its base branch as a job
+// would: in a container of its project image (project-image.ts) when jobs run
+// in one. A project that fails the check says why and can be added again.
+import { spawn, spawnSync, type SpawnSyncReturns } from 'node:child_process';
+import { appendFileSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { describe, runGates, type CheckResult } from '../../plugin/src/gates.ts';
 import { githubUrl } from '../../plugin/src/git.ts';
 import { loadProfile, PROFILE_PATH } from '../../plugin/src/profile.ts';
 import { failureExcerpt } from '../../plugin/src/proc.ts';
+import { ensureSetup } from '../../plugin/src/workspace.ts';
+import { readDockerfile } from './project-image.ts';
 import { githubPush, type Runner } from './check.ts';
 import { checkName, credentialEnv, personEnv, type Config } from './config.ts';
 import { personDirs, runArgs, type ContainerConfig } from './container.ts';
@@ -85,30 +89,57 @@ export function removeProject(opts: { store: Store; home: string; config: Pick<C
   return project;
 }
 
-/** Runs the profile's installs and setup in a worktree of the project's clone: on the machine, or in a container. */
-export type SetupRun = (worktree: string, clone: string, env: Record<string, string>) => { code: number; output: string };
+/**
+ * Runs `helix setup` in a worktree of the project's clone, on the machine or
+ * in a container of image: the profile's installs and setup, then every gate.
+ * gates: their results, absent when setup failed before they ran.
+ */
+export type SetupRun = (worktree: string, clone: string, env: Record<string, string>, image?: string) => { code: number; output: string; gates?: CheckResult[] };
 
 const CLI = join(dirname(fileURLToPath(import.meta.url)), 'cli.ts');
 const SETUP_MS = 30 * 60 * 1000;
+/** Setup and every gate, a failed one twice: each gate may take CHECK_TIMEOUT_MS (proc.ts). */
+const CHECK_MS = 2 * 60 * 60 * 1000;
+
+/** Where `helix setup` leaves the gates' results: beside the worktree, in a folder the container has too. */
+const gatesFile = (worktree: string) => join(dirname(worktree), 'gates.json');
+
+/** What `helix setup` runs: the profile's installs and setup, then each of its commands in full (`run`, whatever its paths), as gates run in a job. */
+export function setupAndGates(worktree: string, say: (line: string) => void): void {
+  rmSync(gatesFile(worktree), { force: true });
+  const profile = loadProfile(worktree);
+  ensureSetup(worktree, profile, say);
+  const checks = Object.entries(profile.commands).map(([name, c]) => ({ name, command: c.run, ...(c.cwd ? { cwd: c.cwd } : {}) }));
+  writeFileSync(gatesFile(worktree), JSON.stringify(runGates(worktree, checks, 'add-check', say)));
+}
+
+const ran = (worktree: string, r: SpawnSyncReturns<string>): ReturnType<SetupRun> => {
+  const file = gatesFile(worktree);
+  return {
+    code: r.status ?? 1, output: `${r.stdout ?? ''}${r.stderr ?? ''}${r.error ? r.error.message : ''}`,
+    ...(r.status === 0 && existsSync(file) ? { gates: JSON.parse(readFileSync(file, 'utf8')) as CheckResult[] } : {}),
+  };
+};
 
 /** The setup run as Helix's account on the machine, as jobs run without containers. */
 export const setupHere: SetupRun = (worktree, _clone, env) => {
-  const r = spawnSync(process.execPath, ['--disable-warning=ExperimentalWarning', CLI, 'setup', worktree], { encoding: 'utf8', timeout: SETUP_MS, env: { ...process.env, ...env } });
-  return { code: r.status ?? 1, output: `${r.stdout ?? ''}${r.stderr ?? ''}${r.error ? r.error.message : ''}` };
+  rmSync(gatesFile(worktree), { force: true });
+  return ran(worktree, spawnSync(process.execPath, ['--disable-warning=ExperimentalWarning', CLI, 'setup', worktree], { encoding: 'utf8', timeout: CHECK_MS, env: { ...process.env, ...env } }));
 };
 
-/** The setup run in the job image, under a job's limits, seeing only the clone, the worktree and Animus. */
+/** The setup run in the image the check gives (the job image when none), under a job's limits, seeing only the clone, the worktree and Animus. */
 export function setupInContainer(opts: { animusRoot: string; image: string; limits: ContainerConfig; uid: number; gid: number; name: string }): SetupRun {
-  return (worktree, clone, env) => {
+  return (worktree, clone, env, image = opts.image) => {
+    rmSync(gatesFile(worktree), { force: true });
     const args = runArgs({
-      name: `helix-check-${opts.name}`, image: opts.image, limits: opts.limits, uid: opts.uid, gid: opts.gid,
+      name: `helix-check-${opts.name}`, image, limits: opts.limits, uid: opts.uid, gid: opts.gid,
       mounts: [{ path: opts.animusRoot, readOnly: true }, { path: clone }, { path: dirname(worktree) }],
       envNames: Object.keys(env).sort(), workdir: worktree,
       command: ['node', '--disable-warning=ExperimentalWarning', join(opts.animusRoot, 'helix', 'src', 'cli.ts'), 'setup', worktree],
     });
-    const r = spawnSync('docker', args, { encoding: 'utf8', timeout: SETUP_MS, env: { ...process.env, ...env } });
+    const r = spawnSync('docker', args, { encoding: 'utf8', timeout: CHECK_MS, env: { ...process.env, ...env } });
     if (r.error || r.status !== 0) spawnSync('docker', ['rm', '--force', `helix-check-${opts.name}`], { stdio: 'ignore' });
-    return { code: r.status ?? 1, output: `${r.stdout ?? ''}${r.stderr ?? ''}${r.error ? r.error.message : ''}` };
+    return ran(worktree, r);
   };
 }
 
@@ -122,7 +153,11 @@ const git = (args: string[], opts: { cwd?: string; env: Record<string, string> }
  * line, for the person waiting on `animus project add`. Moves the project to
  * ready or failed; whether it is ready.
  */
-export function checkProject(opts: { store: Store; home: string; name: string; setup: SetupRun; say: (line: string) => void; runner?: Runner }): boolean {
+export function checkProject(opts: {
+  store: Store; home: string; name: string; setup: SetupRun; say: (line: string) => void; runner?: Runner;
+  /** With containers: the image setup and the gates run in, from the base branch's Dockerfile (project-image.ts projectImage). Throws why it cannot be had. */
+  image?: (dockerfile: string | undefined, base: string) => string;
+}): boolean {
   const { store, home, name, say } = opts;
   const project = store.project(name);
   if (project?.state !== 'checking') return false;
@@ -156,21 +191,28 @@ export function checkProject(opts: { store: Store; home: string; name: string; s
     }
     say(`${PROFILE_PATH}: base ${profile.base}, gates ${Object.keys(profile.commands).join(', ') || 'none'}`);
 
-    if (!profile.setup && !profile.installs.length) {
-      say('the profile has no installs or setup to try');
+    const fetched = git(['fetch', '--quiet', 'origin', profile.base], { cwd: dir, env: withToken });
+    if (fetched.code !== 0) return fail(`its base branch ${profile.base} could not be fetched: ${fetched.out.split('\n').pop()}`);
+    // Only with containers: on one machine the machine is the environment, and the Dockerfile is not read.
+    const image = opts.image?.(readDockerfile(dir, profile.base), profile.base);
+
+    if (!profile.setup && !profile.installs.length && !Object.keys(profile.commands).length) {
+      say('the profile has no installs, setup or gates to try');
     } else {
-      const fetched = git(['fetch', '--quiet', 'origin', profile.base], { cwd: dir, env: withToken });
-      if (fetched.code !== 0) return fail(`its base branch ${profile.base} could not be fetched: ${fetched.out.split('\n').pop()}`);
       const worktree = join(checkFolder(home, name), 'setup');
       rmSync(worktree, { recursive: true, force: true });
       git(['worktree', 'prune'], { cwd: dir, env: {} });
       const added = git(['worktree', 'add', '--quiet', '--detach', worktree, `origin/${profile.base}`], { cwd: dir, env: {} });
       if (added.code !== 0) return fail(`could not make a worktree on ${profile.base}: ${added.out}`);
-      say(`running the profile's installs and setup once, as a job would${profile.setup ? `: ${profile.setup}` : ''}`);
-      const r = opts.setup(worktree, dir, env);
+      say(`running the profile's installs and setup, then every gate, as a job would${profile.setup ? `: ${profile.setup}` : ''}`);
+      const r = opts.setup(worktree, dir, env, image);
       git(['worktree', 'remove', '--force', worktree], { cwd: dir, env: {} });
-      if (r.code !== 0) return fail(`setup did not pass, so every job would fail at it:\n${failureExcerpt(r.output, 30)}`);
+      if (!r.gates) return fail(`setup did not pass, so every job would fail at it:\n${failureExcerpt(r.output, 30)}`);
       say('setup passed');
+      for (const line of describe(r.gates).split('\n').slice(0, r.gates.length)) say(`  ${line}`);
+      for (const g of r.gates.filter((g) => g.flaky)) say(`flaky: ${g.name} failed, then passed when run again`);
+      const failed = r.gates.filter((g) => !g.ok);
+      if (failed.length) return fail(`its gates fail on ${profile.base}, so every job would fail at them:\n${describe(failed)}`);
     }
     settle({ state: 'ready' });
     say(`${name} is ready: animus submit <spec.md> from a checkout of it`);
