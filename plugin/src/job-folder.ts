@@ -3,8 +3,8 @@
 // and the local display reads this machine's: both answer the same page.
 import { readdirSync, readFileSync, realpathSync, statSync } from 'node:fs';
 import { extname, join, sep } from 'node:path';
-import type { JobCheck, JobPage } from '../display/shape.ts';
-import { STAGES, type JobState, type Run } from './log.ts';
+import type { JobCheck, JobPage, JobRun } from '../display/shape.ts';
+import { describeTools, readToolsFile, STAGES, type JobState, type Run } from './log.ts';
 import type { Review } from './review.ts';
 import { readShots } from './ui.ts';
 
@@ -67,10 +67,26 @@ export function shotFile(dir: string, name: string): { type: string; body: Buffe
   } catch { return undefined; }
 }
 
+/** A job's runs put together (a resumed job has more than one); the tool calls are read from the job folder, wherever its Animus home is. */
+function jobRun(dir: string, runs: readonly Run[]): JobRun {
+  const agents = runs.flatMap((r) => r.agents ?? []);
+  const lines = readToolsFile(join(dir, 'tools.jsonl'));
+  return {
+    fix_rounds: runs.reduce((n, r) => n + (r.fix_rounds ?? 0), 0),
+    gates: runs.flatMap((r) => r.gates ?? []).map((g) => ({ flaky: g.checks.filter((c) => c.flaky).map((c) => c.name) })),
+    agents: agents.map((a) => ({ role: a.role, tier: a.tier, cost_usd: a.cost_usd, calls: a.tools?.calls ?? 0, errors: a.tools?.errors ?? 0 })),
+    findings: runs.flatMap((r) => r.review?.log ?? []).map(({ round, severity, fate }) => ({ round, severity, fate })),
+    tools: { calls: agents.reduce((n, a) => n + (a.tools?.calls ?? 0), 0), errors: agents.reduce((n, a) => n + (a.tools?.errors ?? 0), 0), text: describeTools(agents, lines) },
+  };
+}
+
 /** The parts of a job page that its folder and the run log hold. `answer` is an answer to the question it stopped on that has not been read by a run yet. */
 export function folderParts(dir: string, runs: readonly Run[], answer?: string): Partial<JobPage> {
   const page: Partial<JobPage> = {};
-  if (runs.length) page.ms = Object.fromEntries(STAGES.map((s) => [s, runs.reduce((sum, r) => sum + (r.ms?.[s] ?? 0), 0)]));
+  if (runs.length) {
+    page.ms = Object.fromEntries(STAGES.map((s) => [s, runs.reduce((sum, r) => sum + (r.ms?.[s] ?? 0), 0)]));
+    page.run = jobRun(dir, runs);
+  }
   const state = readJson<JobState>(join(dir, 'state.json'));
   const cut = state?.slicing?.slices ?? [];
   if (cut.length > 1) page.slices = cut.map((s, i) => ({ title: s.title, delivers: s.delivers, done: i < (state?.slices_done?.length ?? 0) }));

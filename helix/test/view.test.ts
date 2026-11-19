@@ -70,17 +70,17 @@ test('the headline is built from the counts and names the last job that finished
 });
 
 // Protects: THIS WEEK counts only the last 7 days, and merged only closed PRs that merged. Fails when: an older job or an unmerged PR is counted, or the median is the mean.
-test('this week counts merged PRs, finished jobs, money and the median finished job over 7 days', () => {
+test('this week counts merged PRs, gates passed first time, cost per merged PR and the median finished job over 7 days', () => {
   const day = 24 * 60;
-  const done = (took: number, cost: number, endedAgo: number) => job({ state: 'ended', outcome: 'pr', started: ago(endedAgo + took), ended: ago(endedAgo), cost_usd: cost });
-  const jobs = [done(10, 1, 60), done(30, 2.5, day), done(20, 4, 6 * day), done(99, 50, 8 * day), job({ state: 'ended', outcome: 'needs-input', question: '?', ended: ago(5) })];
+  const done = (took: number, cost: number, endedAgo: number, fix_rounds?: number) => job({ state: 'ended', outcome: 'pr', started: ago(endedAgo + took), ended: ago(endedAgo), cost_usd: cost, ...(fix_rounds === undefined ? {} : { fix_rounds }) });
+  const jobs = [done(10, 1, 60, 0), done(30, 2.5, day, 2), done(20, 4, 6 * day), done(99, 50, 8 * day), job({ state: 'ended', outcome: 'needs-input', question: '?', ended: ago(5) })];
   const d = { ...shown(jobs), closed: [
     { job: jobs[0]!.id as number, number: 1, merged: true, at: ago(30) },
     { job: jobs[1]!.id as number, number: 2, merged: false, at: ago(30) },
     { job: jobs[3]!.id as number, number: 3, merged: true, at: ago(8 * day) },
   ] };
-  assert.deepEqual(view(d, null, NOW).week, { merged: '1', finished: '3', spent: '$7.50', median: '20m' });
-  assert.deepEqual(view(shown([]), null, NOW).week, { merged: '0', finished: '0', spent: '$0.00', median: '–' });
+  assert.deepEqual(view(d, null, NOW).week, { merged: '1', firstPass: '50%', perMerged: '$7.50', median: '20m' });
+  assert.deepEqual(view(shown([]), null, NOW).week, { merged: '0', firstPass: '–', perMerged: '–', median: '–' });
   // A merged PR's tick is in the merged colour.
   assert.deepEqual(view(d, null, NOW).projects[0]!.ticks.slice(0, 2), ['merged', 'ended']);
 });

@@ -20,6 +20,14 @@ export type JobPageView = {
   bar: { name: string; took: string; pct: number; at: number; label: string; on: boolean }[];
   /** The side panel for the job's pull request: its number, state, branch and times; left out for a job with none. */
   pr?: { number: string; href?: string; state: string; tone: Tone; rows: { k: string; v: string }[] };
+  /** The Agents panel: cost by role and tier, biggest first, each with its share of the cost as a bar and its sessions and tool calls. */
+  agents: { name: string; cost: string; pct: number; calls: string }[];
+  /** "What this run taught": the lessons citing the job, each with its state; the panel is left out when none does. */
+  taught: { text: string; state: string }[];
+  /** A check that was flaky, as the chip says it: `test was flaky once`. */
+  flaky: string[];
+  /** The folded Tool calls row: its counts, and every session's calls as `animus tools` prints them; left out when the job made none. */
+  tools?: { summary: string; text: string };
   /** The side panel of the spec header's size, difficulty and type: only the ones it names. */
   labels: { k: string; v: string }[];
   /** What each heading counts, beside it. */
@@ -37,7 +45,8 @@ export type JobPageView = {
   stages: { name: string; took: string; on: boolean }[];
   slices: { title: string; delivers: string; done: boolean }[];
   checks: { name: string; command: string; tag: string; tone: Tone; detail: string; output?: string }[];
-  reviews: { title: string; summary: string; findings: { tag: string; tone: Tone; where: string; problem: string; fix: string }[] }[];
+  /** Each finding says its fate: `fixed in round 2`, `still open`, `not acted on`; empty where the run log has none for it. */
+  reviews: { title: string; summary: string; findings: { tag: string; tone: Tone; fate: string; where: string; problem: string; fix: string }[] }[];
   questions: { question: string; answer: string; answered: boolean }[];
   /** Each screenshot, named by its file, and where Helix serves it to a token. */
   shots: { name: string; src: string }[];
@@ -76,6 +85,27 @@ export function labelsOf(spec: string): { k: string; v: string }[] {
 }
 
 const plural = (n: number, one: string) => `${n} ${n === 1 ? one : `${one}s`}`;
+
+/** What became of a review finding; `next` is the round that took it up. */
+const fateOf = (fate: 'fixed' | 'open' | 'not-acted-on' | undefined, next: number) => (fate === 'fixed' ? `fixed in round ${next}` : fate === 'open' ? 'still open' : fate ? 'not acted on' : '');
+
+/** The Pull request panel's rows for what happened after the job; the watch only for a merged PR (`reverted` and `reworked` come from the 30 days after the merge). */
+function afterRows(a: JobPage['after'], merged: boolean): { k: string; v: string }[] {
+  if (!a) return [];
+  const commits = a.human_commits ? `${plural(a.human_commits, 'commit')}${a.lines ? ` · ${plural(a.lines.added, 'line')}` : ''}` : 'no commits';
+  const watch = a.reverted ? 'reverted' : a.reworked ? 'reworked' : a.reverted === false ? 'not reverted' : 'watching';
+  return [{ k: 'after the job', v: commits }, ...(merged ? [{ k: '30-day watch', v: watch }] : [])];
+}
+
+/** Cost by role and tier, biggest first, each with its share of the cost. */
+function agentsOf(agents: NonNullable<JobPage['run']>['agents']): JobPageView['agents'] {
+  const total = agents.reduce((n, a) => n + a.cost_usd, 0);
+  return [...Map.groupBy(agents, (a) => `${a.role} · ${a.tier}`)].map(([name, as]) => {
+    const cost = as.reduce((n, a) => n + a.cost_usd, 0);
+    const [calls, errors] = [as.reduce((n, a) => n + a.calls, 0), as.reduce((n, a) => n + a.errors, 0)];
+    return { name, cost, pct: total ? Math.round((cost / total) * 100) : 0, calls: [plural(as.length, 'session'), plural(calls, 'tool call'), ...(errors ? [plural(errors, 'error')] : [])].join(' · ') };
+  }).sort((a, b) => b.cost - a.cost).map((a) => ({ ...a, cost: `$${a.cost.toFixed(2)}` }));
+}
 
 /** A time as the page shows it: in UTC, so every screen that shows the job says the same. */
 export const when = (iso: string) => `${iso.slice(0, 10)} ${iso.slice(11, 16)} UTC`;
@@ -134,15 +164,19 @@ export function jobView(p: JobPage, now: number, local = false, closed?: Display
     line: [j.repo, j.person, j.started ? `started ${when(j.started)}` : `submitted ${when(j.submitted)}`, ...(merged !== undefined ? [`merged after ${span(merged)}`] : [])].join(' · '),
     numbers: [
       { k: 'time taken', v: took }, { k: 'cost', v: j.cost_usd !== undefined ? `$${j.cost_usd.toFixed(2)}` : '–' },
-      { k: 'gate runs', v: String(p.gate_runs ?? 0) },
+      { k: `fix ${p.run?.fix_rounds === 1 ? 'round' : 'rounds'} · ${plural(p.gate_runs ?? 0, 'gate run')}`, v: p.run ? String(p.run.fix_rounds) : '–' },
       p.slices?.length ? { k: 'slices passed', v: `${done} of ${p.slices.length}` } : { k: 'review rounds', v: String(p.reviews?.length ?? 0) },
     ],
     bar,
     ...(j.pr ? { pr: {
       number: pr ? `#${pr}` : j.pr, ...(/^https?:\/\//.test(j.pr) ? { href: j.pr } : {}),
       state: state ?? 'open', tone: (state === 'merged' ? 'merged' : state === 'closed' ? 'mute' : 'open') as Tone,
-      rows: [{ k: 'branch', v: `animus/${j.animus_job ?? j.id}` }, ...(p.pr_opened ? [{ k: 'opened', v: when(p.pr_opened) }] : []), ...(mergedAt ? [{ k: 'merged', v: when(mergedAt) }] : [])],
+      rows: [{ k: 'branch', v: `animus/${j.animus_job ?? j.id}` }, ...(p.pr_opened ? [{ k: 'opened', v: when(p.pr_opened) }] : []), ...(mergedAt ? [{ k: 'merged', v: when(mergedAt) }] : []), ...afterRows(p.after, state === 'merged')],
     } } : {}),
+    agents: agentsOf(p.run?.agents ?? []),
+    taught: (p.lessons ?? []).map((l) => ({ text: l.text, state: l.status === 'proposed' ? `Proposed · animus lessons accept ${l.id}` : `Kept · used ${l.uses}×` })),
+    flaky: [...Map.groupBy((p.run?.gates ?? []).flatMap((g) => g.flaky), (n) => n)].map(([name, at]) => `${name} was flaky ${at.length === 1 ? 'once' : at.length === 2 ? 'twice' : `${at.length} times`}`),
+    ...(p.run?.tools.text ? { tools: { summary: `${p.run.tools.calls} · ${plural(p.run.tools.errors, 'error')}`, text: p.run.tools.text } } : {}),
     labels: labelsOf(p.spec ?? ''),
     notes: {
       criteria: `${criteria.filter((c) => c.tone === 'ink').length} of ${criteria.length} proven`,
@@ -158,8 +192,8 @@ export function jobView(p: JobPage, now: number, local = false, closed?: Display
     checks,
     reviews: (p.reviews ?? []).map((r, i) => ({
       title: `Review ${i + 1}`, summary: r.summary,
-      findings: r.findings.map((f) => ({
-        tag: f.severity.toUpperCase(), tone: SEVERITY[f.severity] ?? 'mute',
+      findings: r.findings.map((f, n) => ({
+        tag: f.severity.toUpperCase(), tone: SEVERITY[f.severity] ?? 'mute', fate: fateOf(p.run?.findings.filter((l) => l.round === i + 1)[n]?.fate, i + 2),
         where: f.file ? `${f.file}${f.line ? `:${f.line}` : ''}` : '', problem: f.problem, fix: f.fix ?? '',
       })),
     })),

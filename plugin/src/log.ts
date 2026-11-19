@@ -29,8 +29,10 @@ export type ToolLine = ToolCall & { stage: string; role: string; session?: strin
 
 export const toolsLog = (job: string) => join(jobDir(job), 'tools.jsonl');
 
-export function readTools(job: string): ToolLine[] {
-  const file = toolsLog(job);
+export const readTools = (job: string): ToolLine[] => readToolsFile(toolsLog(job));
+
+/** The tool lines of a tools.jsonl wherever it is (a Helix person's job folder is not under this home). */
+export function readToolsFile(file: string): ToolLine[] {
   if (!existsSync(file)) return [];
   return readFileSync(file, 'utf8').split('\n').filter(Boolean).flatMap((line) => {
     try { return [JSON.parse(line) as ToolLine]; } catch { return []; }

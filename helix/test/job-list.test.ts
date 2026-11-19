@@ -6,7 +6,7 @@ import { join } from 'node:path';
 import { test } from 'node:test';
 import { filterOf, jobListView, queryOf } from '../../plugin/display/job-list.ts';
 import { route } from '../../plugin/display/pages.ts';
-import type { JobListPage } from '../../plugin/display/shape.ts';
+import type { JobListPage, ListJob } from '../../plugin/display/shape.ts';
 import { hashToken, type Config } from '../src/config.ts';
 import type { GithubPr } from '../src/open-prs.ts';
 import { serve } from '../src/server.ts';
@@ -122,4 +122,11 @@ test('To merge is the PR\'s merge time less the job\'s end, and — when unknown
   const page = (jobs: JobListPage['jobs']): JobListPage => ({ at: '2026-11-17T20:00:00Z', more: false, totals: { jobs: 2, merged: 1, failed: 0, cost_usd: 4 }, jobs });
   const rows = jobListView(page([{ ...base, pr_state: 'merged', pr_merged: '2026-11-17T13:40:00Z' }, { ...base, id: 2, pr_state: 'open' }]), false).rows;
   assert.deepEqual(rows.map((r) => [r.took, r.cost, r.toMerge]), [['30m', '$2.00', '3h 10m'], ['30m', '$2.00', '—']]);
+});
+
+// Protects: the Fix rounds column. Fails when: a job whose gates never ran shows 0, or a count is lost.
+test('the Jobs table shows each job\'s fix rounds, and a dash before the gates ran', () => {
+  const job = (id: number, over: Partial<ListJob>): ListJob => ({ id, person: 'ana', repo: 'app', title: `J${id}`, submitted: `2026-11-17T10:0${id}:00Z`, state: 'ended', outcome: 'failed', ...over });
+  const rows = jobListView({ at: '2026-11-17T12:00:00Z', jobs: [job(1, { fix_rounds: 2 }), job(2, { fix_rounds: 0 }), job(3, {})], more: false, totals: { jobs: 3, merged: 0, failed: 3, cost_usd: 0 } } as JobListPage, false).rows;
+  assert.deepEqual(rows.map((r) => r.fixes), ['2', '0', '—']);
 });

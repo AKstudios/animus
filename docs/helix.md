@@ -420,10 +420,11 @@ the display's own request for a job page's data sends none.
 | --- | --- |
 | `GET /` | The display page |
 | `GET /jobs/<id>`, `/people`, `/people/<name>` | The display page, to a browser asking for HTML |
-| `GET /jobs/<id>/page-data` | What a job page shows, for any person |
+| `GET /jobs/<id>/page-data` | What a job page shows, for any person; besides the job's folder it carries `run` (fix rounds, flaky checks, each agent session's cost and tool calls, review findings' fates, `animus tools` as text), `after` (human commits and lines after the job, the 30-day watch) and `lessons` citing the job |
 | `GET /people/page-data` | What the people list shows, for any person |
 | `GET /people/<name>/page-data[?before=<job id>]` | What a person's page shows: their numbers, thirty jobs older than that one, and all their activity; 404 for a name Helix never heard of |
-| `GET /job-list[?result=&project=&person=&before=<submitted>]` | What the Jobs page (`/jobs`) shows, for any person: `{ at, jobs, more }`, thirty jobs newest first from the whole table, filtered by result (`all`, `merged`, `open`, `failed`, `needs input`), project and person, each with `pr_state` (`open`, `merged`, `closed`) where GitHub has said; 400 for an unknown result |
+| `GET /insights-data[?scope=<project>]` | What the Insights page (`/insights`) shows, for any person: `{ at, scope, projects, runs, outcomes, lessons }`, the run lines of the last 60 days from Helix's own Animus home and each person's (trimmed to what the page sums), the outcomes of their PRs, and Helix's lessons; `scope` is `factory` (the default) or a project's name, which keeps only that project's runs and lessons |
+| `GET /job-list[?result=&project=&person=&before=<submitted>]` | What the Jobs page (`/jobs`) shows, for any person: `{ at, jobs, more }`, thirty jobs newest first from the whole table, filtered by result (`all`, `merged`, `open`, `failed`, `needs input`), project and person, each with `pr_state` (`open`, `merged`, `closed`) where GitHub has said, and `fix_rounds` where its gates ran; 400 for an unknown result |
 | `GET /jobs/<id>/shots/<name>` | One of a job's screenshots, by its name in `shots/manifest.json`; nothing outside its shots folder |
 | `GET /display` | What the display shows, as JSON, with the open PRs of the jobs (`prs`) |
 | `GET /version` | Helix's version |

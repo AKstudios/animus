@@ -14,6 +14,7 @@ import { basename, join } from 'node:path';
 import { listJobs, RESULTS, type JobFilter, type Result } from '../display/job-list.ts';
 import type { Display, DisplayJob, JobListPage, JobPage, ListJob, PrState } from '../display/shape.ts';
 import { asset, CSP } from './assets.ts';
+import { afterOf, fixRounds, insightsData, lessonsCiting } from './insights-data.ts';
 import { folderParts, read, shotFile } from './job-folder.ts';
 import { readOutcomes, type Outcomes } from './outcomes.ts';
 import { alive, animusHome, jobDir, loadProgress, loadState, readRuns, STAGES, type Run } from './log.ts';
@@ -30,6 +31,7 @@ function jobOf(id: string, runs: readonly Run[]): DisplayJob | undefined {
   if (!state && !progress) return undefined;
   const mine = runs.filter((r) => r.job === id);
   const last = mine.at(-1);
+  const fix = fixRounds(mine);
   let title = last?.title;
   if (!title && state) { try { title = /^# (.+)$/m.exec(readFileSync(state.spec, 'utf8'))?.[1]; } catch { /* the job's copy is gone */ } }
   const running = !state?.outcome && progress?.host === hostname() && progress.pid !== undefined && alive(progress.pid);
@@ -41,6 +43,7 @@ function jobOf(id: string, runs: readonly Run[]): DisplayJob | undefined {
     ...(state?.outcome ? { outcome: state.outcome } : {}), ...(last?.pr ? { pr: last.pr } : {}),
     ...(last?.reason ? { reason: last.reason } : {}), ...(state?.question ? { question: state.question } : {}),
     ...(last ? { cost_usd: last.cost_usd } : {}),
+    ...(fix.has(id) ? { fix_rounds: fix.get(id)! } : {}),
     ...(running && progress ? { progress } : {}),
     // `animus resume` needs state.json, which is saved only after the worktree is made.
     ...(!state?.outcome && !running ? state ? { resume: `animus resume ${id}` } : { reason: 'It stopped during setup, before it had a worktree, so there is nothing to resume. Run its spec again.' } : {}),
@@ -103,7 +106,8 @@ export function localJobPage(id: string): JobPage | undefined {
   try { outcomes = readOutcomes(); } catch { /* unreadable: no PR is known */ }
   const o = job.pr ? outcomes[job.pr] : undefined;
   const pr: Partial<JobPage> = o ? { pr_state: o.state.toLowerCase() as PrState, pr_opened: o.opened, ...(o.state === 'MERGED' ? { pr_merged: o.closed ?? o.checked } : {}) } : {};
-  return { at: new Date().toISOString(), stages: STAGES, job, ...pr, ...(spec !== undefined ? { spec } : {}), log: '', ...folderParts(jobDir(id), runs.filter((r) => r.job === id)) };
+  const lessons = lessonsCiting(id);
+  return { at: new Date().toISOString(), stages: STAGES, job, ...pr, ...(o ? { after: afterOf(o) } : {}), ...(lessons.length ? { lessons } : {}), ...(spec !== undefined ? { spec } : {}), log: '', ...folderParts(jobDir(id), runs.filter((r) => r.job === id)) };
 }
 
 /** Listens on the first free port from `port` up, on 127.0.0.1 only. */
@@ -130,6 +134,7 @@ export function localServer(): Server {
       return res.end(file.body);
     }
     if (url.pathname === '/display') return send(200, localDisplay());
+    if (url.pathname === '/insights-data') return send(200, insightsData(url.searchParams.get('scope') || 'factory', [animusHome()], Date.now()));
     if (url.pathname === '/job-list') {
       const result = url.searchParams.get('result') ?? 'all';
       if (!RESULTS.includes(result as Result)) return send(400, { error: `result is one of ${RESULTS.join(', ')}` });

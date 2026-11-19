@@ -28,6 +28,8 @@ export type DisplayJob = {
   reason?: string;
   question?: string;
   cost_usd?: number;
+  /** Times its gates sent the work back; left out for a job whose gates have not run. */
+  fix_rounds?: number;
   /** A stopped job (its process is gone, with no outcome): the command that picks it up again. */
   resume?: string;
   /** Why a queued job is held for room: memory, load or a tier at its limit, with the numbers. */
@@ -71,8 +73,23 @@ export type JobPage = {
   pr_state?: PrState;
   pr_opened?: string;
   pr_merged?: string;
+  /** What the job's run log says of its runs, left out until one has ended. */
+  run?: JobRun;
+  /** What happened to its PR after the job, as outcomes.json says; left out where it has not said. */
+  after?: Pick<InsightsOutcome, 'human_commits' | 'reverted' | 'reworked'> & { lines?: { added: number; removed: number } };
+  /** The lessons that cite the job, proposed or kept. */
+  lessons?: InsightsLesson[];
   /** What the job's run has printed, all of it. */
   log: string;
+};
+
+/** A job's runs put together, for its page: fix rounds, each gate run's flaky checks, each agent session with its calls, each review finding's fate, and `animus tools` as text. */
+export type JobRun = {
+  fix_rounds: number;
+  gates: { flaky: string[] }[];
+  agents: { role: string; tier: string; cost_usd: number; calls: number; errors: number }[];
+  findings: { round: number; severity: string; fate: 'fixed' | 'open' | 'not-acted-on' }[];
+  tools: { calls: number; errors: number; text: string };
 };
 
 /** An open pull request one of Helix's jobs opened, as GitHub lists it now. */
@@ -156,3 +173,31 @@ export type ListJob = DisplayJob & { pr_state?: PrState; pr_merged?: string };
 
 /** Everything the filters match, not only the rows sent. */
 export type JobTotals = { jobs: number; merged: number; failed: number; cost_usd: number };
+
+/** One run-log line as the Insights page needs it: the task class, how it ended, what it cost, its gates, agents and review. */
+export type InsightsRun = {
+  job: string; repo: string; size: string; difficulty: string; type: string; ended: string;
+  outcome: string; cause?: string; cost_usd: number;
+  /** Wall time of the whole run, in ms. */
+  ms: number;
+  pr?: string; fix_rounds: number;
+  /** Each gate run: whether it passed (a flaky check counts as passed) and the checks that were flaky. */
+  gates: { ok: boolean; flaky: string[] }[];
+  /** Each agent session, with its tool calls from the run log's `tools` summary. */
+  agents: { role: string; tier: string; cost_usd: number; calls: number; errors: number }[];
+  review: { findings: number; acted_on: number } | null;
+};
+
+/** What became of a pull request, as outcomes.json says. */
+export type InsightsOutcome = { state: 'OPEN' | 'MERGED' | 'CLOSED'; human_commits: number; reverted?: boolean; reworked?: boolean };
+
+/** A lesson that is waiting for a yes or kept; `expires` is when a kept one runs out (lessons.ts expiresAt). */
+export type InsightsLesson = { id: number; text: string; scope: 'project' | 'factory'; project: string; cites: string[]; status: 'proposed' | 'kept'; uses: number; expires: string };
+
+/**
+ * The Insights page's data: from Helix, GET /insights-data?scope=, with a
+ * person's token, and from the local display without one. `scope` is
+ * `factory` or a project's name; `runs` are those of the last 60 days that
+ * ended in it, `outcomes` those of their PRs, `lessons` the ones in scope.
+ */
+export type InsightsPage = { at: string; scope: string; projects: string[]; runs: InsightsRun[]; outcomes: Record<string, InsightsOutcome>; lessons: InsightsLesson[] };

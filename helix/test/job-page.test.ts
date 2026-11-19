@@ -132,8 +132,8 @@ test('a job page shows the job\'s facts, spec, stages and slices, checks with a 
   ]);
   assert.deepEqual(v.reviews, [
     { title: 'Review 1', summary: 'Close; the cover is lost.', findings: [
-      { tag: 'BLOCKER', tone: 'fail', where: 'src/pdf.ts:40', problem: 'The cover page is dropped.', fix: 'Keep page one.' },
-      { tag: 'NOTE', tone: 'mute', where: '', problem: 'The test names could say more.', fix: '' },
+      { tag: 'BLOCKER', tone: 'fail', where: 'src/pdf.ts:40', problem: 'The cover page is dropped.', fix: 'Keep page one.', fate: '' },
+      { tag: 'NOTE', tone: 'mute', where: '', problem: 'The test names could say more.', fix: '', fate: '' },
     ] },
     { title: 'Review 2', summary: 'The cover is kept now.', findings: [] },
   ]);
@@ -143,7 +143,7 @@ test('a job page shows the job\'s facts, spec, stages and slices, checks with a 
   ]);
   assert.deepEqual([v.log, v.follow], [lines, false]);
   // Two gate run files in the folder.
-  assert.equal(v.numbers[2]!.v, '2');
+  assert.equal(v.numbers[2]!.k, 'fix rounds · 2 gate runs');
 });
 
 // Protects: a job that has not started, or whose folder is missing, still has a page. Fails when: a missing file makes Helix fail the request.
@@ -170,13 +170,39 @@ test('a merged job page leads with its tag and line, four numbers and a bar of e
   });
   const v = jobView(p, NOW, false, { job: 9, number: 4, merged: true, at: '2026-11-17T12:00:30Z' });
   assert.deepEqual([v.tag, v.line], [{ text: 'Merged #4', tone: 'merged' }, 'app · ana · started 2026-11-17 10:05 UTC · merged after 1h 20m']);
-  assert.deepEqual(v.numbers, [{ k: 'time taken', v: '35m' }, { k: 'cost', v: '$3.40' }, { k: 'gate runs', v: '3' }, { k: 'slices passed', v: '1 of 2' }]);
+  assert.deepEqual(v.numbers, [{ k: 'time taken', v: '35m' }, { k: 'cost', v: '$3.40' }, { k: 'fix rounds · 3 gate runs', v: '–' }, { k: 'slices passed', v: '1 of 2' }]);
   assert.deepEqual(v.bar, [
     { name: 'plan', took: '2m', pct: 20, at: 0, label: 'plan', on: false },
     { name: 'implement', took: '6m', pct: 60, at: 20, label: 'implement · 2 slices', on: false },
     { name: 'review', took: '2m', pct: 20, at: 80, label: 'review', on: false },
   ]);
   assert.equal(jobView({ ...p, slices: undefined }, NOW).numbers[3]!.v, '1');
+});
+
+// Protects: criterion 4's side panels and chips. Fails when: the third number, the Agents shares, the after-the-job rows, the watch, the lessons, the flaky chip, a finding's fate or the tool calls are wrong.
+test('a merged job page tells its fix rounds, agents, what happened after, the watch, lessons, flaky checks, finding fates and tool calls', () => {
+  const p = page({ state: 'ended', outcome: 'pr', pr: 'https://github.com/o/app/pull/4', cost_usd: 4, started: '2026-11-17T10:05:00Z', ended: '2026-11-17T10:40:30Z' }, {
+    gate_runs: 3, reviews: [{ summary: 'x', findings: [{ severity: 'blocker', file: 'a.ts', line: 1, problem: 'p', fix: 'f' }, { severity: 'note', problem: 'n', fix: '' }] }],
+    run: {
+      fix_rounds: 2, gates: [{ flaky: ['test'] }, { flaky: ['test'] }, { flaky: [] }],
+      agents: [{ role: 'plan', tier: 'fast', cost_usd: 1, calls: 4, errors: 0 }, { role: 'implement', tier: 'strong', cost_usd: 3, calls: 20, errors: 2 }],
+      findings: [{ round: 1, severity: 'blocker', fate: 'fixed' }, { round: 1, severity: 'note', fate: 'not-acted-on' }],
+      tools: { calls: 24, errors: 2, text: 'implement  Bash ×12' },
+    },
+    after: { human_commits: 2, lines: { added: 10, removed: 1 }, reverted: false },
+    lessons: [{ id: 7, text: 'Run lint first.', scope: 'project', project: 'app', cites: ['j'], status: 'proposed', uses: 0, expires: '' }, { id: 8, text: 'Keep slices small.', scope: 'factory', project: '', cites: ['j'], status: 'kept', uses: 3, expires: '' }],
+  });
+  const v = jobView(p, NOW, false, { job: 9, number: 4, merged: true, at: '2026-11-17T12:00:30Z' });
+  assert.deepEqual(v.numbers[2], { k: 'fix rounds · 3 gate runs', v: '2' });
+  assert.deepEqual(v.agents, [
+    { name: 'implement · strong', cost: '$3.00', pct: 75, calls: '1 session · 20 tool calls · 2 errors' },
+    { name: 'plan · fast', cost: '$1.00', pct: 25, calls: '1 session · 4 tool calls' },
+  ]);
+  assert.deepEqual(v.pr!.rows.slice(-2), [{ k: 'after the job', v: '2 commits · 10 lines' }, { k: '30-day watch', v: 'not reverted' }]);
+  assert.deepEqual(v.taught, [{ text: 'Run lint first.', state: 'Proposed · animus lessons accept 7' }, { text: 'Keep slices small.', state: 'Kept · used 3×' }]);
+  assert.deepEqual(v.flaky, ['test was flaky twice']);
+  assert.deepEqual(v.reviews[0]!.findings.map((f) => f.fate), ['fixed in round 2', 'not acted on']);
+  assert.deepEqual(v.tools, { summary: '24 · 2 errors', text: 'implement  Bash ×12' });
 });
 
 // Protects: criterion 5, criteria in the spec's words with their checks. Fails when: a criterion is matched to the wrong check, its command is lost, or a spec that cannot be read hides checks.
