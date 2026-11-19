@@ -254,7 +254,10 @@ function main(argv: string[]): number | undefined | Promise<number> {
       const retros = setInterval(retro, RETRO_CHECK_MS);
       // Free memory and load change without a job ending: look at the queue again.
       const recheck = setInterval(() => supervisor.wake(), 30 * 1000);
-      const stop = () => { clearInterval(recheck); clearTimeout(first); clearInterval(daily); clearTimeout(firstRetro); clearInterval(retros); unwatchFile(configFile()); slack?.close(); supervisor.stop(); server.close(); store.close(); rmSync(pidFile(), { force: true }); process.exit(0); };
+      // A waiting job starts within about a minute of its earlier pull request merging; one that waited through a restart is looked at now.
+      void supervisor.poll();
+      const polling = setInterval(() => { void supervisor.poll(); }, 60 * 1000);
+      const stop = () => { clearInterval(recheck); clearInterval(polling); clearTimeout(first); clearInterval(daily); clearTimeout(firstRetro); clearInterval(retros); unwatchFile(configFile()); slack?.close(); supervisor.stop(); server.close(); store.close(); rmSync(pidFile(), { force: true }); process.exit(0); };
       process.on('SIGINT', stop);
       process.on('SIGTERM', stop);
       return undefined;
@@ -356,7 +359,7 @@ function main(argv: string[]): number | undefined | Promise<number> {
       const name = positionals[0];
       if (!name) throw new AnimusError('usage: helix remove-repo <name>');
       const gone = withStore((store) => {
-        const busy = [...store.inState('queued'), ...store.inState('running')].filter((j) => j.repo === name);
+        const busy = [...store.inState('queued'), ...store.inState('waiting'), ...store.inState('running')].filter((j) => j.repo === name);
         if (busy.length) throw new AnimusError(`job(s) ${busy.map((j) => j.id).join(', ')} are queued or running for ${name}: wait for them, or cancel them, first`);
         const project = store.project(name);
         removeRepo(store, name);

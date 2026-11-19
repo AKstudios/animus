@@ -94,7 +94,7 @@ function tick(j: DisplayJob, closed?: Map<number | string, DisplayClosed>): Tick
   if (closed?.get(j.id)?.merged) return 'merged';
   if (j.state === 'stopped') return 'failed';
   if (isAsk(j)) return 'ask';
-  if (j.state === 'queued' || j.state === 'cancelled') return 'queued';
+  if (j.state === 'queued' || j.state === 'waiting' || j.state === 'cancelled') return 'queued';
   return j.outcome === 'failed' ? 'failed' : 'ended';
 }
 
@@ -162,8 +162,10 @@ export function view(d: Display, picked: string | null, now: number): View {
     waited: span(now - Date.parse(j.ended ?? j.submitted)),
     command: d.local ? `animus resume ${j.id} --answer "…"` : `animus answer ${j.id} "…"`,
   })).reverse();
-  const queue = shown.filter((j) => j.state === 'queued').map((j): Waiting => {
+  const queue = shown.filter((j) => j.state === 'queued' || j.state === 'waiting').map((j): Waiting => {
     const waited = now - Date.parse(j.queued ?? j.submitted);
+    // A waiting job has no place in the line: it takes no slot until its earlier pull request merges.
+    if (j.state === 'waiting') return { id: j.id, page: jobPage(j.id), tag: 'Waiting', title: j.title, repo: j.repo, person: j.person, ...people(j.person, d.local === true), note: `${j.waiting ?? 'waiting for its earlier pull request'}, for ${waited < 60_000 ? 'less than a minute' : span(waited)}.` };
     const why = j.resumed === 'answer' ? 'Has its answer and carries on from where it stopped. '
       : j.resumed === 'restart' ? 'Helix stopped while it ran, so it carries on from where it stopped. ' : '';
     return {

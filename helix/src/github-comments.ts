@@ -21,7 +21,7 @@ const TOO_OLD_MS = 24 * 60 * 60 * 1000;
 /** The part of a GitHub issue comment this needs; html_url says issue or pull request. */
 export type IssueComment = { id: number; body: string; user: { login: string }; created_at: string; html_url: string };
 
-async function gh(method: string, path: string, token: string, urls: GitHubUrls, body?: unknown): Promise<unknown> {
+export async function gh(method: string, path: string, token: string, urls: GitHubUrls, body?: unknown): Promise<unknown> {
   let res: Response;
   try {
     res = await fetch(`${urls.api}${path}`, {
@@ -219,7 +219,7 @@ export function commentWatcher(opts: {
   }
 
   /** The latest job submitted from the issue (or fix asked on the pull request) that waits for an answer, or for `cancel` is queued or running. */
-  const jobOn = (repo: string, number: number, word: 'answer' | 'cancel') => (word === 'answer' ? store.inState('ended').filter((j) => j.outcome === 'needs-input') : [...store.inState('queued'), ...store.inState('running')])
+  const jobOn = (repo: string, number: number, word: 'answer' | 'cancel') => (word === 'answer' ? store.inState('ended').filter((j) => j.outcome === 'needs-input') : [...store.inState('queued'), ...store.inState('waiting'), ...store.inState('running')])
     .filter((j) => j.github?.repo.toLowerCase() === repo.toLowerCase() && j.github.issue === number)
     .sort((a, b) => b.id - a.id)[0];
 

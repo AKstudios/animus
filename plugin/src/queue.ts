@@ -13,9 +13,9 @@ import { readMachine, waitReason, type Reading, type Room } from './room.ts';
 /** What the queue needs to know of a job; a supervisor's jobs have more. */
 export type QueueJob = {
   id: number;
-  state: 'queued' | 'running' | 'ended' | 'cancelled';
+  state: 'queued' | 'waiting' | 'running' | 'ended' | 'cancelled';
   tier?: Tier;
-  /** Why a queued job is held for room; cleared when it starts. */
+  /** Why a queued job is held for room, or what a waiting job waits for; cleared when it starts. */
   waiting?: string;
   pid?: number;
   /** Times the supervisor came back and found the job running with no supervisor. */
@@ -40,6 +40,9 @@ export type QueueStore<J extends QueueJob> = {
 /** A job found running this many times when the supervisor came back is ended, not queued again: it may be what takes it down. */
 export const MAX_INTERRUPTIONS = 3;
 
+/** Where the pull request a waiting job waits for stands: merged, still open (`waiting` says what for), or closed without merging (`reason` ends the job). */
+export type Earlier = { state: 'merged' } | { state: 'open'; waiting: string } | { state: 'closed'; reason: string };
+
 export type QueueOptions<J extends QueueJob> = {
   store: QueueStore<J>;
   /** slots: jobs that run at once; the rest is the room check's settings. */
@@ -56,6 +59,8 @@ export type QueueOptions<J extends QueueJob> = {
   reap?: (id: number) => void;
   /** Saves a job that ended and says so. */
   end: (job: J) => void;
+  /** Looks at what a waiting job waits for. Rejects when GitHub cannot say: the job is looked at again next time. */
+  earlier?: (job: J) => Promise<Earlier>;
   /** While this is true no job starts; submissions still queue. */
   paused?: () => boolean;
   /** Reads the machine's free memory and load before each start; the machine's own by default. */
@@ -70,6 +75,8 @@ export type Queue<J extends QueueJob> = {
   begin(): void;
   /** Starts what the queue holds while slots are free. */
   tick(): void;
+  /** Looks at every waiting job: one whose earlier pull request merged is queued, one whose was closed unmerged ends failed. The supervisor calls it about each minute. */
+  poll(): Promise<void>;
   /** A started job's process ended: its slot is free. */
   release(id: number): void;
   /** Cancels a job: ends it as cancelled (with fields added), ends its process, and frees nothing until `release`. */
@@ -139,7 +146,32 @@ export function createQueue<J extends QueueJob>(opts: QueueOptions<J>): Queue<J>
     }
   }
 
+  let polling = false;
+  async function poll(): Promise<void> {
+    if (stopped || !opts.earlier || polling) return;
+    polling = true;
+    try {
+      for (const job of store.inState('waiting')) {
+        let found: Earlier;
+        try { found = await opts.earlier(job); } catch (err) { say(`job ${job.id}: its earlier pull request could not be read: ${(err as Error).message}`); continue; }
+        // Stopped while GitHub was asked: the store may be closed. Cancelled: what the table says stands.
+        if (stopped) break;
+        const current = store.get(job.id);
+        if (current?.state !== 'waiting') continue;
+        if (found.state === 'merged') {
+          store.save(next(current, { state: 'queued', queued: now() }, 'waiting'));
+          say(`job ${job.id}: its earlier pull request merged: queued`);
+        } else if (found.state === 'closed') {
+          opts.end(next(current, { state: 'ended', ended: now(), outcome: 'failed', reason: found.reason }, 'waiting'));
+          say(`job ${job.id} did not start: ${found.reason}`);
+        } else if (current.waiting !== found.waiting) store.save({ ...current, waiting: found.waiting });
+      }
+    } finally { polling = false; }
+    tick();
+  }
+
   return {
+    poll,
     begin() {
       // What the table calls running has no supervisor: end what is left of it and queue it again.
       // A pid from before the machine last started names nothing of ours now, and may name something else.

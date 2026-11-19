@@ -22,6 +22,7 @@ import { credentialEnv, personEnv, readyRepos, type Config } from './config.ts';
 import { GITHUB, githubRepo, liveTokenFile, type GitHubUrls } from './github-app.ts';
 import { readPull } from './github-comments.ts';
 import type { HelixJob, Store } from './store.ts';
+import { earlierOf, findOnGitHub, waitingFor, type FindPull } from './waiting.ts';
 
 export const PLUGIN = join(dirname(fileURLToPath(import.meta.url)), '..', '..', 'plugin');
 
@@ -85,6 +86,8 @@ export type Supervisor = {
   animusHome(person: string): string;
   /** Starts what the queue holds while slots are free: after the config changed, or a pause ended. */
   wake(): void;
+  /** Looks at the waiting jobs' earlier pull requests (about each minute): a merged one queues its job, a closed one fails it. */
+  poll(): Promise<void>;
   /** Stops starting jobs and ends the ones running. */
   stop(): void;
 };
@@ -114,16 +117,16 @@ function kill(pid: number, child?: ChildProcess): void {
 }
 
 /** Whether a job can no longer be cancelled: it ended, failed or was cancelled already. */
-export const jobIsOver = (job: HelixJob): boolean => job.state !== 'queued' && job.state !== 'running';
+export const jobIsOver = (job: HelixJob): boolean => job.state === 'ended' || job.state === 'cancelled';
 
 /**
- * Cancels a person's queued and running jobs, from any process: `helix
+ * Cancels a person's queued, waiting and running jobs, from any process: `helix
  * remove-person` runs beside `helix serve`, which sees the job's process end
  * and leaves the table as this says. Jobs that already ended are kept.
  */
 export function cancelJobsOf(store: Store, person: string, reap: (id: number) => void = () => {}): HelixJob[] {
   const now = new Date().toISOString();
-  const theirs = [...store.inState('queued'), ...store.inState('running')].filter((j) => j.person === person);
+  const theirs = [...store.inState('queued'), ...store.inState('waiting'), ...store.inState('running')].filter((j) => j.person === person);
   for (const job of theirs) {
     const { pid, ...rest } = job;
     store.save({ ...rest, state: 'cancelled', ended: now, reason: `${person} was removed from Helix` });
@@ -152,6 +155,8 @@ export function supervise(opts: {
   machine?: () => Reading;
   /** Where GitHub is, for reading the pull request a fix is asked on; github.com by default. */
   github?: GitHubUrls;
+  /** Finds the pull request of the spec a waiting job runs after; GitHub's, read with the person's token, by default. */
+  findPull?: FindPull;
 }): Supervisor {
   const { store, config, home } = opts;
   const launch = opts.launch ?? animus;
@@ -271,8 +276,10 @@ export function supervise(opts: {
   }
 
   const { prepare } = opts;
+  const findPull = opts.findPull ?? findOnGitHub(store, config, opts.github ?? GITHUB);
   const queue = createQueue<HelixJob>({
     store, config, name: 'Helix', say, reap, start, end: saveAndTell,
+    earlier: (job) => earlierOf(findPull, job),
     jobMemory: config.container?.memory,
     ...(prepare ? { prepare: (job: HelixJob) => prepare(job.person, job.repo) } : {}),
     ...(opts.machine ? { machine: opts.machine } : {}),
@@ -331,13 +338,19 @@ export function supervise(opts: {
       readyProject(s.repo);
       let title: string;
       let tier: Tier | undefined;
+      let after: string[];
       try {
         const spec = parseSpec(s.spec, s.name ?? 'spec.md');
         title = spec.title;
+        after = spec.after;
         // A spec the factory will not run fails in its own time; here it only goes uncounted.
         try { tier = resolvePlan(loadFactory(), spec).implement.tier; } catch { /* no tier */ }
       } catch (err) { throw new Refused(400, (err as Error).message); }
-      const job = store.add({ state: 'queued', person, repo: s.repo, spec: '', title, ...(tier ? { tier } : {}), draft: Boolean(s.draft), ...(s.github ? { github: s.github } : {}), submitted: now() });
+      // A spec that runs after another waits in the queue, with no slot and no process, until that spec's pull request is merged; the first look is now.
+      const job = store.add({
+        state: after.length ? 'waiting' : 'queued', person, repo: s.repo, spec: '', title, ...(tier ? { tier } : {}), draft: Boolean(s.draft), ...(s.github ? { github: s.github } : {}), submitted: now(),
+        ...(after.length ? { after, waiting: waitingFor(after[0]!) } : {}),
+      });
       job.spec = join(home, 'jobs', String(job.id), basename(s.name ?? 'spec.md'));
       mkdirSync(dirname(job.spec), { recursive: true });
       writeFileSync(job.spec, s.spec);
@@ -345,6 +358,7 @@ export function supervise(opts: {
       store.save(job);
       store.record(person, 'submitted', { job: job.id, repo: s.repo });
       tick();
+      if (after.length) void queue.poll();
       return store.get(job.id)!;
     },
     cancel(person, id) {
@@ -365,6 +379,7 @@ export function supervise(opts: {
       return readFileSync(logFile(id), 'utf8').trimEnd().split('\n').slice(-lines).join('\n');
     },
     wake: () => tick(),
+    poll: () => queue.poll(),
     progress: (job) => (job.animus_job ? loadProgress(job.animus_job, opts.animusHomeOf?.(job.person)) : undefined),
     animusHome: (person) => opts.animusHomeOf?.(person) ?? animusHome(),
     stop: () => queue.stop(),

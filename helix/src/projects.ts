@@ -77,7 +77,7 @@ export function removeProject(opts: { store: Store; home: string; config: Pick<C
   if (!project) throw new Refused(404, `Helix has no project named ${name}`);
   if (project.added_by !== person && !isOwner(opts.config, person)) throw new Refused(403, `${name} was added ${project.added_by ? `by ${project.added_by}` : 'on the machine'}: only ${project.added_by ?? 'whoever runs Helix'} can remove it${project.added_by ? ', or whoever runs Helix' : ''} (helix remove-repo ${name})`);
   if (project.state === 'checking') throw new Refused(409, `Helix is still checking ${name}: remove it once the check ends`);
-  const busy = [...store.inState('queued'), ...store.inState('running')].filter((j) => j.repo === name);
+  const busy = [...store.inState('queued'), ...store.inState('waiting'), ...store.inState('running')].filter((j) => j.repo === name);
   if (busy.length) throw new Refused(409, `job(s) ${busy.map((j) => j.id).join(', ')} are queued or running for ${name}: wait for them, or cancel them, first`);
   store.dropProject(name);
   store.record(person, 'project-removed', { project: name });

@@ -127,6 +127,15 @@ export async function fakeGitHub(opts: { clientId?: string; deviceFlow?: boolean
   /** The pull request routes: one pull request, its reviews and its inline comments, in GitHub's pages. */
   const pullApi = (method: string, path: string, login: string): [number, unknown] | undefined => {
     const url = new URL(path, 'http://x');
+    // The repository's pull requests, newest first, in any state.
+    const listed = /^\/repos\/([^/]+)\/([^/]+)\/pulls$/.exec(url.pathname);
+    if (listed && method === 'GET') {
+      if (!reaches(login, listed[1]!, listed[2]!)) return [404, { message: 'Not Found' }];
+      return [200, [...issues].filter(([k, p]) => p.pull && k.startsWith(`${listed[1]}/${listed[2]}#`)).map(([k, p]) => {
+        const number = Number(k.split('#')[1]);
+        return { number, title: p.title, html_url: `https://github.com/${listed[1]}/${listed[2]}/pull/${number}`, created_at: new Date(number * 1000).toISOString(), merged_at: p.merged ? '2026-11-19T00:00:00Z' : null, closed_at: p.merged || p.state === 'closed' ? '2026-11-19T00:00:00Z' : null };
+      }).sort((a, b) => b.number - a.number)];
+    }
     const m = /^\/repos\/([^/]+)\/([^/]+)\/pulls\/(\d+)(?:\/(reviews|comments))?$/.exec(url.pathname);
     if (!m || method !== 'GET') return undefined;
     const repo = `${m[1]}/${m[2]}`;
