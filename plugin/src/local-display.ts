@@ -6,7 +6,7 @@
 // otherwise. Served on 127.0.0.1 only, with no sign-in: whoever reaches this
 // machine's loopback is the person whose jobs these are, and there are no
 // people pages.
-import { createServer, type Server } from 'node:http';
+import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
 import { readdirSync, readFileSync, statSync } from 'node:fs';
 import type { AddressInfo } from 'node:net';
 import { hostname, userInfo } from 'node:os';
@@ -138,6 +138,17 @@ export function listenLocal(server: Server, port: number): Promise<number> {
 export function localServer(): Server {
   return createServer((req, res) => {
     const send = (status: number, value: unknown) => { res.writeHead(status, { 'content-type': 'application/json' }); res.end(`${JSON.stringify(value)}\n`); };
+    // An error in one request answers that request; it never ends the server.
+    try { answer(req, res, send); } catch (err) {
+      const reason = (err instanceof Error ? err.message : String(err)).split('\n')[0] || 'unknown error';
+      console.error(err);
+      if (res.headersSent) res.end(); else send(500, { error: `the display failed on this request: ${reason}` });
+    }
+  });
+}
+
+function answer(req: IncomingMessage, res: ServerResponse, send: (status: number, value: unknown) => void): unknown {
+  {
     // A page on another site could point its own name at 127.0.0.1 and read these jobs: only this machine's own names are answered.
     if (!/^(127\.0\.0\.1|localhost)(:\d+)?$/.test(req.headers.host ?? '') || req.method !== 'GET') return send(403, { error: 'this display answers GET requests for 127.0.0.1 only' });
     const url = new URL(req.url ?? '/', 'http://localhost');
@@ -167,5 +178,5 @@ export function localServer(): Server {
       if (image) { res.writeHead(200, { 'content-type': image.type, 'cache-control': 'private, no-cache', 'x-content-type-options': 'nosniff' }); return res.end(image.body); }
     }
     return send(404, { error: `nothing at ${url.pathname}` });
-  });
+  }
 }

@@ -161,6 +161,21 @@ test('the local display serves /insights-data from this machine\'s runs, with no
   assert.deepEqual([data.scope, data.runs.map((r) => r.job), html.status], ['factory', ['j1'], 200]);
 });
 
+// Protects: criterion 6. Fails when: a run-log line with no repo, or one that does not parse, breaks Insights or shows in it.
+test('Insights leaves out run-log lines with no repo or that do not parse', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'insights-bad-'));
+  const gates = [{ attempt: 1, ok: true, ms: 1, checks: [] }];
+  const { repo: _repo, ...noRepo } = run('j2', 1);
+  writeFileSync(join(dir, 'runs.jsonl'), [JSON.stringify({ ...run('j1', 1), gates }), JSON.stringify({ ...noRepo, gates }), '{not json'].join('\n') + '\n');
+  process.env.ANIMUS_HOME = dir;
+  const server = localServer();
+  const port = await listenLocal(server, 0);
+  const res = await fetch(`http://127.0.0.1:${port}/insights-data`);
+  server.close();
+  assert.equal(res.status, 200);
+  assert.deepEqual(((await res.json()) as InsightsPage).runs.map((r) => r.job), ['j1']);
+});
+
 // Protects: criterion 2. Fails when: a PR with an opening job and a fix counts twice in delivered/merged, or its cost is only one job's.
 test('a pull request with an opening job and a fix is one merged PR, with both jobs\' cost', () => {
   const v = insightsView(page([run('j1', 3, { cost_usd: 2 }), run('j9', 1, { cost_usd: 1, pr: pr(1), type: 'fix' })], { [pr(1)]: merged() }));

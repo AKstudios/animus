@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { spawn, spawnSync } from 'node:child_process';
-import { mkdtempSync } from 'node:fs';
+import { appendFileSync, mkdirSync, mkdtempSync, rmSync } from 'node:fs';
 import http from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { hostname, tmpdir } from 'node:os';
@@ -167,6 +167,39 @@ test('the local display names a job by its PR, links it, and says where people a
   assert.match(personNotice('ana', false, undefined, true) ?? '', /no people pages/);
   const page = jobView({ at: d.at, stages: d.stages, job: d.jobs[0]!, log: '' }, 0, true);
   assert.match(page.noLog, /went to the terminal it ran in/);
+});
+
+// Protects: one bad request does not end the display. Fails when: an unreadable run log ends the server, or answers with anything but a 500 and a one-line reason.
+test('an error in one request is a 500 with a one-line reason, and the display keeps serving', async () => {
+  const home = process.env.ANIMUS_HOME!;
+  const own = mkdtempSync(join(tmpdir(), 'animus-500-'));
+  process.env.ANIMUS_HOME = own;
+  mkdirSync(join(own, 'runs.jsonl'));
+  const s = await served();
+  const bad = await s.get('/display');
+  const { error } = (await bad.json()) as { error: string };
+  rmSync(join(own, 'runs.jsonl'), { recursive: true });
+  const after = await s.get('/display');
+  s.stop();
+  process.env.ANIMUS_HOME = home;
+  assert.equal(bad.status, 500);
+  assert.ok(error && !error.includes('\n'));
+  assert.equal(after.status, 200);
+});
+
+// Protects: criterion 6. Fails when: a run-log line with no repo, or not JSON, breaks the display or shows on it.
+test('run-log lines with no repo or that do not parse are left out of the display', async () => {
+  const file = join(process.env.ANIMUS_HOME!, 'runs.jsonl');
+  mkdirSync(process.env.ANIMUS_HOME!, { recursive: true });
+  appendFileSync(file, `${JSON.stringify({ job: 'leaked', started: '2026-01-01T00:00:00.000Z', ended: '2026-01-01T00:05:00.000Z', outcome: 'pr' })}\n{not json\n`);
+  saveState({ job: 'fine', repo: '/work/shop', spec: '', workspace: {} as JobState['workspace'], plan: {} as JobState['plan'], outcome: 'pr' });
+  appendRun({ job: 'fine', repo: '/work/shop', submitter: 'me@example.com', title: 'Fine', started: '2026-01-01T00:00:00.000Z', ended: '2026-01-01T00:05:00.000Z', outcome: 'pr', cost_usd: 1 } as Run);
+  const s = await served();
+  const res = await s.get('/display');
+  s.stop();
+  assert.equal(res.status, 200);
+  const ids = ((await res.json()) as Display).jobs.map((j) => j.id);
+  assert.ok(ids.includes('fine') && !ids.includes('leaked'));
 });
 
 // Protects: only loopback names are answered. Fails when: a page on another site, resolving its own name to 127.0.0.1, can read the jobs.
