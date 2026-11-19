@@ -12,12 +12,12 @@ import { initProfile } from './init.ts';
 import { githubLogin, joinHelix, leaveHelix, openPage } from './join.ts';
 import { addProject } from './project.ts';
 import { describe, failsOnBase, jobChecks, runChecks } from './gates.ts';
-import { fixAlone, fixTarget, keptFromBody, openedHere } from './fix.ts';
+import { fixAlone, fixFromPr, fixSkills, fixTarget, isPr, keptFromBody, openedHere, whereToFix } from './fix.ts';
 import { githubUrl, mainCheckout, touchedFiles } from './git.ts';
 import { describeRuns, describeTools, jobDir, loadState, readRuns, readTools, type Run } from './log.ts';
 import { jobOf, onPath, runJob, uiJobOf } from './pipeline.ts';
 import { describeNumbers, numbers, refreshOutcomes } from './outcomes.ts';
-import { prFacts, publish, pushEvidence } from './pr.ts';
+import { ghLogin, prFacts, publish, pushEvidence } from './pr.ts';
 import { personalFor, readSkillsFile, skillsForRole, snapshotSkills, whereToRun, type PersonalSkill, type Where } from './personal.ts';
 import { accept, describeLessons, dismiss, readLessons } from './lessons.ts';
 import { runRetro } from './retro.ts';
@@ -42,6 +42,13 @@ const USAGE = `animus: a spec goes in, a pull request with proof comes out
         then the top); without that, Helix when this machine has joined one
         that has the repository, and here otherwise. Here, it is animus run
         and waits for the job; on Helix, it is animus submit and returns.
+  animus start <pr> "<what to change>" [--local | --helix] [--repo <dir>] [--dry-run] [--keep]
+        Change an open pull request a job opened (<pr> is its number or URL):
+        a new job on its branch that proves every criterion again and pushes
+        to the same pull request. It runs here when a job here opened it, and
+        carries on from that job's session; else on Helix when this machine
+        has joined one that has the repository; else here, from the pull
+        request alone. --local or --helix decides, and says what it leaves.
   animus run <spec.md> [--repo <dir>] [--dry-run] [--draft] [--keep]
         Run one job: set up a worktree, implement, gates, review, open the PR.
         --dry-run stops before the push; --draft opens the PR as a draft;
@@ -63,14 +70,6 @@ const USAGE = `animus: a spec goes in, a pull request with proof comes out
         go.mod or Cargo.toml. Runs nothing; --force replaces a profile.
   animus resume <job> [--answer <text>] [--dry-run] [--keep]
         Pick up a job that asked a question or was interrupted.
-  animus fix <pr> "<what to change>" [--local | --helix] [--repo <dir>] [--dry-run] [--keep]
-        Change an open pull request a job opened: a new job on its branch, in
-        that job's worktree, which carries on from its implementer session,
-        proves every criterion again and pushes to the same pull request.
-        <pr> is its number or URL. It runs where the pull request's job ran,
-        and on Helix when a job there opened it (--local or --helix says).
-        --references <dir> gives the implementer what is in it (Helix: the
-        pull request's reviews since its last push).
   animus runs [-n <count>] [--json]
         The run log, newest last.
   animus tools <job> [--json]
@@ -238,6 +237,23 @@ async function main(argv: string[]): Promise<number> {
     return { factory, agent: claudeAgent(factory), publish, evidence: pushEvidence, log: say };
   };
 
+  /** Runs a fix of `pr` on this machine: from the job here that opened it, else from the pull request alone. */
+  const fixHere = async (repo: string, pr: string, text: string, runsLine?: string): Promise<number> => {
+    if (!values['dry-run'] && !onPath('gh')) throw new AnimusError('gh is not installed, so the pull request cannot be updated; install it or use --dry-run');
+    let fix: Omit<NonNullable<Parameters<typeof runJob>[0]['fix']>, 'ask'>;
+    if (openedHere(repo, pr).length) {
+      const { run, state } = fixTarget(repo, pr);
+      const alone = fixAlone(repo, run, state);
+      // The description is what the pull request shows now: its Closes line and Fixes list are kept, however old the earlier job's state.
+      const kept = alone ? undefined : keptFromBody(run.pr!, repo);
+      fix = { of: run.job, pr: run.pr!, ...(alone ? { alone } : { from: state!, ...(kept ? { kept } : {}) }) };
+    } else fix = fixFromPr(repo, pr);
+    // Skills given as a file are the launcher's choice (Helix passes them), unless the job it continues kept its own.
+    const personal = values.skills && !existsSync(jobDir(fix.of)) ? localSkills(repo, values.skills)
+      : fixSkills(fix.of, { author: fix.alone?.author, requester: () => ghLogin(repo), theirs: () => localSkills(repo, undefined) });
+    return finish(await runJob({ repo, fix: { ...fix, ask: text, ...(values.references ? { references: resolve(values.references) } : {}) }, personal, ...(runsLine ? { runsLine } : {}), ...flags }, deps()));
+  };
+
   switch (command) {
     case 'run': {
       if (!positionals[0]) throw new AnimusError('usage: animus run <spec.md>');
@@ -254,6 +270,21 @@ async function main(argv: string[]): Promise<number> {
       const repo = resolve(values.repo ?? cwd);
       const asked: Where | undefined = values.local ? 'local' : values.helix ? 'helix' : undefined;
       const mine = personalFor(repo);
+      if (isPr(positionals[0])) {
+        const [pr, ...text] = positionals;
+        if (!text.length) throw new AnimusError('usage: animus start <pr> "<what to change>" [--local | --helix]');
+        const root = mainCheckout(repo);
+        const here = openedHere(root, pr!).at(-1)?.job;
+        const choice = await whereToFix({ pr: pr!, ...(here ? { here } : {}), ...(asked ? { asked } : {}), checkout: repo });
+        if (choice.left) say(choice.left);
+        const runsLine = `this fix runs ${choice.where === 'helix' ? 'on Helix' : 'on this machine'}: ${choice.why}`;
+        if (choice.where === 'local') return fixHere(root, pr!, text.join(' '), runsLine);
+        say(runsLine);
+        if (values['dry-run']) throw new AnimusError('--dry-run is for a fix on this machine: animus start <pr> "<what to change>" --local --dry-run');
+        const skills = snapshotSkills(mine.skills);
+        announce(await helix.fix({ repo: choice.project ?? await projectNamed(root), pr: pr!, ask: text.join(' '), ...(skills.length ? { skills: skills.map(({ sha: _sha, ...s }) => s) } : {}) }), skills);
+        return 0;
+      }
       const choice = await whereToRun({ ...(asked ? { asked } : {}), ...(mine.run ? { config: mine.run } : {}), checkout: repo });
       const runsLine = `this job runs ${choice.where === 'helix' ? 'on Helix' : 'on this machine'}: ${choice.why}`;
       if (choice.where === 'helix') {
@@ -370,30 +401,10 @@ async function main(argv: string[]): Promise<number> {
       return 0;
     }
     case 'fix': {
+      // What animus start <pr> and Helix launch to run a fix on this machine; not a command people type.
       const [pr, ...text] = positionals;
-      if (!pr || !text.length) throw new AnimusError('usage: animus fix <pr> "<what to change>" [--local | --helix]');
-      if (values.local && values.helix) throw new AnimusError('--local or --helix, not both');
-      const checkout = resolve(values.repo ?? cwd);
-      const asked: Where | undefined = values.local ? 'local' : values.helix ? 'helix' : undefined;
-      const mine = personalFor(checkout);
-      // Unless told where: a job Helix started is already where it runs, and a pull request a job here opened is fixed here; otherwise as for a new job.
-      const choice = process.env.ANIMUS_TRIGGER === 'helix' || (!asked && !mine.run && openedHere(mainCheckout(checkout), pr).length)
-        ? { where: 'local' as Where, project: undefined }
-        : await whereToRun({ ...(asked ? { asked } : {}), ...(mine.run ? { config: mine.run } : {}), checkout });
-      if (choice.where === 'helix') {
-        if (values['dry-run']) throw new AnimusError('--dry-run is for a fix on this machine: animus fix --local --dry-run');
-        const root = mainCheckout(checkout);
-        const skills = snapshotSkills(mine.skills);
-        announce(await helix.fix({ repo: choice.project ?? await projectNamed(root), pr, ask: text.join(' '), ...(skills.length ? { skills: skills.map(({ sha: _sha, ...s }) => s) } : {}) }), skills);
-        return 0;
-      }
-      if (!values['dry-run'] && !onPath('gh')) throw new AnimusError('gh is not installed, so the pull request cannot be updated; install it or use --dry-run');
-      const repo = mainCheckout(resolve(values.repo ?? cwd));
-      const { run, state } = fixTarget(repo, pr);
-      const alone = fixAlone(repo, run, state);
-      // The description is what the pull request shows now: its Closes line and Fixes list are kept, however old the earlier job's state.
-      const kept = alone ? undefined : keptFromBody(run.pr!, repo);
-      return finish(await runJob({ repo, fix: { of: run.job, ...(alone ? { alone } : { from: state!, ...(kept ? { kept } : {}) }), ask: text.join(' '), pr: run.pr!, ...(values.references ? { references: resolve(values.references) } : {}) }, personal: localSkills(repo, values.skills), ...flags }, deps()));
+      if (!pr || !text.length) throw new AnimusError('usage: animus fix <pr> "<what to change>" [--repo <dir>] [--dry-run] [--keep]');
+      return fixHere(mainCheckout(resolve(values.repo ?? cwd)), pr, text.join(' '));
     }
     case 'resume': {
       const state = positionals[0] ? loadState(positionals[0]) : undefined;

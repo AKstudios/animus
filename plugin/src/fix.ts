@@ -5,9 +5,10 @@ import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { hostname } from 'node:os';
 import { join } from 'node:path';
 import { alive, jobDir, loadProgress, loadState, readRuns, type JobState, type Run } from './log.ts';
-import { prSource, prState, SPEC_SUMMARY, type PrLookup, type PrSourceLookup } from './pr.ts';
+import { prSource, prState, SPEC_SUMMARY, type PrLookup, type PrSource, type PrSourceLookup } from './pr.ts';
 import { git, AnimusError, GitError, tryGit } from './proc.ts';
 import { revParse } from './git.ts';
+import { loadJobSkills, whereToRun, type PersonalSkill, type Where } from './personal.ts';
 
 /** One fix as the pull request lists it. */
 export type FixEntry = { ask: string; job: string; cost_usd: number };
@@ -48,8 +49,59 @@ export function fixTarget(repo: string, pr: string, lookup: PrLookup = prState):
   return { run, ...(state ? { state } : {}) };
 }
 
-/** What a fix that runs from the pull request alone takes from it. */
-export type FromPr = { spec: string; branch: string; baseBranch: string; closes?: number; fixes?: FixEntry[] };
+/** Whether `animus start`'s argument is a pull request rather than a spec: no such file, and a number, `#number` or a pull request's URL. */
+export const isPr = (arg: string) => !existsSync(arg) && /^(#?\d+|https?:\/\/\S+\/pull\/\d+\/?)$/.test(arg.trim());
+
+/**
+ * Where `animus start <pr>` runs a fix: where its session is. On this machine when a job here opened the pull request
+ * (`here`, that job); otherwise as for a new job but whatever the config says: Helix when this machine has joined one
+ * that has the repository, and else here from the pull request alone. --local and --helix win, and `left` is the one
+ * line that says the choice leaves a session behind.
+ */
+export async function whereToFix(opts: Omit<Parameters<typeof whereToRun>[0], 'config'> & { pr: string; here?: string }): Promise<{ where: Where; why: string; project?: string; left?: string }> {
+  const { pr, here, ...where } = opts;
+  if (here && opts.asked !== 'helix') return { where: 'local', why: opts.asked ? 'asked for --local' : `job ${here} on this machine opened it, and its session is here` };
+  const choice = await whereToRun(where);
+  if (here) return { ...choice, left: `the session of job ${here} stays on this machine: Helix runs the fix from the pull request alone` };
+  if (opts.asked === 'local') return { ...choice, left: `no job on this machine opened pull request ${pr}: the fix runs here from the pull request alone, without the session of the job that opened it` };
+  return choice.where === 'local' ? { ...choice, why: `no job on this machine opened it and ${choice.why}: the fix runs here from the pull request alone` } : choice;
+}
+
+/** What a fix that runs from the pull request alone takes from it; author is the GitHub login that opened it. */
+export type FromPr = { spec: string; branch: string; baseBranch: string; closes?: number; fixes?: FixEntry[]; author?: string };
+
+/** The spec, branches, Closes line and Fixes list a pull request's description and GitHub give; `what` names the description in the refusal when it holds no spec. */
+function fromDescription(found: PrSource, what: string): FromPr {
+  const spec = new RegExp(`<details><summary>${SPEC_SUMMARY}</summary>\\n\\n(\`{3,})md\\n([\\s\\S]*?)\\n\\1\\n\\n</details>`).exec(found.body)?.[2];
+  if (!spec) throw new AnimusError(`${what} holds no spec (one too long for GitHub's limit is left out), so the fix cannot run`);
+  const { closes, fixes } = readBody(found.body);
+  return { spec, branch: found.head, baseBranch: found.base, ...(closes ? { closes } : {}), ...(fixes.length ? { fixes } : {}), ...(found.author ? { author: found.author } : {}) };
+}
+
+/**
+ * A fix of a pull request no job on this machine opened: everything from GitHub, as `fixAlone` has it, and the job it
+ * continues named from the description's last line. Refuses, with one line, one that is merged or closed, one with a
+ * fix running or waiting here, and one whose description holds no spec.
+ */
+export function fixFromPr(repo: string, pr: string, lookup: PrSourceLookup = prSource): { of: string; pr: string; alone: FromPr } {
+  const found = lookup(pr, repo);
+  if (!found) throw new AnimusError(`no job on this machine opened pull request ${pr} and GitHub would not give it, so there is nothing to fix`);
+  if (found.state && found.state !== 'OPEN') throw new AnimusError(`pull request ${pr} is ${found.state.toLowerCase()}, so it cannot be fixed`);
+  const url = found.url ?? pr;
+  const active = activeFix(url);
+  if (active) throw new AnimusError(`pull request ${pr} has a fix ${active.what}: job ${active.job}`);
+  const alone = fromDescription(found, `no job on this machine opened pull request ${pr}, and its description`);
+  return { of: /^Built by Animus, job `([^`]+)`\.$/m.exec(found.body)?.[1] ?? url, pr: url, alone };
+}
+
+/**
+ * The personal skills a fix runs with: the copy kept in the folder of the job it continues; with that folder gone, the
+ * requester's only when they opened the pull request, and none otherwise.
+ */
+export function fixSkills(of: string, p: { author?: string | undefined; requester: () => string | undefined; theirs: () => PersonalSkill[] }): PersonalSkill[] {
+  if (existsSync(jobDir(of))) return loadJobSkills(jobDir(of));
+  return p.author && p.author === p.requester() ? p.theirs() : [];
+}
 
 /**
  * Whether the fix has only the pull request to go on: the earlier job's folder is gone, or its worktree is and cannot
@@ -62,10 +114,7 @@ export function fixAlone(repo: string, run: Run, state: JobState | undefined, lo
   if (state && (existsSync(join(state.workspace.worktree, '.git')) || revParse(repo, state.workspace.branch))) return undefined;
   const found = lookup(run.pr!, repo);
   if (!found) throw new AnimusError(`the earlier job's ${state ? 'worktree' : 'folder'} is gone and GitHub would not give the description of ${run.pr}, so the fix has nothing to go on`);
-  const spec = new RegExp(`<details><summary>${SPEC_SUMMARY}</summary>\\n\\n(\`{3,})md\\n([\\s\\S]*?)\\n\\1\\n\\n</details>`).exec(found.body)?.[2];
-  if (!spec) throw new AnimusError(`the earlier job's ${state ? 'worktree' : 'folder'} is gone and the description of ${run.pr} holds no spec (one too long for GitHub's limit is left out), so the fix cannot run`);
-  const { closes, fixes } = readBody(found.body);
-  return { spec, branch: found.head, baseBranch: found.base, ...(closes ? { closes } : {}), ...(fixes.length ? { fixes } : {}) };
+  return fromDescription(found, `the earlier job's ${state ? 'worktree' : 'folder'} is gone and the description of ${run.pr}`);
 }
 
 /** What a pull request's description says a fix must keep: the issue it closes and its list of fixes. */
