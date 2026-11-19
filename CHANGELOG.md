@@ -8,6 +8,13 @@ clients with how to update.
 
 ## Unreleased
 
+- `/animus fix <what to change>` on an open pull request a job opened, from
+  the job's person or the owner, gets 👀 and queues a fix on Helix with the
+  pull request's reviews and inline comments since the last push as
+  references (`animus fix --references <dir>`). A plain `/animus` there, a
+  fix from anyone else, on a pull request no job opened, a merged or closed
+  one or one with a fix already queued, running or waiting gets a one-line
+  reply and queues nothing.
 - `animus fix <pr> "<text>"` changes an open pull request a job opened: a new
   job in that job's worktree, reset to the branch as GitHub has it, that
   carries on from its implementer session (or a handoff when the session is

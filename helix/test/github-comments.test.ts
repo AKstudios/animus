@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
@@ -8,7 +8,7 @@ import { draftRunner, type DraftLaunch } from '../src/drafts.ts';
 import { checkComments, commentWatcher, githubNotifier, MARKER } from '../src/github-comments.ts';
 import { deviceCode, keepTokens, pollDevice } from '../src/github-app.ts';
 import { openStore } from '../src/store.ts';
-import { pauseFile, supervise, type Launch } from '../src/supervisor.ts';
+import { animusArgs, pauseFile, supervise, type Launch } from '../src/supervisor.ts';
 import { fakeGitHub, type FakeGitHub } from './fake-github.ts';
 import { fakeTransport, until } from './fake-slack.ts';
 import { fakeAdmit } from './fake-admit.ts';
@@ -42,14 +42,14 @@ const HOUR = 3600;
  * A Helix with ana (GitHub login ana-gh, signed in through the app) and the
  * project app of o. The comment watcher's clock is T0 and moves with
  * clock.at; the first poll starts watching at T0. Issue 7 on o/app is open,
- * 8 is a pull request. Jobs queue and stay queued, unless run is set: then
+ * 8 is an open pull request. Job pages are at http://helix.test. Jobs queue and stay queued, unless run is set: then
  * they run as `animus` would end them (see JOB) and report on their issue.
  */
 async function helix(opts: { slack?: boolean; owner?: string; run?: boolean } = {}) {
   const home = mkdtempSync(join(tmpdir(), 'helix-github-comments-'));
   process.env.HELIX_HOME = home;
   const github: FakeGitHub = await fakeGitHub();
-  const config: Config = { host: '127.0.0.1', port: 0, slots: 1, owner: opts.owner ?? 'ana', github: { client_id: 'Iv23liGood' } };
+  const config: Config = { host: '127.0.0.1', port: 0, slots: 1, owner: opts.owner ?? 'ana', url: 'http://helix.test', github: { client_id: 'Iv23liGood' } };
   const store = openStore(join(home, 'helix.db'));
   const envFile = join(home, 'ana.env');
   writeFileSync(envFile, '');
@@ -174,19 +174,66 @@ test('posts the revised draft as a new comment when the author has an open draft
   assert.equal(h.store.draftsIn('queued').length + h.store.draftsIn('running').length, 0);
 });
 
-// Protects: criterion 10. Fails when: /animus on a pull request starts a draft or is left unanswered.
-test('replies that fix on pull requests is not available yet, and starts nothing', async () => {
+const PULL_8 = 'https://github.com/o/app/pull/8';
+/** ana's job 1, which opened pull request 8 and last pushed to it at 10 seconds. */
+const opened8 = (h: Awaited<ReturnType<typeof helix>>) =>
+  h.store.add({ state: 'ended', person: 'ana', repo: 'app', spec: '', title: 'Fix login', draft: false, outcome: 'pr', pr: PULL_8, submitted: at(-HOUR), ended: at(10) });
+const fixes = (h: Awaited<ReturnType<typeof helix>>) => h.store.list().filter((j) => j.fix_of);
+
+// Protects: fix criterion 1. Fails when: /animus fix gets no 👀, is not queued as a fix of the job's pull request with the text as its ask, keeps no pull request to report on, or its references miss a review or inline comment since the last push or hold one from before it.
+test('/animus fix on a pull request a job opened gets 👀 and queues a fix with the text as its ask and the reviews since the last push as references', async () => {
   const h = await helix();
-  h.github.addComment('o/app', 8, 'ana-gh', '/animus fix the failing test', at(30));
+  opened8(h);
+  h.github.addReview('o/app', 8, 'bob-gh', 'Already pushed for', at(5));
+  h.github.addReviewComment('o/app', 8, 'bob-gh', 'Old inline remark', at(6), 'src/old.ts');
+  h.github.addReview('o/app', 8, 'bob-gh', 'Rename the button', at(20));
+  h.github.addReviewComment('o/app', 8, 'bob-gh', 'Typo in this label', at(25), 'src/login.ts');
+  const id = h.github.addComment('o/app', 8, 'ana-gh', '/animus fix make the button blue', at(30));
 
   await h.poll();
 
-  assert.equal(h.github.posted.length, 1);
-  assert.equal(h.github.posted[0]!.number, 8);
-  assert.match(h.github.posted[0]!.body, /`fix` on pull requests is not available yet/);
-  assert.deepEqual(h.github.reactions, []);
-  assert.deepEqual(h.store.draftsIn('queued').concat(h.store.draftsIn('running'), h.store.draftsIn('ready')), []);
+  assert.deepEqual(h.github.reactions, [{ repo: 'o/app', comment: id, login: 'ana-gh', content: 'eyes' }]);
+  assert.deepEqual(h.github.posted, []);
+  const [fix] = fixes(h);
+  assert.deepEqual([fix!.fix_of, fix!.person, fix!.pr, fix!.ask, fix!.github], [1, 'ana', PULL_8, 'make the button blue', { repo: 'o/app', issue: 8 }]);
+  const args = animusArgs(fix!, 'repo');
+  const dir = args[args.indexOf('--references') + 1]!;
+  const references = readdirSync(dir).sort().map((f) => readFileSync(join(dir, f), 'utf8')).join('\n');
+  assert.match(references, /Rename the button/);
+  assert.match(references, /src\/login\.ts[\s\S]*Typo in this label/);
+  assert.doesNotMatch(references, /Already pushed for|Old inline remark/);
 });
+
+const REFUSED = [
+  { why: 'a plain /animus on a pull request', login: 'ana-gh', body: '/animus make it blue', reply: /^Comment `\/animus fix <what to change>`/ },
+  { why: 'fix from someone not the job\'s person or the owner', login: 'bob-gh', body: '/animus fix make it blue', reply: /^Not queued: pull request 8 was opened by ana's job 1: only ana or the owner may fix it\.$/ },
+  { why: 'a pull request no job opened', number: 11, login: 'ana-gh', body: '/animus fix make it blue', reply: /^Not queued: no job on Helix opened pull request 11 of app, so there is nothing to fix\.$/ },
+  { why: 'a merged pull request', pull: { state: 'closed', merged: true }, login: 'ana-gh', body: '/animus fix make it blue', reply: /^Not queued: pull request 8 is merged, so it cannot be fixed\.$/ },
+  { why: 'a closed pull request', pull: { state: 'closed' }, login: 'ana-gh', body: '/animus fix make it blue', reply: /^Not queued: pull request 8 is closed, so it cannot be fixed\.$/ },
+  { why: 'a pull request with a fix queued', active: { state: 'queued' }, login: 'ana-gh', body: '/animus fix make it blue', reply: /^Not queued: pull request 8 has a fix queued: job 2 \(http:\/\/helix\.test\/jobs\/2\)\.$/ },
+  { why: 'a pull request with a fix waiting for an answer', active: { state: 'ended', outcome: 'needs-input' }, login: 'ana-gh', body: '/animus fix make it blue', reply: /^Not queued: pull request 8 has a fix waiting for an answer: job 2 \(http:\/\/helix\.test\/jobs\/2\)\.$/ },
+] as const;
+
+for (const c of REFUSED) {
+  // Protects: fix criterion 2. Fails when: a refused /animus on a pull request queues a fix, gets 👀, or is answered with more than one line or without its reason.
+  test(`replies with one line and queues nothing for ${c.why}`, async () => {
+    const h = await helix({ owner: 'nobody' });
+    opened8(h);
+    if ('pull' in c) h.github.addIssue('o/app', 8, { title: 'Fix login', body: 'A pull request', pull: true, ...c.pull });
+    if ('number' in c) h.github.addIssue('o/app', c.number, { title: 'By hand', body: 'x', pull: true });
+    if ('active' in c) h.store.add({ ...c.active, person: 'ana', repo: 'app', spec: '', title: 'fix: Fix login', draft: false, pr: PULL_8, fix_of: 1, ask: 'earlier', submitted: at(0) });
+    const before = fixes(h).length;
+    h.github.addComment('o/app', 'number' in c ? c.number : 8, c.login, c.body, at(30));
+
+    await h.poll();
+
+    assert.equal(bodies(h).length, 1);
+    assert.match(bodies(h)[0]!, c.reply);
+    assert.doesNotMatch(bodies(h)[0]!, /\n/);
+    assert.deepEqual(h.github.reactions, []);
+    assert.equal(fixes(h).length, before);
+  });
+}
 
 // Protects: criterion 5. Fails when: a person with a Slack link is not DMed the draft's link, for a draft or its revision, or one without a link is.
 test('DMs a person with a Slack link the link to a draft and to its revision', async () => {

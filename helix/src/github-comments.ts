@@ -72,14 +72,31 @@ export async function commentAs(store: Store, config: Pick<Config, 'github'>, ur
   return made.id;
 }
 
-/** Every comment on the repository updated since, oldest created first. */
-async function listComments(repo: string, since: string, token: string, urls: GitHubUrls): Promise<IssueComment[]> {
-  const all: IssueComment[] = [];
+/** Every item of a GitHub list, page by page; path already has its query. */
+async function pages<T>(path: string, token: string, urls: GitHubUrls): Promise<T[]> {
+  const all: T[] = [];
   for (let page = 1; ; page++) {
-    const got = await gh('GET', `/repos/${repo}/issues/comments?since=${encodeURIComponent(since)}&sort=created&direction=asc&per_page=100&page=${page}`, token, urls) as IssueComment[];
+    const got = await gh('GET', `${path}&per_page=100&page=${page}`, token, urls) as T[];
     all.push(...got);
     if (got.length < 100) return all;
   }
+}
+
+/** Every comment on the repository updated since, oldest created first. */
+const listComments = (repo: string, since: string, token: string, urls: GitHubUrls) =>
+  pages<IssueComment>(`/repos/${repo}/issues/comments?since=${encodeURIComponent(since)}&sort=created&direction=asc`, token, urls);
+
+/** A pull request's reviews and inline comments made after since, as a draft's references are kept: one file each, by name. */
+async function reviewsSince(repo: string, pull: number, since: string, token: string, urls: GitHubUrls): Promise<{ name: string; text: string }[]> {
+  type Review = { id: number; user: { login: string }; body?: string; submitted_at?: string };
+  type Inline = { id: number; user: { login: string }; body: string; path: string; line?: number; created_at: string };
+  const after = (t?: string) => Boolean(t) && Date.parse(t!) > Date.parse(since);
+  const reviews = (await pages<Review>(`/repos/${repo}/pulls/${pull}/reviews?`, token, urls)).filter((r) => r.body?.trim() && after(r.submitted_at));
+  const inline = (await pages<Inline>(`/repos/${repo}/pulls/${pull}/comments?`, token, urls)).filter((c) => after(c.created_at));
+  return [
+    ...reviews.map((r) => ({ name: `review-${r.id}.md`, text: `Review by ${r.user.login}:\n\n${r.body!.trim()}\n` })),
+    ...inline.map((c) => ({ name: `comment-${c.id}.md`, text: `${c.user.login} on ${c.path}${c.line ? ` line ${c.line}` : ''}:\n\n${c.body.trim()}\n` })),
+  ];
 }
 
 /** Who may read a project's comments, in the order their tokens are tried: whoever added it, then everyone else. */
@@ -153,7 +170,8 @@ export function githubNotifier(opts: { store: Store; config: Pick<Config, 'githu
 }
 
 const USAGE ='Say what you want after `/animus`, as in `/animus add a login page`.';
-// shortcut: fix is read but not acted on until its command exists; it is not draft text.
+const FIX_USAGE = 'Comment `/animus fix <what to change>` to have Animus change this pull request; it works on an open pull request a job opened.';
+// fix is for pull requests; on an issue it is not draft text.
 const WORDS = ['submit', 'discard', 'answer', 'cancel', 'fix'];
 
 /**
@@ -163,7 +181,7 @@ const WORDS = ['submit', 'discard', 'answer', 'cancel', 'fix'];
  * was created at or after the position and is not among those handled.
  */
 export function commentWatcher(opts: {
-  store: Store; config: Pick<Config, 'github' | 'owner'>; drafts: Pick<Drafts, 'github' | 'githubDiscard' | 'githubSubmit'>; jobs: Pick<Supervisor, 'submit' | 'answer' | 'cancel'>;
+  store: Store; config: Pick<Config, 'github' | 'owner'>; drafts: Pick<Drafts, 'github' | 'githubDiscard' | 'githubSubmit'>; jobs: Pick<Supervisor, 'submit' | 'answer' | 'cancel' | 'fix'>;
   github?: GitHubUrls; say?: (line: string) => void; now?: () => number;
 }): { poll(): Promise<void> } {
   const { store, config, drafts, jobs } = opts;
@@ -203,6 +221,32 @@ export function commentWatcher(opts: {
     return word === 'answer' ? `Got your answer: job ${job.id} resumes.` : `Job ${job.id} was cancelled.`;
   }
 
+  /** 👀 on a comment, to say it was seen; a refusal of it stops nothing. */
+  async function seen(person: string, repo: string, id: number): Promise<void> {
+    const token = await tokenOf(store, config, person, urls);
+    if (token) await gh('POST', `/repos/${repo}/issues/comments/${id}/reactions`, token, urls, { content: 'eyes' }).catch((err: unknown) => say(`comment ${id} on ${repo}: ${(err as Error).message}`));
+  }
+
+  /** `/animus fix <text>` on a pull request: a fix queued as `animus fix` on Helix would queue it, with the reviews since the job's last push; else the one line saying why not. */
+  async function fixCommand(person: string, project: Project, repo: string, number: number, text: string): Promise<string | undefined> {
+    const ask = /^fix(\s|$)/i.test(text) ? text.slice('fix'.length).trim() : '';
+    if (!ask) return FIX_USAGE;
+    const token = await tokenOf(store, config, person, urls);
+    if (!token) throw new AnimusError(`${person} has no GitHub token to read pull request ${number} with`);
+    const pull = await gh('GET', `/repos/${repo}/pulls/${number}`, token, urls) as { state: string; merged?: boolean };
+    if (pull.merged || pull.state !== 'open') return `Not queued: pull request ${number} is ${pull.merged ? 'merged' : 'closed'}, so it cannot be fixed.`;
+    // The latest job that pushed to it, as the supervisor finds the one a fix continues; its end is the last push.
+    const last = store.list().filter((j) => j.repo === project.name && j.pr?.endsWith(`/pull/${number}`) && j.ended && (j.outcome === 'pr' || j.outcome === 'draft-pr')).sort((a, b) => a.id - b.id).at(-1);
+    const references = last ? await reviewsSince(repo, number, last.ended!, token, urls) : [];
+    try {
+      jobs.fix(person, { repo: project.name, pr: String(number), ask, github: { repo, issue: number }, ...(references.length ? { references } : {}) });
+    } catch (err) {
+      if (err instanceof AnimusError) return `Not queued: ${err.message}.`;
+      throw err;
+    }
+    return undefined;
+  }
+
   async function handle(project: Project, repo: string, c: IssueComment): Promise<void> {
     const login = c.user.login.toLowerCase();
     const person = Object.entries(store.people()).find(([, p]) => p.github?.toLowerCase() === login)?.[0];
@@ -213,16 +257,18 @@ export function commentWatcher(opts: {
     const number = Number(m[2]);
     const reply = (text: string) => commentAs(store, config, urls, person, repo, number, text);
     if (now() - Date.parse(c.created_at) > TOO_OLD_MS) { await reply('This `/animus` comment is too old to act on: Helix saw it more than a day after it was written. Comment again if you still want it.'); return; }
-    if (m[1] === 'pull') { await reply('`fix` on pull requests is not available yet: comment `/animus` on the issue to draft a spec.'); return; }
     const text = body.slice('/animus'.length).trim();
+    if (m[1] === 'pull') {
+      const refused = await fixCommand(person, project, repo, number, text);
+      if (refused) await reply(refused); else await seen(person, repo, c.id);
+      return;
+    }
     const word = text.split(/\s/)[0]!.toLowerCase();
     if (word === 'discard') { await reply(await drafts.githubDiscard(person, { repo, number })); return; }
     if (word === 'submit') { await reply(await drafts.githubSubmit(person, { repo, number }, jobs)); return; }
     if (word === 'answer' || word === 'cancel') { await reply(await jobCommand(person, repo, number, word, text.slice(word.length).trim())); return; }
     if (WORDS.includes(word)) return;
-    const token = await tokenOf(store, config, person, urls);
-    // The reaction says "seen"; a refusal of it does not stop the draft.
-    if (token) await gh('POST', `/repos/${repo}/issues/comments/${c.id}/reactions`, token, urls, { content: 'eyes' }).catch((err: unknown) => say(`comment ${c.id} on ${repo}: ${(err as Error).message}`));
+    await seen(person, repo, c.id);
     const said = text ? await drafts.github(person, { project: project.name, repo, number, url: `https://github.com/${repo}/issues/${number}` }, text) : USAGE;
     if (said) await reply(said);
   }

@@ -69,6 +69,8 @@ const USAGE = `animus: a spec goes in, a pull request with proof comes out
         proves every criterion again and pushes to the same pull request.
         <pr> is its number or URL. It runs where the pull request's job ran,
         and on Helix when a job there opened it (--local or --helix says).
+        --references <dir> gives the implementer what is in it (Helix: the
+        pull request's reviews since its last push).
   animus runs [-n <count>] [--json]
         The run log, newest last.
   animus tools <job> [--json]
@@ -226,7 +228,7 @@ async function main(argv: string[]): Promise<number> {
     args: rest, allowPositionals: true,
     options: {
       repo: { type: 'string' }, project: { type: 'string' }, 'dry-run': { type: 'boolean' }, keep: { type: 'boolean' }, draft: { type: 'boolean' }, answer: { type: 'string' },
-      json: { type: 'boolean' }, skills: { type: 'string' }, local: { type: 'boolean' }, helix: { type: 'boolean' }, n: { type: 'string', short: 'n' }, again: { type: 'boolean' }, days: { type: 'string' }, force: { type: 'boolean' }, slices: { type: 'boolean' }, yes: { type: 'boolean' }, github: { type: 'string' }, slack: { type: 'string' }, all: { type: 'boolean' },
+      json: { type: 'boolean' }, skills: { type: 'string' }, local: { type: 'boolean' }, helix: { type: 'boolean' }, n: { type: 'string', short: 'n' }, again: { type: 'boolean' }, days: { type: 'string' }, force: { type: 'boolean' }, slices: { type: 'boolean' }, yes: { type: 'boolean' }, github: { type: 'string' }, slack: { type: 'string' }, all: { type: 'boolean' }, references: { type: 'string' },
     },
   });
   const cwd = process.cwd();
@@ -391,7 +393,7 @@ async function main(argv: string[]): Promise<number> {
       const alone = fixAlone(repo, run, state);
       // The description is what the pull request shows now: its Closes line and Fixes list are kept, however old the earlier job's state.
       const kept = alone ? undefined : keptFromBody(run.pr!, repo);
-      return finish(await runJob({ repo, fix: { of: run.job, ...(alone ? { alone } : { from: state!, ...(kept ? { kept } : {}) }), ask: text.join(' '), pr: run.pr! }, personal: localSkills(repo, values.skills), ...flags }, deps()));
+      return finish(await runJob({ repo, fix: { of: run.job, ...(alone ? { alone } : { from: state!, ...(kept ? { kept } : {}) }), ask: text.join(' '), pr: run.pr!, ...(values.references ? { references: resolve(values.references) } : {}) }, personal: localSkills(repo, values.skills), ...flags }, deps()));
     }
     case 'resume': {
       const state = positionals[0] ? loadState(positionals[0]) : undefined;
