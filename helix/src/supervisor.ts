@@ -16,7 +16,7 @@ import type { PersonalSkill } from '../../plugin/src/personal.ts';
 import { loadFactory, resolvePlan, type Tier } from '../../plugin/src/profiles.ts';
 import { parseSpec } from '../../plugin/src/spec.ts';
 import { isOwner } from './owner.ts';
-import { readMachine, waitReason, type Reading } from './room.ts';
+import { readMachine, waitReason, type Reading } from '../../plugin/src/room.ts';
 import { credentialEnv, personEnv, readyRepos, type Config } from './config.ts';
 import { GITHUB, githubRepo, liveTokenFile, type GitHubUrls } from './github-app.ts';
 import { readPull } from './github-comments.ts';
