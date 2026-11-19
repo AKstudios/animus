@@ -213,7 +213,7 @@ export function jobView(p: JobPage, now: number, local = false, closed?: Display
     ...(j.outcome ? [{ k: 'outcome', v: OUTCOMES[j.outcome] ?? j.outcome }] : []),
     ...(j.resume ? [{ k: 'carry on', v: j.resume }] : []),
     ...(j.pr ? [{ k: 'PR', v: pr ? `#${pr}` : j.pr, ...(/^https?:\/\//.test(j.pr) ? { href: j.pr } : {}) }] : []),
-    ...(j.fix_of !== undefined ? [{ k: 'fixes', v: `job #${j.fix_of}`, page: jobPage(j.fix_of) }] : []),
+    ...(j.fix_of !== undefined ? [{ k: 'fixes', v: j.fix_of_title ?? `job ${typeof j.fix_of === 'number' ? '#' : ''}${j.fix_of}`, page: jobPage(j.fix_of) }] : []),
     ...(j.cost_usd !== undefined ? [{ k: 'cost', v: `$${j.cost_usd.toFixed(2)}` }] : []),
     { k: 'submitted', v: when(j.submitted, now) },
     ...(j.started ? [{ k: 'started', v: when(j.started, now) }] : []),

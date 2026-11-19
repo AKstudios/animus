@@ -219,8 +219,8 @@ export function appendRun(run: Run): void {
 export function readRuns(file = runLog()): Run[] {
   if (!existsSync(file)) return [];
   return readFileSync(file, 'utf8').split('\n').filter(Boolean).flatMap((line) => {
-    // Only objects: a line that is JSON but not a run (`null`, a number) is skipped like one that is not JSON.
-    try { const r: unknown = JSON.parse(line); return r && typeof r === 'object' && !Array.isArray(r) ? [r as Run] : []; } catch { return []; }
+    // Only objects with a repo: a line that is JSON but not a run (`null`, a number, a leaked fixture) is skipped like one that is not JSON.
+    try { const r = JSON.parse(line) as Partial<Run> | null; return r && typeof r === 'object' && !Array.isArray(r) && typeof r.repo === 'string' ? [r as Run] : []; } catch { return []; }
   });
 }
 

@@ -141,7 +141,7 @@ test('Helix counts a use for each lesson on the run line a contained job wrote i
   const ana = personDirs(home, 'ana').animus;
   mkdirSync(ana, { recursive: true });
   const [first] = addProposals([lesson, { ...lesson, text: 'Name the check.' }], Date.now());
-  const writes = (lessons: number[]) => `require('fs').appendFileSync(${JSON.stringify(join(ana, 'runs.jsonl'))}, JSON.stringify({ job: 'app-1', ended: new Date().toISOString(), lessons: ${JSON.stringify(lessons)} }) + '\\n');`;
+  const writes = (lessons: number[]) => `require('fs').appendFileSync(${JSON.stringify(join(ana, 'runs.jsonl'))}, JSON.stringify({ job: 'app-1', repo: '/work/app', ended: new Date().toISOString(), lessons: ${JSON.stringify(lessons)} }) + '\\n');`;
   let script = writes([first!.id]);
   const store = openStore(join(home, 'helix.db'));
   store.putPerson('ana', { token_sha256: 'x' });

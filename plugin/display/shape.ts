@@ -25,6 +25,8 @@ export type DisplayJob = {
   pr?: string;
   /** A fix: the job it continues (Helix's number, or a local job's id). */
   fix_of?: number | string;
+  /** The title of that job, for the line "fix of <title>"; left out where the source does not know it. */
+  fix_of_title?: string;
   reason?: string;
   question?: string;
   cost_usd?: number;
@@ -218,8 +220,8 @@ export type InsightsRun = {
   pr?: string; fix_rounds: number;
   /** Each gate run: whether it passed (a flaky check counts as passed) and the checks that were flaky. */
   gates: { ok: boolean; flaky: string[] }[];
-  /** Each agent session, with its tool calls from the run log's `tools` summary. */
-  agents: { role: string; tier: string; cost_usd: number; calls: number; errors: number }[];
+  /** Each agent session, with its tool calls from the run log's `tools` summary; `calls` and `errors` are left out when the session recorded none. */
+  agents: { role: string; tier: string; cost_usd: number; calls?: number; errors?: number }[];
   review: { findings: number; acted_on: number } | null;
 };
 

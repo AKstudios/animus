@@ -274,7 +274,7 @@ export function serve(opts: {
       if (err instanceof Refused) return send(err.status, { error: err.message });
       if (err instanceof StillWaiting) return send(202, { pending: true });
       console.error(err);
-      return send(500, { error: 'Helix failed on this request; see its own output' });
+      return send(500, { error: `Helix failed on this request: ${(err instanceof Error ? err.message : String(err)).split('\n')[0] || 'unknown error'}` });
     });
   });
 }

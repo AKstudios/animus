@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { spawn, spawnSync } from 'node:child_process';
-import { mkdtempSync } from 'node:fs';
+import { appendFileSync, mkdirSync, mkdtempSync, rmSync } from 'node:fs';
 import http from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { hostname, tmpdir } from 'node:os';
@@ -69,6 +69,27 @@ test('an ended local job shows its run log row, with no way to resume', () => {
   appendRun({ job: 'logged', repo: '/work/shop', submitter: 'me@example.com', title: 'Logged', started: '2026-01-01T00:00:00.000Z', ended: '2026-01-01T00:05:00.000Z', outcome: 'pr', pr: 'https://example.test/pr/9', cost_usd: 1.5 } as Run);
   const job = localJobs().find((j) => j.id === 'logged')!;
   assert.deepEqual([job.state, job.outcome, job.pr, job.title, job.person, job.resume], ['ended', 'pr', 'https://example.test/pr/9', 'Logged', 'me', undefined]);
+});
+
+// Protects: a person is shown by name. Fails when the address, or the git name the run recorded, is not what shows.
+test('a local job shows its person by the recorded git name, else the part of the address before the @', () => {
+  for (const [job, extra] of [['named', { submitter_name: 'Ana Lima' }], ['unnamed', {}]] as const) {
+    saveState({ job, repo: '/work/shop', spec: '', workspace: {} as JobState['workspace'], plan: {} as JobState['plan'], outcome: 'pr' });
+    appendRun({ job, repo: '/work/shop', submitter: 'ana@example.com', title: job, started: '2026-01-01T00:00:00.000Z', ended: '2026-01-01T00:05:00.000Z', outcome: 'pr', cost_usd: 1, ...extra } as Run);
+  }
+  const person = (id: string) => localJobs().find((j) => j.id === id)!.person;
+  assert.deepEqual([person('named'), person('unnamed')], ['Ana Lima', 'ana']);
+});
+
+// Protects: a running job's page names its person and its start. Fails when person is empty or started is missing while cost stays unknown.
+test('a running local job has a person and a start, and no cost', () => {
+  seed('running-now');
+  const job = localJobs().find((j) => j.id === 'running-now')!;
+  assert.equal(job.state, 'running');
+  assert.notEqual(job.person, '');
+  assert.ok(!job.person.includes('@'));
+  assert.ok(Date.now() - Date.parse(job.started!) < 60_000);
+  assert.equal(job.cost_usd, undefined);
 });
 
 // Protects: `animus resume` is offered only for a job with state.json. Fails when a run that stopped before saveState (progress.json only) gets a resume command or an empty project name.
@@ -149,6 +170,39 @@ test('the local display names a job by its PR, links it, has people pages, and s
   assert.match(personNotice('ana', false, 404, true) ?? '', /No job on this machine names ana/);
   const page = jobView({ at: d.at, stages: d.stages, job: d.jobs[0]!, log: '' }, 0, true);
   assert.match(page.noLog, /kept no log/);
+});
+
+// Protects: one bad request does not end the display. Fails when: an unreadable run log ends the server, or answers with anything but a 500 and a one-line reason.
+test('an error in one request is a 500 with a one-line reason, and the display keeps serving', async () => {
+  const home = process.env.ANIMUS_HOME!;
+  const own = mkdtempSync(join(tmpdir(), 'animus-500-'));
+  process.env.ANIMUS_HOME = own;
+  mkdirSync(join(own, 'runs.jsonl'));
+  const s = await served();
+  const bad = await s.get('/display');
+  const { error } = (await bad.json()) as { error: string };
+  rmSync(join(own, 'runs.jsonl'), { recursive: true });
+  const after = await s.get('/display');
+  s.stop();
+  process.env.ANIMUS_HOME = home;
+  assert.equal(bad.status, 500);
+  assert.ok(error && !error.includes('\n'));
+  assert.equal(after.status, 200);
+});
+
+// Protects: criterion 6. Fails when: a run-log line with no repo, or not JSON, breaks the display or shows on it.
+test('run-log lines with no repo or that do not parse are left out of the display', async () => {
+  const file = join(process.env.ANIMUS_HOME!, 'runs.jsonl');
+  mkdirSync(process.env.ANIMUS_HOME!, { recursive: true });
+  appendFileSync(file, `${JSON.stringify({ job: 'leaked', started: '2026-01-01T00:00:00.000Z', ended: '2026-01-01T00:05:00.000Z', outcome: 'pr' })}\n{not json\n`);
+  saveState({ job: 'fine', repo: '/work/shop', spec: '', workspace: {} as JobState['workspace'], plan: {} as JobState['plan'], outcome: 'pr' });
+  appendRun({ job: 'fine', repo: '/work/shop', submitter: 'me@example.com', title: 'Fine', started: '2026-01-01T00:00:00.000Z', ended: '2026-01-01T00:05:00.000Z', outcome: 'pr', cost_usd: 1 } as Run);
+  const s = await served();
+  const res = await s.get('/display');
+  s.stop();
+  assert.equal(res.status, 200);
+  const ids = ((await res.json()) as Display).jobs.map((j) => j.id);
+  assert.ok(ids.includes('fine') && !ids.includes('leaked'));
 });
 
 // Protects: only loopback names are answered. Fails when: a page on another site, resolving its own name to 127.0.0.1, can read the jobs.
@@ -234,6 +288,18 @@ test('the local /job-list tags merged and closed PRs from outcomes.json and filt
   assert.equal(jobListView(all, true).rows.every((r) => !r.person || r.personPage === `/people/${encodeURIComponent(r.person)}`), true);
   // Totals cover the whole filter, not the page: the project filter changes them.
   assert.deepEqual([all.totals.merged, wiki.totals.jobs, wiki.totals.merged], [1, 1, 0]);
+});
+
+// Protects: a local fix names the job it continues. Fails when fix_of or that job's title is lost.
+test('a local fix carries the id and title of the job it fixes', () => {
+  const run = (job: string, over: Partial<Run>) => appendRun({ job, repo: '/work/shop', submitter: 'me@example.com', title: `Title ${job}`, started: '2026-01-01T00:00:00.000Z', ended: '2026-01-01T00:05:00.000Z', outcome: 'pr', pr: 'https://example.test/pr/9', cost_usd: 1, ...over } as Run);
+  saveState({ job: 'opens-pr', repo: '/work/shop', spec: '', workspace: {} as JobState['workspace'], plan: {} as JobState['plan'], outcome: 'pr' });
+  saveState({ job: 'fixes-pr', repo: '/work/shop', spec: '', workspace: {} as JobState['workspace'], plan: {} as JobState['plan'], outcome: 'pr' });
+  run('opens-pr', {});
+  run('fixes-pr', { fix_of: 'opens-pr' });
+  const jobs = localJobs();
+  const pick = (id: string) => { const j = jobs.find((x) => x.id === id)!; return [j.fix_of, j.fix_of_title]; };
+  assert.deepEqual([pick('opens-pr'), pick('fixes-pr')], [[undefined, undefined], ['opens-pr', 'Title opens-pr']]);
 });
 
 // ---- jobs of this machine's queue

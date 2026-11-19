@@ -61,18 +61,23 @@ const usd = (n: number) => `$${n.toFixed(2)}`;
 const pct = (n: number, of: number) => (of ? `${Math.round((n / of) * 100)}%` : '—');
 const times = (n: number) => (n === 1 ? '1 time' : `${n} times`);
 
+/** A job's runs put together; jobs on one pull request (the job that opened it and its fixes) are one, so a PR is counted once. */
 function jobsOf(runs: readonly InsightsRun[], outcomes: InsightsPage['outcomes']): Job[] {
   const byJob = new Map<string, InsightsRun[]>();
   for (const r of [...runs].sort((a, b) => (a.ended < b.ended ? -1 : 1))) byJob.set(r.job, [...(byJob.get(r.job) ?? []), r]);
-  return [...byJob.values()].map((rs) => {
+  const byPr = new Map<string, InsightsRun[][]>();
+  for (const rs of byJob.values()) { const k = rs.findLast((r) => r.pr)?.pr ?? `job:${rs[0]!.job}`; byPr.set(k, [...(byPr.get(k) ?? []), rs]); }
+  return [...byPr.values()].map((group) => {
+    const rs = group.flat().sort((a, b) => (a.ended < b.ended ? -1 : 1));
+    const first = rs[0]!;
     const last = rs.at(-1)!;
     const pr = rs.findLast((r) => r.pr)?.pr;
     const o = pr ? outcomes[pr] : undefined;
-    const delivered = last.outcome === 'pr' || last.outcome === 'draft-pr';
+    const delivered = group.some((g) => ['pr', 'draft-pr'].includes(g.at(-1)!.outcome));
     const gates = rs.flatMap((r) => r.gates);
     const merged = delivered && o?.state === 'MERGED';
     return {
-      project: base(last.repo), cls: `${last.size} · ${last.difficulty} · ${last.type}`, delivered, merged,
+      project: base(last.repo), cls: `${first.size} · ${first.difficulty} · ${first.type}`, delivered, merged,
       touched: merged && o!.human_commits > 0, undone: merged && Boolean(o!.reverted || o!.reworked),
       ...(gates.length ? { firstPass: gates.every((g) => g.ok) && sum(rs.map((r) => r.fix_rounds)) === 0 } : {}),
       ...(last.cause ? { cause: last.cause } : {}), cost: sum(rs.map((r) => r.cost_usd)), ms: sum(rs.map((r) => r.ms)), last, runs: rs,
@@ -164,9 +169,11 @@ export function insightsView(p: InsightsPage, now = Date.parse(p.at)): InsightsV
   const agentRuns = jobs.flatMap((j) => j.runs.flatMap((r) => r.agents));
   const totalCost = sum(agentRuns.map((a) => a.cost_usd));
   const agents = [...Map.groupBy(agentRuns, (a) => `${a.role}\u0000${a.tier}`)].map(([, as]) => {
-    const calls = sum(as.map((a) => a.calls));
-    return { role: as[0]!.role, tier: as[0]!.tier, spent: sum(as.map((a) => a.cost_usd)), calls, errors: sum(as.map((a) => a.errors)) };
-  }).sort((x, y) => y.spent - x.spent).map((a): AgentRow => ({ role: a.role, tier: a.tier, cost: pct(a.spent, totalCost), calls: a.calls.toLocaleString('en-US'), failed: pct(a.errors, a.calls) }));
+    const seen = as.filter((a) => a.calls !== undefined);
+    return { role: as[0]!.role, tier: as[0]!.tier, spent: sum(as.map((a) => a.cost_usd)), runs: as.length, seen: seen.length, calls: sum(seen.map((a) => a.calls!)), errors: sum(seen.map((a) => a.errors ?? 0)) };
+  }).sort((x, y) => y.spent - x.spent).map((a): AgentRow => a.seen
+    ? { role: a.role, tier: a.tier, cost: pct(a.spent, totalCost), calls: `${a.calls.toLocaleString('en-US')}${a.seen < a.runs ? ` · ${a.seen} of ${a.runs} runs` : ''}`, failed: pct(a.errors, a.calls) }
+    : { role: a.role, tier: a.tier, cost: pct(a.spent, totalCost), calls: 'not recorded', failed: 'not recorded' });
 
   const reviews = jobs.flatMap((j) => (j.last.review ? [j.last.review] : []));
   const found = sum(reviews.map((r) => r.findings));

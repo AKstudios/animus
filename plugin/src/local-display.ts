@@ -6,10 +6,10 @@
 // otherwise. Served on 127.0.0.1 only, with no sign-in: whoever reaches this
 // machine's loopback is the person whose jobs these are, and there are no
 // people pages.
-import { createServer, type Server } from 'node:http';
+import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
 import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
 import type { AddressInfo } from 'node:net';
-import { hostname } from 'node:os';
+import { hostname, userInfo } from 'node:os';
 import { basename, join } from 'node:path';
 import { listJobs, RESULTS, type JobFilter, type Result } from '../display/job-list.ts';
 import type { Display, DisplayJob, JobListPage, JobPage, ListJob, PrState } from '../display/shape.ts';
@@ -19,6 +19,7 @@ import { folderParts, read, shotFile } from './job-folder.ts';
 import { logFile } from './local-loop.ts';
 import { openLocalQueue, queueFile, type LocalJob } from './local-queue.ts';
 import { readOutcomes, type Outcomes } from './outcomes.ts';
+import { tryGit } from './proc.ts';
 import { alive, animusHome, jobDir, loadProgress, loadState, readRuns, STAGES, type Run } from './log.ts';
 import { loadFactory } from './profiles.ts';
 import { personOf, profilesInfo, runTokens, usageOf } from './usage.ts';
@@ -29,6 +30,12 @@ const PLAIN = /^[A-Za-z0-9][\w.-]*$/;
 
 /** The project of a job that has no state and no run row: it never got far enough to name one. */
 const NO_PROJECT = 'unknown project';
+
+/** A person's name from their address: what is before the @. */
+const nameOf = (submitter: string): string => submitter.split('@')[0]!;
+
+/** Who runs a job here, by name: the repository's git user, else the user's login. */
+const runnerOf = (repo: string): string => tryGit(repo, ['config', 'user.name']) ?? nameOf(tryGit(repo, ['config', 'user.email']) ?? userInfo().username);
 
 /** This machine's queue (local-queue.ts), newest last; none when it has never had one. */
 function queued(): LocalJob[] {
@@ -56,6 +63,8 @@ function jobOf(id: string, runs: readonly Run[], from?: LocalJob): DisplayJob | 
   const mine = runs.filter((r) => r.job === id);
   const last = mine.at(-1);
   const fix = fixRounds(mine);
+  const fixOf = last?.fix_of ?? state?.fix_of;
+  const fixTitle = fixOf ? runs.findLast((r) => r.job === fixOf)?.title : undefined;
   let title = last?.title;
   if (!title && state) { try { title = /^# (.+)$/m.exec(readFileSync(state.spec, 'utf8'))?.[1]; } catch { /* the job's copy is gone */ } }
   const running = !state?.outcome && progress?.host === hostname() && progress.pid !== undefined && alive(progress.pid);
@@ -68,13 +77,14 @@ function jobOf(id: string, runs: readonly Run[], from?: LocalJob): DisplayJob | 
   const again = from && (from.state === 'queued' || from.state === 'waiting' || from.state === 'running') ? from : undefined;
   const job: DisplayJob = {
     // A job that has not ended yet is the machine's person's: the newest run says who that is.
-    id, person: personOf(last ?? runs.at(-1)), repo: state ? basename(state.repo) : last ? basename(last.repo) : from ? basename(from.repo) : NO_PROJECT, title: title ?? id, submitted,
+    id, person: running && state && !runs.length ? runnerOf(state.repo) : personOf(last ?? runs.at(-1)), repo: state ? basename(state.repo) : last ? basename(last.repo) : from ? basename(from.repo) : NO_PROJECT, title: title ?? id, submitted,
     state: state?.outcome ? 'ended' : running ? 'running' : 'stopped',
     ...(started ? { started } : {}), ...(last?.ended && !running ? { ended: last.ended } : {}),
     ...(tokens ? { tokens } : {}),
     ...(state?.outcome ? { outcome: state.outcome } : {}), ...(last?.pr ? { pr: last.pr } : {}),
     ...(last?.reason ? { reason: last.reason } : {}), ...(state?.question ? { question: state.question } : {}),
     ...(last && !running ? { cost_usd: last.cost_usd } : {}),
+    ...(fixOf ? { fix_of: fixOf, ...(fixTitle ? { fix_of_title: fixTitle } : {}) } : {}),
     ...(fix.has(id) ? { fix_rounds: fix.get(id)! } : {}),
     ...(running && progress ? { progress } : {}),
     // `animus resume` needs state.json, which is saved only after the worktree is made.
@@ -201,6 +211,17 @@ export function listenLocal(server: Server, port: number): Promise<number> {
 export function localServer(): Server {
   return createServer((req, res) => {
     const send = (status: number, value: unknown) => { res.writeHead(status, { 'content-type': 'application/json' }); res.end(`${JSON.stringify(value)}\n`); };
+    // An error in one request answers that request; it never ends the server.
+    try { answer(req, res, send); } catch (err) {
+      const reason = (err instanceof Error ? err.message : String(err)).split('\n')[0] || 'unknown error';
+      console.error(err);
+      if (res.headersSent) res.end(); else send(500, { error: `the display failed on this request: ${reason}` });
+    }
+  });
+}
+
+function answer(req: IncomingMessage, res: ServerResponse, send: (status: number, value: unknown) => void): unknown {
+  {
     // A page on another site could point its own name at 127.0.0.1 and read these jobs: only this machine's own names are answered.
     if (!/^(127\.0\.0\.1|localhost)(:\d+)?$/.test(req.headers.host ?? '') || req.method !== 'GET') return send(403, { error: 'this display answers GET requests for 127.0.0.1 only' });
     const url = new URL(req.url ?? '/', 'http://localhost');
@@ -235,5 +256,5 @@ export function localServer(): Server {
       if (image) { res.writeHead(200, { 'content-type': image.type, 'cache-control': 'private, no-cache', 'x-content-type-options': 'nosniff' }); return res.end(image.body); }
     }
     return send(404, { error: `nothing at ${url.pathname}` });
-  });
+  }
 }

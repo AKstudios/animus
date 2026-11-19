@@ -172,7 +172,7 @@ test('a person\'s page shows what their runs used, from their run log', async ()
   const tokens = { input: 1000, output: 200, cache_read: 300, cache_write: 500 };
   const agent = { role: 'implement', model: 'm-big', cost_usd: 2, tokens, stage: 'implement', tier: 'deep', effort: '', ok: true, ms: 0, turns: 0, calls: 0, errors: 0 };
   const day = new Date().toISOString();
-  writeFileSync(join(dir, 'runs.jsonl'), `${JSON.stringify({ job: 'j', submitter: 'ana', started: day, ended: day, cost_usd: 2, tokens, agents: [agent] })}\n`);
+  writeFileSync(join(dir, 'runs.jsonl'), `${JSON.stringify({ job: 'j', repo: '/work/app', submitter: 'ana', started: day, ended: day, cost_usd: 2, tokens, agents: [agent] })}\n`);
   const u = personView((await (await h.get('/people/ana/page-data', 'ben-token')).json()) as PersonPage).usage!;
   h.stop();
 
