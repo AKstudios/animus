@@ -272,7 +272,7 @@ const detailsOf = (v: JobPageView, key: string, cls: string, summary: string, bo
   return `<details class="${cls}" data-key="fold-${esc(key)}" data-fold="${esc(key)}" data-default="${dflt ? 1 : 0}"${(readFolds(v.id)[key] ?? dflt) ? ' open' : ''}><summary>${summary}</summary>${body}</details>`;
 };
 /** A heading section: its head is the summary, with a chevron. */
-const foldSection = (v: JobPageView, key: string, title: string, body: string) => detailsOf(v, key, `section fold-section ${key}`, `<span class="section-head"><h2>${title}</h2><span class="chev" aria-hidden="true"></span></span>`, body);
+const foldSection = (v: JobPageView, key: string, title: string, body: string) => detailsOf(v, key, `section fold-section fold-${key}`, `<span class="section-head"><h2>${title}</h2><span class="chev" aria-hidden="true"></span></span>`, body);
 
 const STAGE_TITLE: Record<string, string> = { setup: 'Setup', plan: 'Plan', implement: 'Implement', gates: 'Gates', review: 'Review', evidence: 'Evidence', pr: 'PR' };
 const plural = (n: number, one: string) => `${n} ${n === 1 ? one : `${one}s`}`;
