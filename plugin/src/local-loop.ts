@@ -25,7 +25,7 @@ export const animusArgs = (job: LocalJob): string[] => {
 export const logFile = (id: number, home = animusHome()) => join(home, 'queue', String(id), 'log.txt');
 
 /** Ends a job's process tree: the whole group where there is one. */
-function kill(pid: number, child?: ChildProcess): void {
+export function kill(pid: number, child?: ChildProcess): void {
   try {
     if (process.platform !== 'win32') process.kill(-pid, 'SIGTERM');
     else if (child) child.kill();

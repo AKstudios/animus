@@ -7,7 +7,8 @@ import { join } from 'node:path';
 import { test } from 'node:test';
 import './helpers.ts';
 import { earlierOf } from '../src/after.ts';
-import { enqueue, ensureLoop, openLocalQueue } from '../src/local-queue.ts';
+import { enqueue, ensureLoop, openLocalQueue, type LocalJob } from '../src/local-queue.ts';
+import { answerLocal, cancelLocal } from '../src/local-status.ts';
 import { loopConfig } from '../src/personal.ts';
 import type { Earlier } from '../src/queue.ts';
 import { runLoop } from '../src/local-loop.ts';
@@ -244,4 +245,121 @@ test('loopConfig reads the room settings from run: and refuses bad ones', () => 
   assert.throws(() => loopConfig(file('run:\n  slots: 0\n')), /slots must be a whole number/);
   assert.throws(() => loopConfig(file('run:\n  job_memory: lots\n')), /job_memory must be a memory size/);
   assert.throws(() => loopConfig(file('run:\n  tier_limits: { huge: 1 }\n')), /tier_limits has huge/);
+});
+
+const cli = (home: string, ...args: string[]) => {
+  const r = spawnSync(process.execPath, ['--disable-warning=ExperimentalWarning', join(import.meta.dirname, '../src/cli.ts'), ...args], { env: { ...process.env, ANIMUS_HOME: home, HELIX_URL: '', HELIX_TOKEN: '' }, encoding: 'utf8' });
+  return { code: r.status, out: r.stdout, err: r.stderr };
+};
+const ended = (queue: ReturnType<typeof openLocalQueue>, fields: Partial<LocalJob>) => {
+  const job = enqueue(queue, spec);
+  queue.save({ ...queue.get(job.id)!, state: 'ended', ...fields });
+  return job.id;
+};
+
+// Protects: criterion 5, the list of what needs you. Fails when a question is dropped once looked at, a failure or pull request shows again after it was seen, or a job that needs nothing is listed.
+test('animus status lists questions, then failures and pull requests since you last looked, and marks them seen', () => {
+  const home = newHome();
+  const queue = openLocalQueue(home);
+  const old = ended(queue, { outcome: 'failed', reason: 'old trouble', ended: '2020-01-01T00:00:00.000Z' });
+  const asks = ended(queue, { outcome: 'needs-input', question: 'Which table?', ended: '2020-01-02T00:00:00.000Z' });
+  const failed = ended(queue, { outcome: 'failed', reason: 'gates failed\nmore', ended: '2022-01-01T00:00:00.000Z' });
+  const opened = ended(queue, { outcome: 'pr', pr: 'https://example.test/pr/7', ended: '2022-01-02T00:00:00.000Z' });
+  queue.markSeen('2021-01-01T00:00:00.000Z');
+  queue.close();
+
+  const first = cli(home, 'status');
+  const second = cli(home, 'status');
+
+  assert.equal(first.code, 0);
+  const lines = first.out.split('\n');
+  const at = (text: string) => lines.findIndex((l) => l.includes(text));
+  assert.ok(at('needs you:') === 0 && at(`job ${asks} asks: Which table?`) < at(`job ${failed} failed`) && at(`job ${failed} failed`) < at(`job ${opened} opened a pull request: https://example.test/pr/7`));
+  assert.ok(first.out.includes('gates failed') && !first.out.includes('more\n  job'), 'only the first line of a reason');
+  assert.ok(!first.out.slice(0, first.out.indexOf('\n\n')).includes(`job ${old} failed`), 'a failure from before you last looked is not listed as needing you');
+  // The second look: the question still waits, the failure and the pull request were seen.
+  assert.ok(second.out.startsWith(`needs you:\n  job ${asks} asks`) && !second.out.includes('opened a pull request') && !second.out.includes('failed:'));
+});
+
+// Protects: criterion 3 and 5, the room reason in status. Fails when a job held for room shows only "queued".
+test('animus status shows why a job is held for room, in the list and for the one job', () => {
+  const home = newHome();
+  const queue = openLocalQueue(home);
+  const job = enqueue(queue, spec);
+  queue.save({ ...queue.get(job.id)!, waiting: 'waiting for memory: 5 GB free, needs 4 GB plus 2 GB kept free' });
+  queue.claim('1.0.0', process.ppid);
+  queue.close();
+
+  const list = cli(home, 'status').out;
+  const one = cli(home, 'status', String(job.id)).out;
+
+  assert.match(list, /queued\s+Say done\s+waiting for memory: 5 GB free/);
+  assert.ok(one.includes(`job ${job.id}: Say done`) && one.includes('  waiting for memory: 5 GB free, needs 4 GB plus 2 GB kept free'));
+  assert.equal(cli(home, 'status', '99').code, 2);
+});
+
+// Protects: criterion 5, the session-start hook. Fails when it starts a loop, prints with nothing to say, or says nothing when something needs you.
+test('session-start prints what needs you, and starts nothing', () => {
+  const home = newHome();
+  const queue = openLocalQueue(home);
+  enqueue(queue, spec);
+  ended(queue, { outcome: 'needs-input', question: 'Which table?', ended: '2020-01-02T00:00:00.000Z' });
+  queue.close();
+
+  const quiet = cli(newHome(), 'session-start');
+  const told = cli(home, 'session-start');
+
+  assert.deepEqual([quiet.code, quiet.out], [0, '']);
+  assert.ok(told.out.startsWith('needs you:') && told.out.includes('asks: Which table?'));
+  const after = openLocalQueue(home);
+  assert.equal(after.loop(), undefined, 'the hook started no loop, though a job is queued');
+  after.close();
+});
+
+// Protects: criterion 5, answer. Fails when an answer to a job that did not ask is taken, or the answered job is not resumed with the answer.
+test('animus answer queues a job that asked again, and the loop resumes it with the answer', async () => {
+  const home = newHome();
+  const queue = openLocalQueue(home);
+  const id = ended(queue, { outcome: 'needs-input', question: 'Which table?', animus_job: 'say-done-1', ended: '2020-01-02T00:00:00.000Z' });
+  const other = ended(queue, { outcome: 'pr' });
+  queue.close();
+
+  assert.equal(cli(home, 'answer', String(other), 'x').code, 2);
+  const reopened = openLocalQueue(home);
+  // In this process: the command would also start a real loop.
+  assert.equal(answerLocal(reopened, String(id), 'the users table').state, 'queued');
+  const { launch, started } = fakeAnimus([{ stdout: JSON.stringify({ outcome: 'pr' }) }]);
+  await runLoop({ queue: reopened, version: '1.0.0', launch, machine: plenty, sleep: tick, home });
+  assert.deepEqual(started, [['resume', 'say-done-1', '--answer', 'the users table']]);
+  assert.deepEqual([reopened.get(id)!.state, reopened.get(id)!.question], ['ended', undefined]);
+  reopened.close();
+});
+
+// Protects: criterion 5, cancel. Fails when a running job is left to finish, the loop overwrites the cancellation with its end, or a finished job can be cancelled.
+test('animus cancel ends a waiting job, and a running one stays cancelled when its process ends', async () => {
+  const home = newHome();
+  const queue = openLocalQueue(home);
+  const waiting = enqueue(queue, { ...spec, after: ['/work/project/docs/specs/earlier.md'] });
+  const running = enqueue(queue, spec);
+  const done = ended(queue, { outcome: 'pr' });
+
+  cancelLocal(queue, String(waiting.id));
+  assert.deepEqual([queue.get(waiting.id)!.state, queue.get(waiting.id)!.ended === undefined], ['cancelled', false]);
+  assert.throws(() => cancelLocal(queue, String(waiting.id)), /already been cancelled/);
+  assert.throws(() => cancelLocal(queue, String(done)), /already ended/);
+
+  // The loop starts the job; cancelled while it runs, it ends with a result the loop must not record.
+  const child = new EventEmitter() as ChildProcess & { stdout: EventEmitter; stderr: EventEmitter };
+  Object.assign(child, { pid: 4_000_001, stdout: new EventEmitter(), stderr: new EventEmitter() });
+  const launch = (): ChildProcess => child;
+  let looks = 0;
+  const sleep = async () => {
+    looks += 1;
+    if (looks === 1) { assert.equal(queue.get(running.id)!.state, 'running'); cancelLocal(queue, String(running.id)); child.stdout.emit('data', Buffer.from(JSON.stringify({ outcome: 'pr' }))); child.emit('close', 0, null); }
+    await tick();
+  };
+  await runLoop({ queue, version: '1.0.0', launch, machine: plenty, sleep, home });
+
+  assert.deepEqual([queue.get(running.id)!.state, queue.get(running.id)!.outcome, queue.get(running.id)!.pid], ['cancelled', undefined, undefined]);
+  queue.close();
 });

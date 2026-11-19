@@ -41,6 +41,9 @@ export type LocalQueue = QueueStore<LocalJob> & {
   claim(version: string, pid?: number): boolean;
   /** Gives up the lock if no work is left, in one step with the check, so a job added just before is not left with no loop; whether it was given up. */
   releaseIfIdle(pid?: number): boolean;
+  /** When the person last looked at what needs them (`animus status`), if ever. */
+  seen(): string | undefined;
+  markSeen(at: string): void;
   close(): void;
 };
 
@@ -53,6 +56,7 @@ export function openLocalQueue(home = animusHome()): LocalQueue {
   db.exec('pragma busy_timeout = 5000');
   db.exec('create table if not exists jobs (id integer primary key autoincrement, state text not null, data text not null)');
   db.exec('create table if not exists loop (id integer primary key check (id = 1), pid integer not null, host text not null, version text not null, started text not null)');
+  db.exec('create table if not exists seen (id integer primary key check (id = 1), at text not null)');
   const row = (r: unknown): LocalJob => {
     const { id, state, data } = r as { id: number; state: LocalJob['state']; data: string };
     return { ...(JSON.parse(data) as LocalJob), id, state };
@@ -88,6 +92,8 @@ export function openLocalQueue(home = animusHome()): LocalQueue {
       db.prepare('delete from loop where id = 1 and pid = ?').run(pid);
       return true;
     }),
+    seen: () => (db.prepare('select at from seen where id = 1').get() as { at: string } | undefined)?.at,
+    markSeen(at) { db.prepare('insert or replace into seen (id, at) values (1, ?)').run(at); },
     close: () => db.close(),
   };
 }
