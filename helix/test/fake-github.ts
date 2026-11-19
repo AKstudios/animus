@@ -23,8 +23,12 @@ export type FakeGitHub = GitHubUrls & {
   permissions: Record<string, Record<string, string>>;
   /** The repositories (owner/name) each login has access to; a login left out has access to every installed one. */
   access: Record<string, string[]>;
-  /** An issue (or pull request) on owner/name, as the issue and comment routes serve it. */
-  addIssue(repo: string, number: number, issue: { title: string; body: string; pull?: boolean }): void;
+  /** An issue (or pull request) on owner/name, as the issue and comment routes serve it; a pull request is open unless state or merged says otherwise. Adding it again replaces it. */
+  addIssue(repo: string, number: number, issue: { title: string; body: string; pull?: boolean; state?: 'open' | 'closed'; merged?: boolean }): void;
+  /** A review a login submitted on a pull request, at submitted. */
+  addReview(repo: string, number: number, login: string, body: string, submitted: string): void;
+  /** An inline comment a login made on a line of a pull request's diff, at created. */
+  addReviewComment(repo: string, number: number, login: string, body: string, created: string, path: string): void;
   /** A comment by a login on an issue; created defaults to now. updated is when it was last edited, by default created. Returns its id. */
   addComment(repo: string, number: number, login: string, body: string, created?: string): number;
   /** The login edits a comment: its update time, which `since` goes by, moves to at (default now). */
@@ -56,12 +60,16 @@ export async function fakeGitHub(opts: { clientId?: string; deviceFlow?: boolean
     return { access_token: `ghu_${issued}`, expires_in: 28800, refresh_token: `ghr_${issued}`, refresh_token_expires_in: 15811200, token_type: 'bearer', scope: '' };
   };
   const ids: Record<string, number> = {};
-  const issues = new Map<string, { title: string; body: string; pull?: boolean }>();
+  const issues = new Map<string, { title: string; body: string; pull?: boolean; state?: 'open' | 'closed'; merged?: boolean }>();
+  const reviews: { repo: string; number: number; id: number; user: { login: string }; body: string; state: string; submitted_at: string }[] = [];
+  const inline: { repo: string; number: number; id: number; user: { login: string }; body: string; path: string; line: number; created_at: string }[] = [];
   const second = () => `${new Date().toISOString().slice(0, 19)}Z`;
   const fake: FakeGitHub = {
     web: '', api: '', calls: [], slowDowns: 0, installed: {}, access: {}, permissions: {},
     comments: [], posted: [], reactions: [], refusePosts: 0,
     addIssue: (repo, number, issue) => { issues.set(`${repo}#${number}`, issue); },
+    addReview: (repo, number, login, body, submitted) => { reviews.push({ repo, number, id: 500 + reviews.length, user: { login }, body, state: 'COMMENTED', submitted_at: submitted }); },
+    addReviewComment: (repo, number, login, body, created, path) => { inline.push({ repo, number, id: 700 + inline.length, user: { login }, body, path, line: 1, created_at: created }); },
     addComment(repo, number, login, body, created = second()) {
       const id = fake.comments.length + 1;
       fake.comments.push({ id, repo, number, login, body, created_at: created, updated_at: created });
@@ -110,8 +118,26 @@ export async function fakeGitHub(opts: { clientId?: string; deviceFlow?: boolean
     html_url: `https://github.com/${c.repo}/${issues.get(`${c.repo}#${c.number}`)?.pull ? 'pull' : 'issues'}/${c.number}#issuecomment-${c.id}`,
   });
 
+  /** The pull request routes: one pull request, its reviews and its inline comments, in GitHub's pages. */
+  const pullApi = (method: string, path: string, login: string): [number, unknown] | undefined => {
+    const url = new URL(path, 'http://x');
+    const m = /^\/repos\/([^/]+)\/([^/]+)\/pulls\/(\d+)(?:\/(reviews|comments))?$/.exec(url.pathname);
+    if (!m || method !== 'GET') return undefined;
+    const repo = `${m[1]}/${m[2]}`;
+    const number = Number(m[3]);
+    const pull = issues.get(`${repo}#${number}`);
+    if (!reaches(login, m[1]!, m[2]!) || !pull?.pull) return [404, { message: 'Not Found' }];
+    if (!m[4]) return [200, { number, state: pull.state ?? 'open', merged: Boolean(pull.merged), html_url: `https://github.com/${repo}/pull/${number}` }];
+    const per = Number(url.searchParams.get('per_page') ?? 30);
+    const page = Number(url.searchParams.get('page') ?? 1);
+    const all = (m[4] === 'reviews' ? reviews : inline).filter((r) => r.repo === repo && r.number === number).map(({ repo: _r, number: _n, ...r }) => r);
+    return [200, all.slice((page - 1) * per, page * per)];
+  };
+
   /** The repository routes: issues, their comments, and comment reactions. */
   const repoApi = (method: string, path: string, login: string, body: Record<string, string>): [number, unknown] | undefined => {
+    const pulled = pullApi(method, path, login);
+    if (pulled) return pulled;
     const m = /^\/repos\/([^/]+)\/([^/]+)\/issues(?:\/(.*))?$/.exec(new URL(path, 'http://x').pathname);
     if (!m) return undefined;
     const repo = `${m[1]}/${m[2]}`;
@@ -146,7 +172,7 @@ export async function fakeGitHub(opts: { clientId?: string; deviceFlow?: boolean
       return [201, shown(fake.comments[fake.addComment(repo, number, login, body.body!) - 1]!)];
     }
     if (issue[2]) return [200, fake.comments.filter((c) => c.repo === repo && c.number === number).map(shown)];
-    return [200, { title: found.title, body: found.body, state: 'open', html_url: `https://github.com/${repo}/${found.pull ? 'pull' : 'issues'}/${number}`, user: { login: 'someone' }, ...(found.pull ? { pull_request: {} } : {}) }];
+    return [200, { title: found.title, body: found.body, state: found.state ?? 'open', html_url: `https://github.com/${repo}/${found.pull ? 'pull' : 'issues'}/${number}`, user: { login: 'someone' }, ...(found.pull ? { pull_request: {} } : {}) }];
   };
 
   const api = (method: string, path: string, token: string, body: Record<string, string>): [number, unknown] => {

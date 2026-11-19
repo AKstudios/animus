@@ -33,13 +33,16 @@ export type Launch = (job: HelixJob, repoDir: string, env: Record<string, string
 export const animusArgs = (job: HelixJob, repoDir: string): string[] => {
   if (job.animus_job) return ['resume', job.animus_job, ...(job.answer ? ['--answer', job.answer] : [])];
   const skills = existsSync(skillsFile(job)) ? ['--skills', skillsFile(job)] : [];
+  const references = existsSync(referencesDir(job)) ? ['--references', referencesDir(job)] : [];
   // `--` keeps an ask that starts with a dash from being read as an option.
-  if (job.fix_of) return ['fix', '--repo', repoDir, ...skills, '--', job.pr!, job.ask!];
+  if (job.fix_of) return ['fix', '--repo', repoDir, ...skills, ...references, '--', job.pr!, job.ask!];
   return ['run', job.spec, '--repo', repoDir, ...(job.draft ? ['--draft'] : []), ...skills];
 };
 
 /** Where Helix keeps the skills a person sent with a spec: beside it, so a job's container sees them where the spec is. */
 export const skillsFile = (job: Pick<HelixJob, 'spec'>) => join(dirname(job.spec), 'skills.json');
+/** Where Helix keeps what a script fetched for a fix (its pull request's reviews), one file each as a draft's references are. */
+export const referencesDir = (job: Pick<HelixJob, 'spec'>) => join(dirname(job.spec), 'references');
 
 /** The same command a person runs on a laptop, on this machine as Helix's account. */
 const animus: Launch = (job, repoDir) => ({
@@ -61,8 +64,11 @@ export const pauseFile = (home: string) => join(home, 'paused');
 /** What `helix upgrade` writes in the pause file: the next `helix serve` takes the pause off. */
 export const UNTIL_RESTART = 'until restart';
 
-/** A fix on an open pull request (GLOSSARY.md): the pull request as a number, `#number` or its URL, and what to change. */
-export type FixRequest = { repo: string; pr: string; ask: string; skills?: PersonalSkill[] };
+/**
+ * A fix on an open pull request (GLOSSARY.md): the pull request as a number, `#number` or its URL, and what to change.
+ * From a /animus fix comment: github, the pull request it reports on, and references, files fetched for it by name.
+ */
+export type FixRequest = { repo: string; pr: string; ask: string; skills?: PersonalSkill[]; github?: { repo: string; issue: number }; references?: { name: string; text: string }[] };
 
 export type Supervisor = {
   submit(person: string, s: Submission): HelixJob;
@@ -329,13 +335,18 @@ export function supervise(opts: {
       if (!opener || !target) throw new Refused(404, `no job on Helix opened pull request ${f.pr} of ${f.repo}, so there is nothing to fix`);
       if (person !== opener.person && !isOwner(config, person)) throw new Refused(403, `pull request ${f.pr} was opened by ${opener.person}'s job ${opener.id}: only ${opener.person} or the owner may fix it`);
       const active = onPr.find((j) => j.fix_of && (j.state === 'queued' || j.state === 'running' || (j.state === 'ended' && j.outcome === 'needs-input')));
-      if (active) throw new Refused(409, `pull request ${f.pr} has a fix ${active.state === 'ended' ? 'waiting for an answer' : active.state}: job ${active.id}`);
+      const page = config.url ? ` (${config.url.replace(/\/+$/, '')}/jobs/${active?.id})` : '';
+      if (active) throw new Refused(409, `pull request ${f.pr} has a fix ${active.state === 'ended' ? 'waiting for an answer' : active.state}: job ${active.id}${page}`);
       // It runs as the person whose job opened the pull request: their folder holds the worktree and session it continues.
-      const job = store.add({ state: 'queued', person: opener.person, repo: f.repo, spec: '', title: `fix: ${target.title}`, ...(target.tier ? { tier: target.tier } : {}), draft: false, pr: target.pr!, fix_of: target.id, ask: f.ask, submitted: now() });
+      const job = store.add({ state: 'queued', person: opener.person, repo: f.repo, spec: '', title: `fix: ${target.title}`, ...(target.tier ? { tier: target.tier } : {}), draft: false, pr: target.pr!, fix_of: target.id, ask: f.ask, ...(f.github ? { github: f.github } : {}), submitted: now() });
       // The job's folder is where a container finds what Helix keeps for the job (its skills); a fix has no spec file in it.
       job.spec = join(home, 'jobs', String(job.id), 'fix');
       mkdirSync(dirname(job.spec), { recursive: true });
       if (f.skills?.length) writeFileSync(skillsFile(job), `${JSON.stringify(f.skills, null, 2)}\n`);
+      if (f.references?.length) {
+        mkdirSync(referencesDir(job), { recursive: true });
+        f.references.forEach((r, i) => writeFileSync(join(referencesDir(job), `${i + 1}-${r.name}`), r.text));
+      }
       store.save(job);
       store.record(person, 'submitted', { job: job.id, repo: f.repo, fix_of: target.id });
       tick();

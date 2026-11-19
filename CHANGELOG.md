@@ -10,6 +10,16 @@ clients with how to update.
 ## Unreleased
 
 - Pull requests no longer touch CHANGELOG.md: `npm run release` writes the release's notes from the merged pull requests, and a job's pull request has a `## Breaking` section when its implementer reports a breaking change (the report gains an optional `breaking`). The `changelog` gate is gone; `npm run changelog` stays as a no-op until a later change drops it.
+- `/animus fix <what to change>` on an open pull request a job opened, from
+  the job's person or the owner, gets 👀 and queues a fix on Helix with the
+  pull request's reviews and inline comments since the last push as
+  references (`animus fix --references <dir>`). A plain `/animus` there, a
+  fix from anyone else, on a pull request no job opened, a merged or closed
+  one or one with a fix already queued, running or waiting gets a one-line
+  reply and queues nothing. The fix comments on the pull request when it
+  pushed (what changed, its cost, its job page), failed or was refused (the
+  reason) or asks a question, and nothing in between; `/animus answer <text>`
+  and `/animus cancel` on the pull request act on it.
 - `animus fix <pr> "<text>"` changes an open pull request a job opened: a new
   job in that job's worktree, reset to the branch as GitHub has it, that
   carries on from its implementer session (or a handoff when the session is
