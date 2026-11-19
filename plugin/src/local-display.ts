@@ -9,7 +9,7 @@
 import { createServer, type Server } from 'node:http';
 import { readdirSync, readFileSync, statSync } from 'node:fs';
 import type { AddressInfo } from 'node:net';
-import { hostname } from 'node:os';
+import { hostname, userInfo } from 'node:os';
 import { basename, join } from 'node:path';
 import { listJobs, RESULTS, type JobFilter, type Result } from '../display/job-list.ts';
 import type { Display, DisplayJob, JobListPage, JobPage, ListJob, PrState } from '../display/shape.ts';
@@ -17,6 +17,7 @@ import { asset, CSP } from './assets.ts';
 import { afterOf, fixRounds, insightsData, lessonsCiting } from './insights-data.ts';
 import { folderParts, read, shotFile } from './job-folder.ts';
 import { readOutcomes, type Outcomes } from './outcomes.ts';
+import { tryGit } from './proc.ts';
 import { alive, animusHome, jobDir, loadProgress, loadState, readRuns, STAGES, type Run } from './log.ts';
 
 /** Job folders are named by Animus; only a plain name is taken as one. */
@@ -24,6 +25,12 @@ const PLAIN = /^[A-Za-z0-9][\w.-]*$/;
 
 /** The project of a job that has no state and no run row: it never got far enough to name one. */
 const NO_PROJECT = 'unknown project';
+
+/** A person's name from their address: what is before the @. */
+const nameOf = (submitter: string): string => submitter.split('@')[0]!;
+
+/** Who runs a job here, by name: the repository's git user, else the user's login. */
+const runnerOf = (repo: string): string => tryGit(repo, ['config', 'user.name']) ?? nameOf(tryGit(repo, ['config', 'user.email']) ?? userInfo().username);
 
 function jobOf(id: string, runs: readonly Run[]): DisplayJob | undefined {
   const state = loadState(id);
@@ -38,10 +45,13 @@ function jobOf(id: string, runs: readonly Run[]): DisplayJob | undefined {
   if (!title && state) { try { title = /^# (.+)$/m.exec(readFileSync(state.spec, 'utf8'))?.[1]; } catch { /* the job's copy is gone */ } }
   const running = !state?.outcome && progress?.host === hostname() && progress.pid !== undefined && alive(progress.pid);
   const submitted = mine[0]?.started ?? progress?.at ?? statSync(jobDir(id)).mtime.toISOString();
+  // A running job has no run row yet: its person is the repo's git user, and it started when its first run did, else when its folder was made.
+  const person = last ? (last.submitter_name ?? nameOf(last.submitter)) : running && state ? runnerOf(state.repo) : '';
+  const started = last?.started ?? (running ? mine[0]?.started ?? statSync(jobDir(id)).birthtime.toISOString() : undefined);
   return {
-    id, person: last?.submitter ?? '', repo: state ? basename(state.repo) : last ? basename(last.repo) : NO_PROJECT, title: title ?? id, submitted,
+    id, person, repo: state ? basename(state.repo) : last ? basename(last.repo) : NO_PROJECT, title: title ?? id, submitted,
     state: state?.outcome ? 'ended' : running ? 'running' : 'stopped',
-    ...(last?.started ? { started: last.started } : {}), ...(last?.ended ? { ended: last.ended } : {}),
+    ...(started ? { started } : {}), ...(last?.ended ? { ended: last.ended } : {}),
     ...(state?.outcome ? { outcome: state.outcome } : {}), ...(last?.pr ? { pr: last.pr } : {}),
     ...(last?.reason ? { reason: last.reason } : {}), ...(state?.question ? { question: state.question } : {}),
     ...(last ? { cost_usd: last.cost_usd } : {}),

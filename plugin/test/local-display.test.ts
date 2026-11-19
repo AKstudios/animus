@@ -66,7 +66,28 @@ test('an ended local job shows its run log row, with no way to resume', () => {
   saveState({ job: 'logged', repo: '/work/shop', spec: '', workspace: {} as JobState['workspace'], plan: {} as JobState['plan'], outcome: 'pr' });
   appendRun({ job: 'logged', repo: '/work/shop', submitter: 'me@example.com', title: 'Logged', started: '2026-01-01T00:00:00.000Z', ended: '2026-01-01T00:05:00.000Z', outcome: 'pr', pr: 'https://example.test/pr/9', cost_usd: 1.5 } as Run);
   const job = localJobs().find((j) => j.id === 'logged')!;
-  assert.deepEqual([job.state, job.outcome, job.pr, job.title, job.person, job.resume], ['ended', 'pr', 'https://example.test/pr/9', 'Logged', 'me@example.com', undefined]);
+  assert.deepEqual([job.state, job.outcome, job.pr, job.title, job.person, job.resume], ['ended', 'pr', 'https://example.test/pr/9', 'Logged', 'me', undefined]);
+});
+
+// Protects: a person is shown by name. Fails when the address, or the git name the run recorded, is not what shows.
+test('a local job shows its person by the recorded git name, else the part of the address before the @', () => {
+  for (const [job, extra] of [['named', { submitter_name: 'Ana Lima' }], ['unnamed', {}]] as const) {
+    saveState({ job, repo: '/work/shop', spec: '', workspace: {} as JobState['workspace'], plan: {} as JobState['plan'], outcome: 'pr' });
+    appendRun({ job, repo: '/work/shop', submitter: 'ana@example.com', title: job, started: '2026-01-01T00:00:00.000Z', ended: '2026-01-01T00:05:00.000Z', outcome: 'pr', cost_usd: 1, ...extra } as Run);
+  }
+  const person = (id: string) => localJobs().find((j) => j.id === id)!.person;
+  assert.deepEqual([person('named'), person('unnamed')], ['Ana Lima', 'ana']);
+});
+
+// Protects: a running job's page names its person and its start. Fails when person is empty or started is missing while cost stays unknown.
+test('a running local job has a person and a start, and no cost', () => {
+  seed('running-now');
+  const job = localJobs().find((j) => j.id === 'running-now')!;
+  assert.equal(job.state, 'running');
+  assert.notEqual(job.person, '');
+  assert.ok(!job.person.includes('@'));
+  assert.ok(Date.now() - Date.parse(job.started!) < 60_000);
+  assert.equal(job.cost_usd, undefined);
 });
 
 // Protects: `animus resume` is offered only for a job with state.json. Fails when a run that stopped before saveState (progress.json only) gets a resume command or an empty project name.

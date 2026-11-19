@@ -113,6 +113,7 @@ function blankRun(p: { job: string; repo: string; opts: RunOptions; spec: Spec; 
   const { job, repo, opts, spec } = p;
   return {
     job, repo, submitter: process.env.ANIMUS_USER ?? tryGit(repo, ['config', 'user.email']) ?? userInfo().username,
+    ...(tryGit(repo, ['config', 'user.name']) ? { submitter_name: tryGit(repo, ['config', 'user.name'])! } : {}),
     trigger: opts.trigger ?? (opts.fix ? 'fix' : opts.resume ? 'resume' : 'cli'), ...(opts.fix ? { fix_of: opts.fix.of } : opts.resume?.state.fix_of ? { fix_of: opts.resume.state.fix_of } : {}), title: spec.title,
     size: p.size, difficulty: p.difficulty, type: p.type, labels_defaulted: spec.defaulted, escalations: [],
     provider: p.factory?.provider ?? 'unknown', factory_version: factoryVersion(), skills: [],

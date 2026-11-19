@@ -70,6 +70,8 @@ export type Run = {
   job: string;
   repo: string;
   submitter: string;
+  /** The git user name of the repository when the job ran, so the display can show a name instead of the address. */
+  submitter_name?: string;
   trigger: string;
   /** The job this one is a fix of: the one before it on the same pull request. */
   fix_of?: string;
