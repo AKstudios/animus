@@ -12,7 +12,11 @@ import type { Finding, Review } from './review.ts';
 import type { Slicing } from './slices.ts';
 import type { Workspace } from './workspace.ts';
 
-export const animusHome = () => process.env.ANIMUS_HOME ?? join(homedir(), '.animus');
+export function animusHome(): string {
+  // Node's test runner sets NODE_TEST_CONTEXT in every test file it starts: no test may fall back to the person's own home.
+  if (!process.env.ANIMUS_HOME && process.env.NODE_TEST_CONTEXT) throw new Error('ANIMUS_HOME is not set in this test run: give the test a home of its own, or run it with scripts/with-tmp.sh');
+  return process.env.ANIMUS_HOME ?? join(homedir(), '.animus');
+}
 export const jobDir = (job: string) => join(animusHome(), 'jobs', job);
 export const runLog = () => join(animusHome(), 'runs.jsonl');
 

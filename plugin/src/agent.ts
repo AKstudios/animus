@@ -5,7 +5,7 @@
 import { spawnSync } from 'node:child_process';
 import { existsSync, readFileSync, realpathSync } from 'node:fs';
 import { homedir } from 'node:os';
-import { basename, dirname, join } from 'node:path';
+import { basename, dirname, join, parse, resolve } from 'node:path';
 import { modelFor, type Factory, type Tier } from './profiles.ts';
 import { AnimusError } from './proc.ts';
 
@@ -73,6 +73,20 @@ type ClaudeJson = {
 };
 
 /**
+ * CLAUDE.md and .claude/rules of the person's home and of every folder above
+ * cwd, as absolute patterns for claudeMdExcludes: a worktree inside the home
+ * folder would otherwise read them as rules of a folder above it. cwd's own
+ * are not matched.
+ */
+function instructionFilesAbove(cwd: string): string[] {
+  const dirs = new Set([homedir()]);
+  for (let d = dirname(resolve(cwd)); dirname(d) !== d; d = dirname(d)) dirs.add(d);
+  dirs.add(parse(resolve(cwd)).root);
+  dirs.delete(resolve(cwd));
+  return [...dirs].flatMap((d) => [join(d, 'CLAUDE.md'), join(d, '.claude', 'CLAUDE.md'), join(d, '.claude', 'rules', '**')]).map((p) => p.replaceAll('\\', '/'));
+}
+
+/**
  * Claude Code, headless. Sessions load the project's own settings and rules
  * only (--setting-sources project), so a job runs the same on a laptop and in
  * a container that has none of the person's own. No MCP server starts, not
@@ -85,6 +99,7 @@ export function claudeAgent(factory: Factory, command = process.env.ANIMUS_CLAUD
   return (req) => {
     const model = modelFor(factory, req.tier);
     const args = ['-p', req.prompt, '--model', model, '--effort', req.effort, '--output-format', 'json', '--permission-mode', 'dontAsk', '--setting-sources', 'project', '--disable-slash-commands', '--strict-mcp-config'];
+    args.push('--settings', JSON.stringify({ claudeMdExcludes: instructionFilesAbove(req.cwd) }));
     for (const dir of req.addDirs ?? []) args.push('--add-dir', dir);
     if (req.resume) args.push('--resume', req.resume);
     if (req.system) args.push('--append-system-prompt', req.system);
