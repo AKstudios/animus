@@ -16,24 +16,40 @@ type Run = import('../plugin/src/log.ts').Run;
 const { outcomesFile } = await import('../plugin/src/outcomes.ts');
 const { listenLocal, localServer } = await import('../plugin/src/local-display.ts');
 const { writeFileSync, mkdirSync } = await import('node:fs');
+const { deflateSync } = await import('node:zlib');
+
+/** A made-up screenshot: a flat PNG of a page's colours, a header band and a few rows, so the viewer has something to show. */
+function png(w: number, h: number, bg: [number, number, number], band: [number, number, number]): Buffer {
+  const crcTable = Array.from({ length: 256 }, (_, n) => { let c = n; for (let k = 0; k < 8; k++) c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1; return c >>> 0; });
+  const crc = (b: Buffer) => { let c = 0xffffffff; for (const x of b) c = crcTable[(c ^ x) & 0xff]! ^ (c >>> 8); return (c ^ 0xffffffff) >>> 0; };
+  const chunk = (type: string, data: Buffer) => { const t = Buffer.from(type); const len = Buffer.alloc(4); len.writeUInt32BE(data.length); const c = Buffer.alloc(4); c.writeUInt32BE(crc(Buffer.concat([t, data]))); return Buffer.concat([len, t, data, c]); };
+  const raw = Buffer.alloc((w * 3 + 1) * h);
+  for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
+    const row = y > 90 && (y - 90) % 70 < 44 && x > 40 && x < w - 40;
+    const [r, g, b] = y < 60 ? band : row ? [Math.min(255, bg[0] + 14), Math.min(255, bg[1] + 14), Math.min(255, bg[2] + 14)] : bg;
+    raw.set([r, g, b], y * (w * 3 + 1) + 1 + x * 3);
+  }
+  const ihdr = Buffer.alloc(13); ihdr.writeUInt32BE(w, 0); ihdr.writeUInt32BE(h, 4); ihdr.set([8, 2, 0, 0, 0], 8);
+  return Buffer.concat([Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]), chunk('IHDR', ihdr), chunk('IDAT', deflateSync(raw)), chunk('IEND', Buffer.alloc(0))]);
+}
 
 const NOW = Date.now();
 const ago = (minutes: number) => new Date(NOW - minutes * 60_000).toISOString();
 const REPO = { animus: '/work/animus', meal: '/work/meal-planner' };
 const SPEC = (title: string, criteria: string[] = []) => `---\nsize: medium\ndifficulty: routine\ntype: feature\n---\n# ${title}\n\n## Problem\n\nMade up for the display's screenshots.\n\n## Acceptance criteria\n\n${criteria.map((c, i) => `${i + 1}. ${c}\n   $ node --test test/c${i + 1}.test.ts`).join('\n')}\n`;
 
-function job(id: string, repo: string, title: string, o: { outcome?: JobState['outcome']; question?: string; running?: { stage: string; who: string }; spec?: string; extra?: Partial<JobState> } = {}): void {
+function job(id: string, repo: string, title: string, o: { outcome?: JobState['outcome']; question?: string; running?: { stage: string; who: string; minutes?: number }; spec?: string; extra?: Partial<JobState> } = {}): void {
   const spec = join(jobDir(id), 'spec.md');
   mkdirSync(jobDir(id), { recursive: true });
   writeFileSync(spec, o.spec ?? SPEC(title));
   saveState({ job: id, repo, spec, workspace: {} as JobState['workspace'], plan: {} as JobState['plan'], ...(o.outcome ? { outcome: o.outcome } : {}), ...(o.question ? { question: o.question } : {}), ...o.extra });
-  if (o.running) writeJson(join(jobDir(id), 'progress.json'), { ...o.running, at: ago(1), pid: process.pid, host: hostname() });
+  if (o.running) writeJson(join(jobDir(id), 'progress.json'), { stage: o.running.stage, who: o.running.who, at: ago(1), started: ago(o.running.minutes ?? 10), pid: process.pid, host: hostname() });
 }
 
 function ran(id: string, repo: string, title: string, started: number, minutes: number, cost: number, o: { outcome: Run['outcome']; pr?: number; reason?: string; question?: string; ms?: Partial<Run['ms']>; extra?: Partial<Run> }): void {
   const project = repo.split('/').at(-1);
   appendRun({
-    job: id, repo, submitter: 'ajmal', title, size: 'medium', difficulty: 'routine', type: 'feature', started: ago(started), ended: ago(started - minutes), outcome: o.outcome, cost_usd: cost,
+    job: id, repo, submitter: 'sam@example.com', submitter_name: 'Sam Rivera', title, tokens: { input: Math.round(cost * 9_000), output: Math.round(cost * 21_000), cache_read: Math.round(cost * 310_000), cache_write: Math.round(cost * 40_000) }, size: 'medium', difficulty: 'routine', type: 'feature', started: ago(started), ended: ago(started - minutes), outcome: o.outcome, cost_usd: cost,
     ...(o.pr ? { pr: `https://github.com/example/${project}/pull/${o.pr}` } : {}), ...(o.reason ? { reason: o.reason } : {}), ...(o.question ? { question: o.question } : {}),
     ms: { queue: 0, setup: 20_000, plan: 100_000, implement: minutes * 36_000, gates: minutes * 10_000, review: minutes * 9_000, evidence: 30_000, pr: 12_000, total: minutes * 60_000, ...o.ms },
     ...o.extra,
@@ -47,8 +63,12 @@ const pr = (repo: string, n: number, id: string, state: 'OPEN' | 'MERGED' | 'CLO
 };
 
 // Working now.
-job('comments-on-github', REPO.animus, 'Start and follow work with /animus comments on GitHub', { running: { stage: 'implement', who: 'implementer · slice 2 of 3' } });
-job('swap-a-meal', REPO.meal, 'Swap a meal for another with the same ingredients', { running: { stage: 'gates', who: 'gates · attempt 1' } });
+const working = ['A /animus comment on an issue starts a draft', 'A /animus comment on a PR starts a fix', 'The bot replies with the job page link'];
+job('comments-on-github', REPO.animus, 'Start and follow work with /animus comments on GitHub', {
+  running: { stage: 'implement', who: 'implementer · slice 2 of 3', minutes: 23 }, spec: SPEC('Start and follow work with /animus comments on GitHub', working),
+  extra: { slicing: { by: 'planner', slices: [{ title: 'Drafts from issue comments', delivers: 'criterion 1' }, { title: 'Fixes from PR comments', delivers: 'criterion 2' }, { title: 'Replies with the link', delivers: 'criterion 3' }] } as unknown as JobState['slicing'], slices_done: ['1'] },
+});
+job('swap-a-meal', REPO.meal, 'Swap a meal for another with the same ingredients', { running: { stage: 'gates', who: 'gates · attempt 1', minutes: 7 } });
 
 // Needs you.
 const asked = 'Should a /animus comment on a closed issue start a draft, or be ignored with a reply saying the issue is closed?';
@@ -65,15 +85,20 @@ job('drafts-from-slack', REPO.animus, 'Drafts from Slack', {
   outcome: 'pr', spec: SPEC('Drafts from Slack', criteria),
   extra: { slicing: { by: 'planner', slices: [{ title: 'Drafts in a DM', delivers: 'criterion 1' }, { title: 'Submit from a draft', delivers: 'criterion 2' }, { title: 'Manifest scopes', delivers: 'criterion 3' }] } as unknown as JobState['slicing'], slices_done: ['1', '2', '3'] },
 });
-const ag = (stage: string, role: string, tier: string, cost: number, calls: number, errors: number) => ({ stage, role, tier, effort: 'medium', model: tier === 'deep' ? 'claude-opus-5-5' : 'claude-sonnet-5-5', ok: true, status: 'ok', cost_usd: cost, turns: 10, tokens: { input: 0, output: 0, cache_read: 0, cache_write: 0 }, ms: 1000, tools: { calls, errors, by_tool: { Bash: calls - 2, Edit: 2 } } });
+const ag = (stage: string, role: string, tier: string, cost: number, calls: number, errors: number, minutes: number) => ({ stage, role, tier, effort: 'medium', model: tier === 'deep' ? 'claude-opus-5-5' : 'claude-sonnet-5-5', ok: true, status: 'ok', cost_usd: cost, turns: Math.round(calls / 2), tokens: { input: Math.round(cost * 9_000), output: Math.round(cost * 21_000), cache_read: Math.round(cost * 310_000), cache_write: Math.round(cost * 40_000) }, ms: minutes * 60_000, tools: { calls, errors, by_tool: { Bash: calls - 2, Edit: 2 } } });
 ran('drafts-from-slack', REPO.animus, 'Drafts from Slack', 900, 41, 6.02, { outcome: 'pr', pr: 16, extra: {
   fix_rounds: 1, gates: [{ attempt: 1, ok: false, ms: 1000, checks: [{ name: 'test', ok: false, skipped: false, ms: 900, flaky: true }] }, { attempt: 2, ok: true, ms: 1000, checks: [] }],
-  agents: [ag('plan', 'planner', 'deep', 0.9, 14, 0), ag('implement', 'implementer', 'standard', 3.4, 62, 3), ag('implement', 'implementer', 'standard', 0.7, 18, 1), ag('review', 'reviewer', 'deep', 1.02, 20, 0)],
+  agents: [ag('plan', 'planner', 'deep', 0.9, 14, 0, 1.5), ag('implement', 'implementer', 'standard', 2.1, 40, 2, 9), ag('implement', 'implementer', 'standard', 1.3, 22, 1, 6), ag('implement', 'implementer', 'standard', 0.7, 18, 1, 4), ag('review', 'reviewer', 'deep', 1.02, 20, 0, 5)],
   review: { rounds: 1, findings: 2, blockers: 1, acted_on: 1, open: 0, log: [{ round: 1, severity: 'blocker', file: 'helix/src/drafts.ts', line: 88, fate: 'fixed' }, { round: 1, severity: 'should-fix', file: 'helix/src/slack.ts', line: 212, fate: 'not-acted-on' }] },
 } as Partial<Run> });
 pr(REPO.animus, 16, 'drafts-from-slack', 'MERGED', 400);
 Object.assign(outcomes[`https://github.com/example/animus/pull/16`] as object, { human_commits: 2, human_lines: { added: 24, removed: 6 }, reverted: false, reworked: false });
 writeFileSync(join(jobDir('drafts-from-slack'), 'tools.jsonl'), ['plan|Read|docs/slack.md', 'implement|Bash|npm test', 'implement|Edit|helix/src/drafts.ts'].map((l, i) => { const [stage, tool, target] = l.split('|'); return JSON.stringify({ at: ago(900 - i), stage, role: stage === 'plan' ? 'planner' : 'implementer', tool, target, ok: true, ms: 120 }); }).join('\n') + '\n');
+const shots = join(jobDir('drafts-from-slack'), 'shots', 'build');
+mkdirSync(shots, { recursive: true });
+const pages: [string, [number, number, number], [number, number, number]][] = [['overview-light', [243, 245, 246], [255, 255, 255]], ['overview-dark', [10, 14, 17], [16, 22, 26]], ['job-page', [243, 245, 246], [25, 200, 240]]];
+for (const [name, bg, band] of pages) writeFileSync(join(shots, `${name}.png`), png(1280, 800, bg, band));
+writeJson(join(jobDir('drafts-from-slack'), 'shots', 'manifest.json'), { at: ago(860), build: pages.map(([name]) => `build/${name}.png`) });
 const gates = join(jobDir('drafts-from-slack'), 'gates');
 mkdirSync(gates, { recursive: true });
 const list = (test: string) => [`ok   typecheck: npm run typecheck (1.0s)`, `${test} test: npm test (14.7s)`, ...criteria.map((_, i) => `ok   acceptance-${i + 1}: node --test test/c${i + 1}.test.ts (0.${i + 2}s)`)].join('\n');
@@ -99,7 +124,7 @@ ran('github-sign-in', REPO.animus, "Join Helix with GitHub's sign-in", 1500, 6, 
 // Two months of finished jobs for the Insights page: the last 30 days against the 30 before. Each is
 // [class, project, days ago, minutes, cost, how it ended, human commits, undone, first time through the gates, flaky check].
 const DAY_MIN = 1440;
-const agent = (role: string, tier: string, cost: number, calls: number, errors: number) => ({ stage: 'implement', role, tier, effort: 'medium', model: tier === 'deep' ? 'claude-opus-5-5' : 'claude-sonnet-5-5', ok: true, status: 'ok', cost_usd: cost, turns: 10, tokens: {}, ms: 1000, tools: { calls, errors, by_tool: {} } });
+const agent = (role: string, tier: string, cost: number, calls: number, errors: number) => ({ stage: role === 'reviewer' ? 'review' : 'implement', role, tier, effort: 'medium', model: tier === 'deep' ? 'claude-opus-5-5' : 'claude-sonnet-5-5', ok: true, status: 'ok', cost_usd: cost, turns: 10, tokens: { input: Math.round(cost * 9_000), output: Math.round(cost * 21_000), cache_read: Math.round(cost * 310_000), cache_write: Math.round(cost * 40_000) }, ms: 1000, tools: { calls, errors, by_tool: {} } });
 type Ended = 'merged' | 'open' | 'closed' | 'gates' | 'asked' | 'budget';
 const past: [string, string, number, number, number, Ended, number, boolean, boolean, string?][] = [
   ['small|trivial|fix', 'meal', 3, 4, 0.4, 'merged', 0, false, true], ['medium|routine|feature', 'animus', 5, 22, 3.1, 'merged', 0, false, true, 'test'],

@@ -26,14 +26,14 @@ test('a running job shows its stage, who is working, the last line it said and h
   assert.deepEqual([v.running, v.slots, v.queued, v.asks], [2, 2, 0, 0]);
 });
 
-// Protects: a card draws no separator or empty `>` line for what the job lacks. Fails when: the view gives a person's page or a line to a job that has neither, or Helix loses its People link.
-test('a running job with no person or line yet has neither, and only Helix links to people', () => {
+// Protects: a card draws no separator or empty `>` line for what the job lacks. Fails when: the view gives a person's page or a line to a job that has neither, or either display loses its People link.
+test('a running job with no person or line yet has neither, and both displays link to people', () => {
   const j = job({ person: '', state: 'running', started: ago(1) });
   const local = view({ ...shown([j]), local: true }, null, NOW);
   const helix = view(shown([j]), null, NOW);
   assert.deepEqual([local.live[0]!.by, local.live[0]!.now], [[{ text: 'app' }], '']);
   assert.deepEqual(view(shown([job({ state: 'running' })]), null, NOW).live[0]!.by, [{ text: 'app' }, { text: 'ana', page: '/people/ana' }]);
-  assert.deepEqual([local.people, helix.people], [false, true]);
+  assert.deepEqual([local.people, helix.people], [true, true]);
 });
 
 // Protects: a waiting question is a card with its command, and the queue is its own short list. Fails when: the command is the wrong one for the source, the question is lost, or queued jobs keep the asking ones' heading.

@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { mkdtempSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
 import type { AddressInfo } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -35,7 +35,7 @@ async function helix() {
   await new Promise<void>((r) => { server.listen(0, '127.0.0.1', r); });
   const url = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
   const get = (path: string, token?: string) => fetch(new URL(path, url), token ? { headers: { authorization: `Bearer ${token}` } } : {});
-  return { get, store, stop: () => { supervisor.stop(); server.close(); store.close(); } };
+  return { get, store, supervisor, stop: () => { supervisor.stop(); server.close(); store.close(); } };
 }
 
 // Protects: criterion 2, the people list. Fails when: a person is left off, a number is wrong, a person from before joined was kept shows a date, or Helix answers without a token.
@@ -52,7 +52,7 @@ test('/people lists each person with their GitHub login, joined, jobs, PRs, spen
     ['cy', '', '', '0', '0', '$0.00'],
   ]);
   // Newest activity of each; none for someone who has done nothing. The time is when it was kept, so only its wording is checked.
-  assert.deepEqual(v.rows.map((r) => r.last.replace(/^\d{4}-\d\d-\d\d \d\d:\d\d UTC/, 'T')), ['T · submitted a job', 'T · cancelled a job', '']);
+  assert.deepEqual(v.rows.map((r) => r.last.replace(/^.+? · /, 'T · ')), ['T · submitted a job', 'T · cancelled a job', '']);
 });
 
 const job = (id: number, over: Partial<DisplayJob>): DisplayJob => ({ id, state: 'queued', person: 'ana lee', repo: 'app', title: `Job ${id}`, submitted: '2026-11-17T11:00:00Z', ...over });
@@ -162,4 +162,21 @@ test('a person\'s page without a token says to sign in, and for a name Helix doe
   assert.match(personNotice('ana', false, 401)!, /^Helix did not take that token/);
   assert.equal(personNotice('ana', true, 404), 'Helix has never heard of ana.');
   assert.equal(personNotice('ana', true, 200), undefined);
+});
+
+// Protects: criterion 2 on Helix. Fails when: a person's page leaves out what their own run log shows, or the totals and model table are wrong.
+test('a person\'s page shows what their runs used, from their run log', async () => {
+  const h = await helix();
+  const dir = h.supervisor.animusHome('ana');
+  mkdirSync(dir, { recursive: true });
+  const tokens = { input: 1000, output: 200, cache_read: 300, cache_write: 500 };
+  const agent = { role: 'implement', model: 'm-big', cost_usd: 2, tokens, stage: 'implement', tier: 'deep', effort: '', ok: true, ms: 0, turns: 0, calls: 0, errors: 0 };
+  const day = new Date().toISOString();
+  writeFileSync(join(dir, 'runs.jsonl'), `${JSON.stringify({ job: 'j', submitter: 'ana', started: day, ended: day, cost_usd: 2, tokens, agents: [agent] })}\n`);
+  const u = personView((await (await h.get('/people/ana/page-data', 'ben-token')).json()) as PersonPage).usage!;
+  h.stop();
+
+  assert.deepEqual(u.totals, [{ k: 'runs', v: '1' }, { k: 'spent', v: '$2.00' }, { k: 'tokens', v: '2.0k' }, { k: 'per run', v: '$2.00' }]);
+  assert.deepEqual(u.models, [{ name: 'm-big', sessions: '1 session', cost: '$2.00', tokens: '2.0k', pct: 100 }]);
+  assert.equal(u.days.length, 30);
 });

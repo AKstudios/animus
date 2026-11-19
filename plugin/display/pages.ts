@@ -23,6 +23,27 @@ export function route(pathname: string): Route {
   return { page: 'overview' };
 }
 
+/** The page a person came to a job or person page from, as its back link names it. */
+export type Origin = { name: string; href: string; page: Route['page'] };
+
+/**
+ * Where the back link of a job or person page goes: the display page in
+ * `referrer` when it is this display's own (same `origin`), else nothing and
+ * the page's default. The address keeps its filters and picked project.
+ */
+export function originOf(referrer: string, origin: string, here: string): Origin | undefined {
+  let u: URL;
+  try { u = new URL(referrer); } catch { return undefined; }
+  if (u.origin !== origin || u.pathname === here) return undefined;
+  const r = route(u.pathname);
+  const href = u.pathname + u.search + u.hash;
+  if (r.page === 'overview') return { name: 'Overview', href, page: r.page };
+  if (r.page === 'jobs') return { name: 'Jobs', href, page: r.page };
+  if (r.page === 'insights') return { name: 'Insights', href, page: r.page };
+  if (r.page === 'people') return { name: r.name ?? 'People', href, page: r.page };
+  return { name: typeof r.id === 'number' ? `Job #${r.id}` : r.id, href, page: r.page };
+}
+
 /** The browser's storage: a function, since even reaching it can throw. */
 export type Kept = () => Pick<Storage, 'getItem' | 'setItem' | 'removeItem'>;
 
@@ -62,22 +83,18 @@ export function jobNotice(id: number | string, signedIn: boolean, status?: numbe
   return undefined;
 }
 
-/** What the local display says at a people address: there is nothing to sign in to. */
-const NO_PEOPLE = "This machine's display has no people pages. They are on Helix.";
-
 /** A person's own page. */
 export const personPage = (name: string) => `/people/${encodeURIComponent(name)}`;
 
 /** What the people list says in place of the list, or nothing when it has it. `status` is how Helix answered for its data. */
 export function peopleNotice(signedIn: boolean, status?: number, local = false): string | undefined {
-  if (local) return NO_PEOPLE;
-  if (signedIn) return undefined;
+  if (local || signedIn) return undefined;
   return status === 401 ? 'Helix did not take that token, so this browser forgot it. Sign in again to see who is on this Helix.' : 'Sign in to see who is on this Helix. Paste your Helix token: animus join kept it in ~/.animus/helix.json.';
 }
 
 /** What a person's page says in place of the person, or nothing when it has them. `status` is how Helix answered for its data. */
 export function personNotice(name: string, signedIn: boolean, status?: number, local = false): string | undefined {
-  if (local) return NO_PEOPLE;
+  if (local) return status === 404 ? `No job on this machine names ${name}.` : undefined;
   if (!signedIn) {
     return status === 401 ? `Helix did not take that token, so this browser forgot it. Sign in again to see ${name}.` : `Sign in to see ${name}. Paste your Helix token: animus join kept it in ~/.animus/helix.json.`;
   }
