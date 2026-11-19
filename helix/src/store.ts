@@ -45,6 +45,8 @@ export type HelixJob = {
   /** A fix (GLOSSARY.md), which ask marks: the job on this Helix it continues (none when no job here opened its pull request), and what was asked. Its pr is the pull request it updates, set when it is queued. */
   fix_of?: number;
   ask?: string;
+  /** A provision job (provision.ts): queued by a failed add check to fix its project's environment; its spec is Helix's. */
+  provision?: boolean;
   /** How the run ended: Animus's outcome (pr, draft-pr, needs-input, failed). */
   outcome?: string;
   /** Why a job Helix ended before animus ran failed, as Animus's run log says it (log.ts Cause): setup, when its project image did not build. */

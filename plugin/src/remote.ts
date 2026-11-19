@@ -89,7 +89,7 @@ export const job = (id: string) => call<RemoteJob>('GET', `/jobs/${encodeURIComp
 export const cancel = (id: string) => call<RemoteJob>('POST', `/jobs/${encodeURIComponent(id)}/cancel`);
 export const answer = (id: string, text: string) => call<RemoteJob>('POST', `/jobs/${encodeURIComponent(id)}/answer`, { answer: text });
 /** A project as Helix reports it: checking until Helix has tried it, then ready or failed. */
-export type RemoteProject = { name: string; url: string; state: 'checking' | 'ready' | 'failed'; added: string; added_by?: string; reason?: string; log?: string };
+export type RemoteProject = { name: string; url: string; state: 'checking' | 'ready' | 'failed'; added: string; added_by?: string; reason?: string; log?: string; provision?: { job: number; state: string; pr?: string } };
 export const projects = () => call<{ projects: RemoteProject[] }>('GET', '/projects');
 export const project = (name: string) => call<RemoteProject>('GET', `/projects/${encodeURIComponent(name)}`);
 export const addProject = (p: { name: string; url: string }) => call<RemoteProject>('POST', '/projects', p);
@@ -110,10 +110,13 @@ export function describeSecrets(project: string, list: readonly RemoteSecret[]):
   return list.map((s) => `${s.name.padEnd(width)}  ${s.scope === 'mine' ? 'yours ' : 'shared'}  set by ${s.by}`).join('\n');
 }
 
+/** What names a project's provision job, in the list and after an add. */
+export const describeProvision = (p: NonNullable<RemoteProject['provision']>): string => `provision job ${p.job} ${p.pr ? `has an open pull request, ${p.pr}` : `is ${p.state}`}`;
+
 /** `animus project list`: one line per project. */
 export function describeProjects(list: readonly RemoteProject[]): string {
   if (!list.length) return 'no projects yet: animus project add, from a checkout of one';
-  const rows = list.map((p) => [p.name, p.state, p.url, p.added_by ? `added by ${p.added_by}` : 'added on the machine', p.state === 'failed' ? (p.reason ?? '').split('\n')[0]!.slice(0, 80) : '']);
+  const rows = list.map((p) => [p.name, p.state, p.url, p.added_by ? `added by ${p.added_by}` : 'added on the machine', p.state === 'failed' ? [p.provision && describeProvision(p.provision), (p.reason ?? '').split('\n')[0]!.slice(0, 80)].filter(Boolean).join(': ') : '']);
   const widths = rows[0]!.map((_, i) => Math.max(...rows.map((row) => row[i]!.length)));
   return rows.map((row) => row.map((cell, i) => cell.padEnd(widths[i]!)).join('  ').trimEnd()).join('\n');
 }
