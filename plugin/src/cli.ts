@@ -22,6 +22,8 @@ import { personalFor, readSkillsFile, skillsForRole, snapshotSkills, whereToRun,
 import { accept, describeLessons, dismiss, readLessons } from './lessons.ts';
 import { runRetro } from './retro.ts';
 import { listenLocal, localServer } from './local-display.ts';
+import { enqueue, ensureLoop, openLocalQueue, queueFile } from './local-queue.ts';
+import { logFile, runLoop } from './local-loop.ts';
 import { loadProfile, PROFILE_PATH } from './profile.ts';
 import { describePlan, loadFactory, resolvePlan } from './profiles.ts';
 import { admitFile, describeAdmit } from './admit.ts';
@@ -40,8 +42,10 @@ const USAGE = `animus: a spec goes in, a pull request with proof comes out
         Start one job, here or on Helix. --local or --helix decides; without
         either, run: in ANIMUS_HOME/config.yaml does (the repository's entry,
         then the top); without that, Helix when this machine has joined one
-        that has the repository, and here otherwise. Here, it is animus run
-        and waits for the job; on Helix, it is animus submit and returns.
+        that has the repository, and here otherwise. Here, it queues the job,
+        makes sure this machine's loop is running and returns: the loop runs
+        the job whether or not this session stays open. On Helix, it is
+        animus submit and returns.
   animus start <pr> "<what to change>" [--local | --helix] [--repo <dir>] [--dry-run] [--keep]
         Change an open pull request a job opened (<pr> is its number or URL):
         a new job on its branch that proves every criterion again and pushes
@@ -222,6 +226,13 @@ function finish(run: Run): number {
   return run.outcome === 'pr' || run.outcome === 'dry-run' ? 0 : 1;
 }
 
+/** Any command starts the loop again while jobs are left and none runs it: after a reboot, a crash or a loop that was stopped. */
+function keepLoop(): void {
+  if (!existsSync(queueFile())) return;
+  const queue = openLocalQueue();
+  try { ensureLoop(queue); } catch (err) { say(`warning: the queue's loop could not be started: ${(err as Error).message}`); } finally { queue.close(); }
+}
+
 async function main(argv: string[]): Promise<number> {
   const [command, ...rest] = argv;
   const { values, positionals } = parseArgs({
@@ -232,7 +243,8 @@ async function main(argv: string[]): Promise<number> {
     },
   });
   const cwd = process.cwd();
-  const flags = { ...(values.draft ? { draft: true } : {}), ...(values['dry-run'] ? { dryRun: true } : {}), ...(values.keep ? { keep: true } : {}) };
+  if (command !== 'loop') keepLoop();
+  const flags ={ ...(values.draft ? { draft: true } : {}), ...(values['dry-run'] ? { dryRun: true } : {}), ...(values.keep ? { keep: true } : {}) };
   const deps = () => {
     const factory = loadFactory();
     return { factory, agent: claudeAgent(factory), publish, evidence: pushEvidence, log: say };
@@ -295,7 +307,24 @@ async function main(argv: string[]): Promise<number> {
         return 0;
       }
       if (!values['dry-run'] && !onPath('gh')) throw new AnimusError('gh is not installed, so no pull request can be opened; install it or use --dry-run');
-      return finish(await runJob({ repo, specFile, personal: snapshotSkills(mine.skills), runsLine, ...flags }, deps()));
+      // Refused here, before it is queued, when its labels would not run or a skill of yours is missing.
+      const spec = loadSpec(specFile);
+      const { tier } = resolvePlan(loadFactory(), spec).implement;
+      snapshotSkills(mine.skills);
+      say(runsLine);
+      const queue = openLocalQueue();
+      try {
+        const job = enqueue(queue, { repo, spec: specFile, title: spec.title, tier, flags: [...(values.draft ? ['--draft'] : []), ...(values['dry-run'] ? ['--dry-run'] : []), ...(values.keep ? ['--keep'] : [])] });
+        ensureLoop(queue);
+        console.log(`job ${job.id} is queued on this machine: ${job.title}\nfollow it with: animus status ${job.id}\nits output: ${logFile(job.id)}`);
+      } finally { queue.close(); }
+      return 0;
+    }
+    case 'loop': {
+      // What `animus` starts to run the queue on this machine, detached; not a command people type.
+      const queue = openLocalQueue();
+      try { await runLoop({ queue, version: animusVersion(), say: (line) => console.log(`${new Date().toISOString()} ${line}`) }); } finally { queue.close(); }
+      return 0;
     }
     case 'plan': {
       if (!positionals[0]) throw new AnimusError('usage: animus plan <spec.md>');
