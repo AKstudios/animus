@@ -20,8 +20,8 @@ export function breakingOf(body: string): string | undefined {
 
 // shortcut: only merge commits ("Merge pull request #N") name a pull request, so a squash merge is listed by its subject; upgrade when merges are squashed.
 export function collect({ git, pull }: Deps): Notes {
-  let last = '';
-  try { last = git('describe', '--tags', '--abbrev=0', '--match', 'v*'); } catch { /* no release yet: everything counts */ }
+  // `tag --list` prints nothing when there is no release yet, where `describe` would fail, and the real git helper exits the process on failure.
+  const last = git('tag', '--list', 'v*', '--merged', 'HEAD', '--sort=-v:refname').split('\n')[0]!;
   const log = git('log', '--first-parent', '--format=%s', ...(last ? [`${last}..HEAD`] : []));
   const notes: Notes = { breaking: [], changes: [], direct: [] };
   for (const subject of log.split('\n').filter(Boolean)) {

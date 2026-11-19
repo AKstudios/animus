@@ -35,8 +35,9 @@ export type PrOutcome = {
 
 export type Outcomes = Record<string, PrOutcome>;
 
-export function readOutcomes(): Outcomes {
-  return existsSync(outcomesFile()) ? (JSON.parse(readFileSync(outcomesFile(), 'utf8')) as Outcomes) : {};
+/** The outcomes file of this Animus home, or of another one (a Helix person's). */
+export function readOutcomes(file = outcomesFile()): Outcomes {
+  return existsSync(file) ? (JSON.parse(readFileSync(file, 'utf8')) as Outcomes) : {};
 }
 
 /** Nothing more can change: closed, or merged with its 30 days watched to the end. */

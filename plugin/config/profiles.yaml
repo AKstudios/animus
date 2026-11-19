@@ -43,6 +43,14 @@ drafter:
   effort: low
   max_usd: 0.5
 
+# The retro: a session that reads a project's recent run records, assembled by
+# a script, and proposes lessons (src/retro.ts). It reads files and nothing
+# else, has no worktree, and stops at max_usd dollars.
+retro:
+  tier: standard
+  effort: medium
+  max_usd: 2
+
 sizes:
   trivial:
     looks_like: Typo, copy, config value, one or two files

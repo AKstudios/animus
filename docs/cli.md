@@ -54,6 +54,45 @@ the result as JSON; exits 0 when the job ended in a PR.
 Picks up a job that stopped with a question, or was interrupted. `--answer`
 gives it the answer to its question.
 
+#### `animus fix <pr> "<what to change>" [--local | --helix] [--repo <dir>] [--dry-run] [--keep] [--skills <file>]`
+
+Changes an open pull request a job opened: a **fix**
+([GLOSSARY.md](../GLOSSARY.md)), a new job on the pull request's branch with
+its own id, page, cost and outcome. `<pr>` is its number, `#number` or URL.
+The fix:
+
+- runs in the worktree of the job it continues (the pull request's latest job,
+  the original or its last fix), after fetching the branch and resetting to it
+  as GitHub has it. Commits GitHub has that the worktree lacks (a hand push,
+  "Update branch") are listed to the implementer.
+- resumes that job's last implementer session when it exists and its context
+  is under the budget; otherwise a fresh session starts from a handoff: the
+  spec, the pull request's diff, earlier answers and the ask. The reviewer is
+  given the ask either way.
+- proves every acceptance criterion again (the ask has no check of its own),
+  and pushes to the same pull request, whose body is rebuilt from the fix's
+  run. It keeps `Closes #N` and gains a "Fixes" list: each ask, its job and
+  its cost. It starts without a draft ([adr/0009](adr/0009-a-fix-starts-without-a-draft.md)).
+- pushes nothing when it fails, or when the reviewer refuses it on a ready
+  pull request, and reports the reasons. On a pull request that was a draft,
+  a reviewer-refused fix pushes and it stays a draft; one that passes marks
+  it ready.
+- with the earlier job's folder or worktree gone, runs from the pull request
+  alone: the spec from the collapsed block in its description, the branch from
+  GitHub and a fresh session; the job's run record says `without_session`.
+
+Refused with one line, and nothing runs: a pull request no job opened, one
+merged or closed, and one with a fix queued, running or waiting for an answer
+(the fix is named). The run log's `trigger` is `fix` and `fix_of` names the job
+it continues.
+
+Where it runs: with `--local` or `--helix`, there. Otherwise a pull request a
+job on this machine opened is fixed here, and with a Helix set up, one a job
+there opened goes to Helix as `animus submit` does, printing the `watch it:`
+links. Only the person whose job opened the pull request, or the owner, may
+([helix.md](helix.md#fixes)). `--dry-run`, `--keep` and `--skills` are for a fix
+on this machine, as for `animus run`.
+
 #### `animus plan <spec.md> [--slices] [--repo <dir>]`
 
 Admits a spec ([specs.md](specs.md#checking-a-spec)) against the factory and
@@ -102,6 +141,40 @@ to merge, commits by people, reverted or reworked within 30 days. Then the
 five numbers split by task class, with how many jobs of each class stopped
 for each `cause` (the run log's, set by script). Without `gh`, it shows what it last read.
 
+#### `animus retro [--project <name>] [--days <n>] [--json]`
+
+A read-only standard-tier session (role `retro`, no worktree) over the
+project's runs of the last `--days` days (default 7; the current repo's
+project unless named). A script assembles what it reads from the run log,
+the job folders and `outcomes.json`: how each job ended, its gate runs with
+failed and flaky checks, review findings and their fate, tool calls counted
+per session, questions with their answers, and what became of the PR. It
+proposes at most 5 lessons, each one sentence with a scope (`project` or
+`factory`), the agent it is for (`implementer`, `planner`, `reviewer` or
+`spec`) and the jobs it cites. The script drops one citing fewer than two
+jobs (unless its PR was reverted or reworked), one that repeats a kept,
+dismissed or waiting lesson, and any cite that is not a job of the window.
+Nothing is kept until a person accepts it. The retro is told the kept,
+dismissed and waiting lessons of its scope, and may report a kept lesson as
+seen again in new jobs, which starts its 60 days over. It reads PR outcomes
+as `animus outcomes` last saved them.
+
+#### `animus lessons [accept <id> | dismiss <id>]`
+
+The proposed, kept and expired lessons in `~/.animus/lessons.json`, with
+ids, cited jobs, uses and days left. A kept lesson expires 60 days after it
+was accepted or last seen again by a retro; `accept` on an expired one keeps
+it again, `dismiss` drops a lesson for good. From a checkout of a project on
+Helix (or with `--helix`) it lists, accepts and dismisses Helix's lessons
+instead, kept in Helix's own Animus home by its weekly retro
+([helix.md](helix.md#lessons)); `--local` reads this machine's.
+
+Every later job of the project (a factory lesson, every project's) gives its
+kept, unexpired lessons to the agent each is for, under "Lessons from earlier
+jobs" in that agent's instructions: at most 10 per agent, newest first. Each
+job a lesson is given to adds one to its uses, and the job's run line lists
+the ids as `lessons`. A job picked up again counts as a new job.
+
 #### `animus cleanup [<job>...] [--days <n>] [--dry-run]`
 
 Removes what finished jobs left behind. A job whose PR is merged or closed
@@ -109,7 +182,9 @@ loses its worktree at once, and its branches (`animus/<job>` and
 `animus-evidence/<job>`, local and on origin) once the PR ended more than
 `--days` ago (default 30). A job with no PR loses both once it last ran
 that long ago. A job with an open PR, or one waiting for an answer, is
-kept. What a job records stays for analysis: its folder (spec, gate output,
+kept, and so is one whose PR has a fix queued, running or waiting for an
+answer (`animus fix`); a fix counts as its PR's job when the PR ends, even
+one that failed. What a job records stays for analysis: its folder (spec, gate output,
 reviews, screenshots, transcripts), Claude Code's own transcripts and the
 run log. A named job goes whole and at once, folder included. `--dry-run`
 lists what would be removed.

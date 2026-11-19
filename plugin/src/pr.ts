@@ -42,6 +42,8 @@ export type PrInput = {
   closes?: number;
   /** How the pull request names that issue (the profile's issue_link); `Closes` when absent. */
   issueLink?: 'closes' | 'refs';
+  /** Every fix on the pull request so far, oldest first, the one that built this body last. */
+  fixes?: readonly { ask: string; job: string; cost_usd: number }[];
   models: string;
   cost_usd: number;
 };
@@ -81,6 +83,8 @@ export function prBody(p: PrInput): string {
   if (p.notes) here.push(`- From the implementer: ${cell(p.notes)}`);
   out.push('## Review here', '', ...(here.length ? here : ['Nothing flagged: the gates passed, and the review found nothing to fix.']), '');
 
+  if (p.fixes?.length) out.push('## Fixes', '', '| # | Ask | Job | Cost |', '| --- | --- | --- | --- |', ...p.fixes.map((f, i) => `| ${i + 1} | ${cell(f.ask)} | \`${f.job}\` | $${f.cost_usd.toFixed(2)} |`), '');
+
   out.push('## Acceptance criteria', '', '| # | Criterion | Check | Reviewer |', '| --- | --- | --- | --- |');
   p.spec.criteria.forEach((c, i) => {
     const ran = p.gates.filter((g) => g.criterion === i + 1);
@@ -116,8 +120,17 @@ export function prBody(p: PrInput): string {
 
   const review = !p.review ? 'no review' : `${p.reviewRounds} review round(s): ${p.review.summary}`;
   out.push('## Run', '', `- Profile: ${p.plan.size}, ${p.plan.difficulty}, ${p.plan.type}`, `- Models: ${p.models}`, `- Gates: ${p.gateAttempts} run(s), sent back ${p.fixRounds} time(s)`, `- Review: ${cell(review)}`, ...(p.caughtUp ? [`- Caught up with ${p.caughtUp.branch} at ${p.caughtUp.commit}, merged in before the push`] : []), `- Cost: $${p.cost_usd.toFixed(2)} (API-equivalent)`, '', `Built by Animus, job \`${p.job}\`.`);
-  return out.join('\n');
+  const body = out.join('\n');
+  // The spec rides along, so a fix can run from the pull request alone; fenced longer than any fence it holds.
+  const fence = '`'.repeat(Math.max(3, ...[...p.spec.text.matchAll(/`+/g)].map((m) => m[0].length + 1)));
+  const spec = `\n\n<details><summary>${SPEC_SUMMARY}</summary>\n\n${fence}md\n${p.spec.text.trim()}\n${fence}\n\n</details>`;
+  return body.length + spec.length <= BODY_LIMIT ? body + spec : `${body}\n\nThe spec is not in this description: with it, the description would pass GitHub's limit of ${BODY_LIMIT.toLocaleString('en-US')} characters.`;
 }
+
+/** The summary of the collapsed block that holds the job's spec. */
+export const SPEC_SUMMARY = 'The spec this job ran from';
+/** The most characters GitHub takes in a pull request's description. */
+export const BODY_LIMIT = 65_536;
 
 export type Publish = (p: { cwd: string; branch: string; baseBranch: string; title: string; body: string; draft: boolean }) => string;
 
@@ -160,6 +173,26 @@ export type PrLookup = (url: string, cwd: string) => PrState | undefined;
 export const prState: PrLookup = (url, cwd) => {
   const state = gh(cwd, ['pr', 'view', url, '--json', 'state', '--jq', '.state'], undefined, true);
   return state === 'OPEN' || state === 'MERGED' || state === 'CLOSED' ? state : undefined;
+};
+
+/** Whether an open pull request is a draft; undefined when GitHub cannot say. */
+export type DraftLookup = (url: string, cwd: string) => boolean | undefined;
+
+export const prDraft: DraftLookup = (url, cwd) => {
+  const draft = gh(cwd, ['pr', 'view', url, '--json', 'isDraft', '--jq', '.isDraft'], undefined, true);
+  return draft === 'true' ? true : draft === 'false' ? false : undefined;
+};
+
+/** A pull request's description and its two branches, as GitHub has them: all a fix needs when the job that opened it is gone. */
+export type PrSource = { body: string; head: string; base: string };
+export type PrSourceLookup = (url: string, cwd: string) => PrSource | undefined;
+
+export const prSource: PrSourceLookup = (url, cwd) => {
+  const out = gh(cwd, ['pr', 'view', url, '--json', 'body,headRefName,baseRefName', '--jq', '[.body,.headRefName,.baseRefName]|@json'], undefined, true);
+  if (!out) return undefined;
+  // The body has newlines, which gh's output is cut at: ask for JSON on one line.
+  const [body, head, base] = JSON.parse(out) as [string, string, string];
+  return { body, head, base };
 };
 
 /** What GitHub records about a pull request. commits holds each commit's committer date. */

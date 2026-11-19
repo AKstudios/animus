@@ -132,7 +132,7 @@ The reviewer is independent in context but not in execution. It is a fresh sessi
 
 **After the PR opens**
 
-A `/animus fix` comment on the PR starts a follow-up job on the same branch, with the review comments as its spec. Without this, every review comment means a manual fix or a fresh job.
+`animus fix <pr> "<what to change>"` runs a **fix**: a new job on the open PR's branch, in the worktree of the job that opened it, so it resumes that job's implementer session (or starts fresh from a handoff of the spec, the PR's diff, earlier answers and the ask when the session is gone or over the context budget). The spec stays the original; the ask is extra instruction to the implementer and the reviewer. Every criterion is proved again, and the same PR is updated: its body, rebuilt by script, keeps `Closes #N` and gains a Fixes list (ask, job, cost). Every PR body carries the spec in a collapsed block, so a fix still runs from the PR alone when the earlier job's folder is gone. A fix that fails, or that the reviewer refuses on a ready PR, pushes nothing. One fix runs at a time per PR, and only on a PR a job opened. From a laptop with a Helix set up it goes to Helix, which runs it in a new container like any job. A `/animus fix` comment on the PR, starting the same job from GitHub, is not built yet. Without these, every review comment means a manual fix or a fresh job.
 
 **Triggers from Slack and issues**
 

@@ -8,7 +8,9 @@ const pulls: Record<number, Pull> = {
 };
 const fake = (log: string, tag = 'v0.1.0') => ({
   git: (...args: string[]) => {
-    if (args[0] === 'describe') { if (!tag) throw new Error('no tags'); return tag; }
+    // Like release.ts's helper, which exits on any git failure: a command that would fail has no answer here.
+    if (args[0] === 'describe') throw new Error('git describe fails when there is no tag');
+    if (args[0] === 'tag') return tag;
     assert.deepEqual(args.slice(-1), tag ? [`${tag}..HEAD`] : ['--format=%s']);
     return log;
   },

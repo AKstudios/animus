@@ -4,6 +4,7 @@
 // it lands as a pull request.
 import { chmodSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, join as joinPath } from 'node:path';
+import type { Lesson } from './lessons.ts';
 import { animusHome } from './log.ts';
 import { AnimusError } from './proc.ts';
 import { animusVersion } from './version.ts';
@@ -14,7 +15,7 @@ export const VERSION_HEADER = 'animus-version';
 /** A job as Helix reports it. */
 export type RemoteJob = {
   id: number; state: string; person: string; repo: string; title: string; submitted: string; started?: string; ended?: string;
-  animus_job?: string; outcome?: string; pr?: string; reason?: string; question?: string; cost_usd?: number; log?: string; waiting?: string;
+  animus_job?: string; fix_of?: number; outcome?: string; pr?: string; reason?: string; question?: string; cost_usd?: number; log?: string; waiting?: string;
   /** On a submission's answer: the submitter's skills Helix took with it. A Helix that predates them leaves this out. */
   skills?: string[];
   /** The job's page at each address Helix has set, as `Tailscale: <url>` lines; never with a token. A Helix that predates them leaves this out. */
@@ -80,6 +81,8 @@ export async function helixVersion(url: string): Promise<string> {
 export type SentSkill = { name: string; roles: string[]; types?: string[]; text: string };
 /** profile: the checkout's profile text, so Helix can warn when it is not the base branch's. */
 export const submit = (s: { repo: string; spec: string; name: string; draft?: boolean; skills?: SentSkill[]; profile?: string }) => call<RemoteJob>('POST', '/jobs', s);
+/** A fix of an open pull request a job on Helix opened (`animus fix`): pr is its number or URL, repo the project's name. */
+export const fix = (f: { repo: string; pr: string; ask: string; skills?: SentSkill[] }) => call<RemoteJob>('POST', '/jobs/fix', f);
 /** The person's own jobs; with all, every person's, which only the owner may see. */
 export const jobs = (all = false) => call<{ slots: number; jobs: RemoteJob[] }>('GET', all ? '/jobs?all' : '/jobs');
 export const job = (id: string) => call<RemoteJob>('GET', `/jobs/${encodeURIComponent(id)}`);
@@ -100,7 +103,11 @@ export function describeProjects(list: readonly RemoteProject[]): string {
   return rows.map((row) => row.map((cell, i) => cell.padEnd(widths[i]!)).join('  ').trimEnd()).join('\n');
 }
 
-export const leave = () => call<{ name: string; cancelled: number[]; kept?: string }>('POST', '/leave');
+/** Helix's lessons, with those a project's retro told about when one is named: its own and the factory's. */
+export const lessons = (project?: string) => call<{ lessons: Lesson[] }>('GET', project ? `/lessons?project=${encodeURIComponent(project)}` : '/lessons');
+export const decideLesson = (id: number, action: 'accept' | 'dismiss') => call<Lesson>('POST', `/lessons/${id}`, { action });
+
+export const leave =() => call<{ name: string; cancelled: number[]; kept?: string }>('POST', '/leave');
 
 /** What an invite is for: asked with its code, before any token exists. */
 export type InviteDetails = { name: string; github?: string; expires: string; repos: { name: string; url: string }[]; github_app?: boolean };

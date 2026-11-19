@@ -12,12 +12,15 @@ import { initProfile } from './init.ts';
 import { githubLogin, joinHelix, leaveHelix, openPage } from './join.ts';
 import { addProject } from './project.ts';
 import { describe, failsOnBase, jobChecks, runChecks } from './gates.ts';
+import { fixAlone, fixTarget, keptFromBody, openedHere } from './fix.ts';
 import { githubUrl, mainCheckout, touchedFiles } from './git.ts';
 import { describeRuns, describeTools, jobDir, loadState, readRuns, readTools, type Run } from './log.ts';
 import { jobOf, onPath, runJob, uiJobOf } from './pipeline.ts';
 import { describeNumbers, numbers, refreshOutcomes } from './outcomes.ts';
 import { prFacts, publish, pushEvidence } from './pr.ts';
 import { personalFor, readSkillsFile, skillsForRole, snapshotSkills, whereToRun, type PersonalSkill, type Where } from './personal.ts';
+import { accept, describeLessons, dismiss, readLessons } from './lessons.ts';
+import { runRetro } from './retro.ts';
 import { listenLocal, localServer } from './local-display.ts';
 import { loadProfile, PROFILE_PATH } from './profile.ts';
 import { describePlan, loadFactory, resolvePlan } from './profiles.ts';
@@ -60,6 +63,12 @@ const USAGE = `animus: a spec goes in, a pull request with proof comes out
         go.mod or Cargo.toml. Runs nothing; --force replaces a profile.
   animus resume <job> [--answer <text>] [--dry-run] [--keep]
         Pick up a job that asked a question or was interrupted.
+  animus fix <pr> "<what to change>" [--local | --helix] [--repo <dir>] [--dry-run] [--keep]
+        Change an open pull request a job opened: a new job on its branch, in
+        that job's worktree, which carries on from its implementer session,
+        proves every criterion again and pushes to the same pull request.
+        <pr> is its number or URL. It runs where the pull request's job ran,
+        and on Helix when a job there opened it (--local or --helix says).
   animus runs [-n <count>] [--json]
         The run log, newest last.
   animus tools <job> [--json]
@@ -71,6 +80,20 @@ const USAGE = `animus: a spec goes in, a pull request with proof comes out
         What became of each pull request, read from GitHub (merged or closed,
         time to merge, human commits, reverted or reworked within 30 days),
         and the five numbers split by task class.
+  animus retro [--project <name>] [--days <n>]
+        A standard-tier session, read-only, over the project's runs of the last
+        --days days (default 7; the current repo's project unless named): it
+        proposes at most 5 lessons, each one sentence for one agent
+        (implementer, planner, reviewer or spec), citing at least two jobs, or
+        one whose pull request was reverted or reworked. The script drops the
+        rest. Nothing is kept until you accept it.
+  animus lessons [accept <id> | dismiss <id>]
+        The proposed, kept and expired lessons with their ids, citations, uses
+        and days left (a kept lesson expires 60 days after it was accepted or
+        a retro saw it again). accept keeps a proposed or expired lesson;
+        dismiss drops it, and the retro is told not to propose it again.
+        For a checkout of a project on Helix these go to Helix, which runs
+        its own retro each week; --local or --helix decides.
   animus cleanup [<job>...] [--days <n>] [--dry-run]
         Remove what finished jobs left: the worktree of a job whose pull
         request merged or closed, and its branches (here and on origin) once
@@ -160,27 +183,33 @@ function localSkills(repo: string, file: string | undefined): PersonalSkill[] {
 }
 
 /** Sends a spec to Helix with the person's skills, for the project with this checkout's GitHub address. */
+/** The Helix project with this checkout's GitHub address, whatever it was named when added; else one named after the folder. */
+async function projectNamed(root: string): Promise<string> {
+  const url = githubUrl(tryGit(root, ['remote', 'get-url', 'origin']) ?? '');
+  // A Helix from before projects has no list to ask.
+  const list = url ? await helix.projects().then((r) => r.projects, () => []) : [];
+  return list.find((p) => p.url === url)?.name ?? basename(root);
+}
+
+/** Says what Helix queued and where to follow it. */
+function announce(j: helix.RemoteJob, skills: readonly { name: string }[]): void {
+  for (const w of j.warnings ?? []) say(`warning: ${w}`);
+  if (skills.length && !j.skills) say(`this Helix predates personal skills: the job runs without ${skills.map((s) => s.name).join(', ')}`);
+  console.log(`job ${j.id} is ${j.state} on Helix: ${j.title}${j.skills?.length ? `\nwith your skills: ${j.skills.join(', ')}` : ''}\nfollow it with: animus status ${j.id}${helix.describeLinks(j).map((l) => `\n${l}`).join('')}`);
+}
+
 async function submitSpec(file: string, checkout: string, draft: boolean, known?: string): Promise<helix.RemoteJob> {
   // Refused here, before it is sent, when its labels would not run.
   resolvePlan(loadFactory(), loadSpec(file));
   const root = mainCheckout(checkout);
-  let repo = known;
-  if (!repo) {
-    // The project with this checkout's GitHub address, whatever it was named when added; else one named after the folder.
-    const url = githubUrl(tryGit(root, ['remote', 'get-url', 'origin']) ?? '');
-    // A Helix from before projects has no list to ask.
-    const list = url ? await helix.projects().then((r) => r.projects, () => []) : [];
-    repo = list.find((p) => p.url === url)?.name ?? basename(root);
-  }
+  const repo = known ?? await projectNamed(root);
   const skills = snapshotSkills(personalFor(root).skills);
   const profileFile = join(root, PROFILE_PATH);
   const j = await helix.submit({
     repo, spec: readFileSync(file, 'utf8'), name: basename(file), ...(draft ? { draft: true } : {}), ...(skills.length ? { skills: skills.map(({ sha: _sha, ...s }) => s) } : {}),
     ...(existsSync(profileFile) ? { profile: readFileSync(profileFile, 'utf8') } : {}),
   });
-  for (const w of j.warnings ?? []) say(`warning: ${w}`);
-  if (skills.length && !j.skills) say(`this Helix predates personal skills: the job runs without ${skills.map((s) => s.name).join(', ')}`);
-  console.log(`job ${j.id} is ${j.state} on Helix: ${j.title}${j.skills?.length ? `\nwith your skills: ${j.skills.join(', ')}` : ''}\nfollow it with: animus status ${j.id}${helix.describeLinks(j).map((l) => `\n${l}`).join('')}`);
+  announce(j, skills);
   return j;
 }
 
@@ -196,7 +225,7 @@ async function main(argv: string[]): Promise<number> {
   const { values, positionals } = parseArgs({
     args: rest, allowPositionals: true,
     options: {
-      repo: { type: 'string' }, 'dry-run': { type: 'boolean' }, keep: { type: 'boolean' }, draft: { type: 'boolean' }, answer: { type: 'string' },
+      repo: { type: 'string' }, project: { type: 'string' }, 'dry-run': { type: 'boolean' }, keep: { type: 'boolean' }, draft: { type: 'boolean' }, answer: { type: 'string' },
       json: { type: 'boolean' }, skills: { type: 'string' }, local: { type: 'boolean' }, helix: { type: 'boolean' }, n: { type: 'string', short: 'n' }, again: { type: 'boolean' }, days: { type: 'string' }, force: { type: 'boolean' }, slices: { type: 'boolean' }, yes: { type: 'boolean' }, github: { type: 'string' }, slack: { type: 'string' }, all: { type: 'boolean' },
     },
   });
@@ -338,6 +367,32 @@ async function main(argv: string[]): Promise<number> {
       console.log(r.text);
       return 0;
     }
+    case 'fix': {
+      const [pr, ...text] = positionals;
+      if (!pr || !text.length) throw new AnimusError('usage: animus fix <pr> "<what to change>" [--local | --helix]');
+      if (values.local && values.helix) throw new AnimusError('--local or --helix, not both');
+      const checkout = resolve(values.repo ?? cwd);
+      const asked: Where | undefined = values.local ? 'local' : values.helix ? 'helix' : undefined;
+      const mine = personalFor(checkout);
+      // Unless told where: a job Helix started is already where it runs, and a pull request a job here opened is fixed here; otherwise as for a new job.
+      const choice = process.env.ANIMUS_TRIGGER === 'helix' || (!asked && !mine.run && openedHere(mainCheckout(checkout), pr).length)
+        ? { where: 'local' as Where, project: undefined }
+        : await whereToRun({ ...(asked ? { asked } : {}), ...(mine.run ? { config: mine.run } : {}), checkout });
+      if (choice.where === 'helix') {
+        if (values['dry-run']) throw new AnimusError('--dry-run is for a fix on this machine: animus fix --local --dry-run');
+        const root = mainCheckout(checkout);
+        const skills = snapshotSkills(mine.skills);
+        announce(await helix.fix({ repo: choice.project ?? await projectNamed(root), pr, ask: text.join(' '), ...(skills.length ? { skills: skills.map(({ sha: _sha, ...s }) => s) } : {}) }), skills);
+        return 0;
+      }
+      if (!values['dry-run'] && !onPath('gh')) throw new AnimusError('gh is not installed, so the pull request cannot be updated; install it or use --dry-run');
+      const repo = mainCheckout(resolve(values.repo ?? cwd));
+      const { run, state } = fixTarget(repo, pr);
+      const alone = fixAlone(repo, run, state);
+      // The description is what the pull request shows now: its Closes line and Fixes list are kept, however old the earlier job's state.
+      const kept = alone ? undefined : keptFromBody(run.pr!, repo);
+      return finish(await runJob({ repo, fix: { of: run.job, ...(alone ? { alone } : { from: state!, ...(kept ? { kept } : {}) }), ask: text.join(' '), pr: run.pr! }, personal: localSkills(repo, values.skills), ...flags }, deps()));
+    }
     case 'resume': {
       const state = positionals[0] ? loadState(positionals[0]) : undefined;
       if (!state) throw new AnimusError(positionals[0] ? `no job ${positionals[0]} under ${jobDir('')}` : 'usage: animus resume <job> [--answer <text>]');
@@ -362,6 +417,42 @@ async function main(argv: string[]): Promise<number> {
       const outcomes = refreshOutcomes(onPath('gh') ? prFacts : () => undefined);
       const rows = numbers(readRuns(), outcomes);
       console.log(values.json ? JSON.stringify({ numbers: rows, pull_requests: Object.values(outcomes) }, null, 2) : describeNumbers(rows));
+      return 0;
+    }
+    case 'retro': {
+      const days = values.days === undefined ? 7 : Number(values.days);
+      if (!Number.isFinite(days) || days <= 0) throw new AnimusError(`--days takes a number of days, not ${values.days}`);
+      const project = values.project ?? basename(mainCheckout(cwd));
+      const { proposed, seen, result } = runRetro({ ...deps(), project, days });
+      if (values.json) { console.log(JSON.stringify({ project, proposed: proposed.length, seen: seen.length, cost_usd: result.cost_usd })); return 0; }
+      console.log(`${proposed.length} lesson${proposed.length === 1 ? '' : 's'} proposed for ${project}${seen.length ? `, ${seen.length} kept seen again` : ''} ($${result.cost_usd.toFixed(2)})${proposed.length ? ': animus lessons' : ''}`);
+      return 0;
+    }
+    case 'lessons': {
+      const [word, id] = positionals;
+      const sub = word === 'accept' || word === 'dismiss' ? word : undefined;
+      if (word && !sub) throw new AnimusError('usage: animus lessons [accept <id> | dismiss <id>]');
+      if (sub && !/^\d+$/.test(id ?? '')) throw new AnimusError(`usage: animus lessons ${sub} <id>`);
+      if (values.local && values.helix) throw new AnimusError('--local or --helix, not both');
+      // As `animus start` decides: on Helix when this checkout's project is there, else on this machine. Outside a checkout, here.
+      const asked: Where | undefined = values.local ? 'local' : values.helix ? 'helix' : undefined;
+      const inCheckout = tryGit(cwd, ['rev-parse', '--git-dir']) !== undefined;
+      const mine = inCheckout ? personalFor(cwd) : undefined;
+      let unanswered = false;
+      const choice: { where: Where; why: string; project?: string } = asked || inCheckout
+        ? await whereToRun({ ...(asked ? { asked } : {}), ...(mine?.run ? { config: mine.run } : {}), checkout: cwd, projects: () => helix.projects().catch((err: unknown) => { unanswered = true; throw err; }) })
+        : { where: 'local', why: 'this is not a checkout of a repository' };
+      const remote = choice.where === 'helix';
+      const where = remote ? 'on Helix' : 'on this machine';
+      say(`lessons ${where}: ${choice.why}`);
+      if (sub) {
+        // Ids are numbered in each Animus home: a lesson kept here for lack of an answer from Helix could be another one.
+        if (unanswered) throw new AnimusError(`${choice.why}, so lesson ${id} was not ${sub === 'accept' ? 'kept' : 'dismissed'} here: try again when Helix answers, or use --local for this machine's own lessons`);
+        const l = remote ? await helix.decideLesson(Number(id), sub) : sub === 'accept' ? accept(Number(id), Date.now()) : dismiss(Number(id));
+        console.log(`lesson ${l.id} is ${sub === 'accept' ? 'kept' : 'dismissed'} ${where}`);
+        return 0;
+      }
+      console.log(describeLessons(remote ? (await helix.lessons(choice.project)).lessons : readLessons(), Date.now()));
       return 0;
     }
     case 'cleanup': {

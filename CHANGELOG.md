@@ -10,7 +10,47 @@ clients with how to update.
 ## Unreleased
 
 - Pull requests no longer touch CHANGELOG.md: `npm run release` writes the release's notes from the merged pull requests, and a job's pull request has a `## Breaking` section when its implementer reports a breaking change (the report gains an optional `breaking`). The `changelog` gate is gone; `npm run changelog` stays as a no-op until a later change drops it.
+- `animus fix <pr> "<text>"` changes an open pull request a job opened: a new
+  job in that job's worktree, reset to the branch as GitHub has it, that
+  carries on from its implementer session (or a handoff when the session is
+  over the context budget), proves every criterion again and pushes to the
+  same pull request, whose body keeps `Closes #N` and gains a Fixes list. The
+  run log's `fix_of` names the job it continues; `trigger` is `fix`, and
+  `without_session: true` marks a fix that ran from the pull request alone
+  (its spec read from the description, a fresh session). `animus fix`
+  refuses a pull request no job opened, a merged or closed one and one with
+  a fix queued, running or waiting for an answer; a failed fix, or one the
+  reviewer refuses on a ready pull request, pushes nothing. Every pull
+  request body now carries the spec in a collapsed block, left out with a
+  note past GitHub's 65,536 characters. `animus cleanup` keeps a job's
+  worktree and branch while a fix of its pull request is queued, running or
+  waiting. With a Helix, `animus fix` submits to the new `POST /jobs/fix`
+  (`repo`, `pr`, `ask`; the job's person or the owner), which runs it as an
+  `animus fix` process in a new container, and the job page links the job it
+  fixes. Adding the route is not breaking.
 - The display's overview is the same on `animus ui` and on Helix: Needs you, Working now, Queued, Open pull requests, Finished. Result tags are in sentence case, a Finished row says how long its PR took to merge, and the Projects panel has ticks and a key in place of the "All projects" button.
+- `animus retro [--project <name>] [--days <n>]` runs a read-only `retro`
+  session (standard tier, a new role in profiles.yaml) over a project's runs
+  and proposes at most 5 lessons, each citing at least two jobs or one whose
+  PR was reverted or reworked; the script drops the rest. `animus lessons`
+  lists proposed, kept and expired lessons from the new
+  `ANIMUS_HOME/lessons.json`, and `animus lessons accept <id>` /
+  `dismiss <id>` keep or drop one. A kept lesson expires after 60 days
+  unless a retro sees it again. Every later job gives its project's and the
+  factory's kept lessons to the implementer, planner and reviewer they are for
+  (at most 10 each, newest first, under "Lessons from earlier jobs"), adds one
+  to each lesson's uses, and lists the ids as `lessons` on its run line.
+  `helix serve` runs a retro for each ready project once a week (as `animus
+  retro --project <name> --json`, which prints its counts as JSON), keeps the
+  lessons in Helix's own Animus home, and posts the count and `animus lessons`
+  to the project's Slack channel. New `GET /lessons[?project=<name>]` and
+  `POST /lessons/<id>` (`action`: `accept` or `dismiss`) take a person's
+  token, and `animus lessons` / `accept` / `dismiss` use them for a checkout
+  of a Helix project (`--local` or `--helix` decides), say where they acted,
+  and refuse to `accept` or `dismiss` on this machine when a Helix you are
+  signed in to does not answer. On a Helix with containers the retro also reads
+  each person's Animus home, jobs get Helix's `lessons.json` read-only, and
+  Helix counts their uses from the run line.
 - A spec refused at admission, and a job ended by SIGINT, SIGTERM or a Helix
   cancel, now leave a run line with cause `admit`, `interrupted` or
   `cancelled`. Helix writes a `cancelled` file beside the job's spec before it

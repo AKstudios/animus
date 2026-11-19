@@ -1,9 +1,11 @@
-// Helix's HTTP API: five actions on jobs (submit, status, result, cancel,
+// Helix's HTTP API: six actions on jobs (submit, fix, status, result, cancel,
 // answer) and three on projects (add, list, remove), over JSON, for the
 // private network only. Each of those carries a person's token; the queue
 // lists a person's own jobs, a job can be answered only by whoever submitted
 // it and cancelled by them or the owner, and a project removed only by whoever
 // added it or the owner (projects.ts).
+// Lessons a retro proposed are read at GET /lessons and kept or dropped with
+// POST /lessons/<id>, with any person's token.
 // Joining (invite, join/device, join) carries a one-time code instead, and leave the
 // person's own token (join.ts). Inviting and removing people (POST /people,
 // DELETE /people/<name>) and every person's queue (GET /jobs?all) are the
@@ -14,6 +16,7 @@
 // list's at /people/page-data and a person's at /people/<name>/page-data.
 import { createServer, type IncomingMessage, type Server } from 'node:http';
 import { AnimusError } from '../../plugin/src/proc.ts';
+import { accept, dismiss, inScope, readLessons } from '../../plugin/src/lessons.ts';
 import { VERSION_HEADER, type MadeInvite, type RemovedPerson } from '../../plugin/src/remote.ts';
 import { animusVersion, compatible } from '../../plugin/src/version.ts';
 import { parseSkills, type PersonalSkill } from '../../plugin/src/personal.ts';
@@ -187,6 +190,23 @@ export function serve(opts: {
         const { cancelled, ...gone } = takeOff(name, store, config, opts.reap);
         return send(200, { name, cancelled: cancelled.map((j) => j.id), ...gone, home } satisfies RemovedPerson);
       }
+      // Lessons live in Helix's own Animus home; any person on Helix may read them and keep or drop one.
+      if (root === 'lessons') {
+        if (!id && req.method === 'GET') {
+          const project = url.searchParams.get('project');
+          return send(200, { lessons: readLessons().filter((l) => project === null || inScope(l, project)) });
+        }
+        if (id && /^\d+$/.test(id) && !action && req.method === 'POST') {
+          const { action: what } = await body(req);
+          if (what !== 'accept' && what !== 'dismiss') throw new Refused(400, 'action is accept or dismiss');
+          if (!readLessons().some((l) => l.id === Number(id))) throw new Refused(404, `no lesson ${id}`);
+          try { return send(200, what === 'accept' ? accept(Number(id), Date.now()) : dismiss(Number(id))); } catch (err) {
+            if (err instanceof AnimusError && !(err instanceof Refused)) throw new Refused(409, err.message);
+            throw err;
+          }
+        }
+        return send(404, { error: `nothing at ${req.method} ${url.pathname}` });
+      }
       if (root === 'projects') {
         const name = id ? decodeURIComponent(id) : undefined;
         if (!name && req.method === 'GET') return send(200, { projects: store.projects().map(({ dir: _dir, ...p }) => p) });
@@ -225,6 +245,13 @@ export function serve(opts: {
           const submitted = supervisor.submit(person, s);
           return send(201, { ...submitted, skills: skills.map((k) => k.name), links: jobLinks(config, submitted.id), ...(warnings.length ? { warnings } : {}) });
         }
+      } else if (id === 'fix' && !action && req.method === 'POST') {
+        const b = await body(req);
+        if (typeof b.repo !== 'string' || typeof b.pr !== 'string' || !b.pr.trim() || typeof b.ask !== 'string' || !b.ask.trim()) throw new Refused(400, 'a fix needs repo (its name here), pr (a number or its address) and ask (what to change)');
+        let skills: PersonalSkill[];
+        try { skills = parseSkills(b.skills, 'the fix'); } catch (err) { throw new Refused(400, (err as Error).message); }
+        const queued = supervisor.fix(person, { repo: b.repo, pr: b.pr, ask: b.ask, ...(skills.length ? { skills } : {}) });
+        return send(201, { ...queued, skills: skills.map((k) => k.name), links: jobLinks(config, queued.id) });
       } else if (/^\d+$/.test(id)) {
         const n = Number(id);
         if (req.method === 'GET' && !action) {
