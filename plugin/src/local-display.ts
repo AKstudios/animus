@@ -32,6 +32,8 @@ function jobOf(id: string, runs: readonly Run[]): DisplayJob | undefined {
   const mine = runs.filter((r) => r.job === id);
   const last = mine.at(-1);
   const fix = fixRounds(mine);
+  const fixOf = last?.fix_of ?? state?.fix_of;
+  const fixTitle = fixOf ? runs.findLast((r) => r.job === fixOf)?.title : undefined;
   let title = last?.title;
   if (!title && state) { try { title = /^# (.+)$/m.exec(readFileSync(state.spec, 'utf8'))?.[1]; } catch { /* the job's copy is gone */ } }
   const running = !state?.outcome && progress?.host === hostname() && progress.pid !== undefined && alive(progress.pid);
@@ -43,6 +45,7 @@ function jobOf(id: string, runs: readonly Run[]): DisplayJob | undefined {
     ...(state?.outcome ? { outcome: state.outcome } : {}), ...(last?.pr ? { pr: last.pr } : {}),
     ...(last?.reason ? { reason: last.reason } : {}), ...(state?.question ? { question: state.question } : {}),
     ...(last ? { cost_usd: last.cost_usd } : {}),
+    ...(fixOf ? { fix_of: fixOf, ...(fixTitle ? { fix_of_title: fixTitle } : {}) } : {}),
     ...(fix.has(id) ? { fix_rounds: fix.get(id)! } : {}),
     ...(running && progress ? { progress } : {}),
     // `animus resume` needs state.json, which is saved only after the worktree is made.

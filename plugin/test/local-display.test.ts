@@ -232,3 +232,15 @@ test('the local /job-list tags merged and closed PRs from outcomes.json and filt
   // Totals cover the whole filter, not the page: the project filter changes them.
   assert.deepEqual([all.totals.merged, wiki.totals.jobs, wiki.totals.merged], [1, 1, 0]);
 });
+
+// Protects: a local fix names the job it continues. Fails when fix_of or that job's title is lost.
+test('a local fix carries the id and title of the job it fixes', () => {
+  const run = (job: string, over: Partial<Run>) => appendRun({ job, repo: '/work/shop', submitter: 'me@example.com', title: `Title ${job}`, started: '2026-01-01T00:00:00.000Z', ended: '2026-01-01T00:05:00.000Z', outcome: 'pr', pr: 'https://example.test/pr/9', cost_usd: 1, ...over } as Run);
+  saveState({ job: 'opens-pr', repo: '/work/shop', spec: '', workspace: {} as JobState['workspace'], plan: {} as JobState['plan'], outcome: 'pr' });
+  saveState({ job: 'fixes-pr', repo: '/work/shop', spec: '', workspace: {} as JobState['workspace'], plan: {} as JobState['plan'], outcome: 'pr' });
+  run('opens-pr', {});
+  run('fixes-pr', { fix_of: 'opens-pr' });
+  const jobs = localJobs();
+  const pick = (id: string) => { const j = jobs.find((x) => x.id === id)!; return [j.fix_of, j.fix_of_title]; };
+  assert.deepEqual([pick('opens-pr'), pick('fixes-pr')], [[undefined, undefined], ['opens-pr', 'Title opens-pr']]);
+});

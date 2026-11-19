@@ -31,7 +31,7 @@ export type Headline = { needs: string; rest: string; last?: { when: string; tag
 export type Week = { merged: string; /** Of the jobs whose gates ran. */ firstPass: string; /** All the week's cost over the PRs merged. */ perMerged: string; median: string };
 
 /** meta: how long it took and what it cost; the project and person are drawn from repo and person. */
-export type Recent = { id: number | string; page: string; tag: string; /** Local display: the pull request the tag names, on GitHub. */ href?: string; tone: Tone; title: string; repo: string; person: string; personPage?: string; meta: string; reason?: string };
+export type Recent = { id: number | string; page: string; tag: string; /** Local display: the pull request the tag names, on GitHub. */ href?: string; tone: Tone; title: string; repo: string; person: string; personPage?: string; meta: string; reason?: string; /** A fix: the job it continues. */ fix?: { title: string; page: string } };
 
 /** An open pull request on the overview; it links to GitHub and to the job that opened it. */
 export type Pr = { id: number | string; page: string; href: string; tag: string; draft: boolean; title: string; repo: string; person: string; personPage?: string };
@@ -116,6 +116,7 @@ export function recent(j: DisplayJob, local = false, closed?: DisplayClosed): Re
   const made = {
     id: j.id, page: jobPage(j.id), tag, ...(local && j.pr && /^https?:\/\//.test(j.pr) ? { href: j.pr } : {}), tone, title: j.title, repo: j.repo, person: j.person, ...people(j.person, local),
     meta: [took, j.cost_usd !== undefined ? usd(j.cost_usd) : ''].filter(Boolean).join(' · '),
+    ...(j.fix_of !== undefined ? { fix: { title: j.fix_of_title ?? `job ${typeof j.fix_of === 'number' ? '#' : ''}${j.fix_of}`, page: jobPage(j.fix_of) } } : {}),
     ...(j.resume ? { reason: `It stopped before it ended. To carry on: ${j.resume}` } : j.reason ? { reason: firstLine(j.reason) } : {}),
   };
   // A PR GitHub (or, locally, outcomes.json) has not answered about stays `PR #n`, never guessed.

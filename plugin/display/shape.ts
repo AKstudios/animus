@@ -25,6 +25,8 @@ export type DisplayJob = {
   pr?: string;
   /** A fix: the job it continues (Helix's number, or a local job's id). */
   fix_of?: number | string;
+  /** The title of that job, for the line "fix of <title>"; left out where the source does not know it. */
+  fix_of_title?: string;
   reason?: string;
   question?: string;
   cost_usd?: number;

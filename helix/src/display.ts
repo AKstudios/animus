@@ -39,15 +39,19 @@ function repoOf(name: string, dir: string): DisplayRepo {
 }
 
 /** Each person's jobs' fix rounds from their run logs, by person and Animus job, for the jobs whose gates ran. */
-function fixOf(opts: { store: Store; supervisor: Supervisor }): (j: HelixJob) => { fix_rounds?: number } {
+function fixOf(opts: { store: Store; supervisor: Supervisor }): (j: HelixJob) => { fix_rounds?: number; fix_of_title?: string } {
   const rounds = new Map<string, number>();
   for (const person of Object.keys(opts.store.people())) {
     for (const [job, n] of fixRounds(readRuns(join(opts.supervisor.animusHome(person), 'runs.jsonl')))) rounds.set(`${person}\u0000${job}`, n);
   }
-  return (j) => { const n = rounds.get(`${j.person}\u0000${j.animus_job}`); return n === undefined ? {} : { fix_rounds: n }; };
+  return (j) => {
+    const n = rounds.get(`${j.person}\u0000${j.animus_job}`);
+    const title = j.fix_of === undefined ? undefined : opts.store.get(j.fix_of)?.title;
+    return { ...(n === undefined ? {} : { fix_rounds: n }), ...(title ? { fix_of_title: title } : {}) };
+  };
 }
 
-function jobOf(job: HelixJob, supervisor: Supervisor, fix: (j: HelixJob) => { fix_rounds?: number } = () => ({})): DisplayJob {
+function jobOf(job: HelixJob, supervisor: Supervisor, fix: (j: HelixJob) => { fix_rounds?: number; fix_of_title?: string } = () => ({})): DisplayJob {
   const { spec: _spec, pid: _pid, answer, draft: _draft, interrupted: _interrupted, ...rest } = job;
   const shown = { ...rest, ...fix(job) };
   if (job.state === 'queued' && job.animus_job) return { ...shown, resumed: answer ? 'answer' : 'restart' };
