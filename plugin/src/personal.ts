@@ -18,6 +18,8 @@ import { githubUrl, mainCheckout } from './git.ts';
 import { animusHome } from './log.ts';
 import { AnimusError, tryGit } from './proc.ts';
 import { isRecord, isStrings } from './profile.ts';
+import { parseMemory } from './room.ts';
+import { TIERS, type Tier } from './profiles.ts';
 import * as helix from './remote.ts';
 
 export type Where = 'local' | 'helix';
@@ -62,9 +64,11 @@ export function personalFor(checkout: string, file = personalConfig()): Personal
   for (const key of Object.keys(raw)) if (!['run', 'skills', 'repos'].includes(key)) throw bad(`${key} is not a setting here; it takes run, skills and repos (gates and setup belong in the project's .animus/animus.yaml)`);
   const dir = dirname(file);
 
-  const where = (v: unknown, at: string): Where | undefined => {
+  const where = (value: unknown, at: string): Where | undefined => {
+    // run: may be a mapping that sets the loop's room beside where (loopConfig reads those keys).
+    const v = isRecord(value) ? value.where : value;
     if (v === undefined) return undefined;
-    if (v !== 'local' && v !== 'helix') throw bad(`${at} must be local or helix`);
+    if (v !== 'local' && v !== 'helix') throw bad(`${at}${isRecord(value) ? '.where' : ''} must be local or helix`);
     return v;
   };
   const skills = (v: unknown, at: string): SkillEntry[] => {
@@ -166,4 +170,35 @@ export async function whereToRun(opts: {
   try { list = (await (opts.projects ?? helix.projects)()).projects; } catch (err) { return { where: 'local', why: `Helix did not answer (${(err as Error).message})` }; }
   const p = list.find((x) => x.url.toLowerCase() === url.toLowerCase() && x.state === 'ready');
   return p ? { where: 'helix', why: `Helix has this repository as ${p.name}`, project: p.name } : { where: 'local', why: 'Helix does not have this repository (animus project add puts it there)' };
+}
+
+export type LoopConfig = { slots: number; job_memory: string; reserve_memory: string; tier_limits: Partial<Record<Tier, number>> };
+
+/** What the loop on this machine starts jobs by: `slots`, `job_memory`, `reserve_memory` and `tier_limits` of `run:` in config.yaml, which may be a mapping beside `where` (Helix's own config.yaml has the same keys and defaults). */
+export function loopConfig(file = personalConfig()): LoopConfig {
+  const config: LoopConfig = { slots: 2, job_memory: '4g', reserve_memory: '2g', tier_limits: {} };
+  if (!existsSync(file)) return config;
+  let raw: unknown;
+  try { raw = parse(readFileSync(file, 'utf8')); } catch (err) { throw new AnimusError(`${file}: ${(err as Error).message}`); }
+  const run = isRecord(raw) ? raw.run : undefined;
+  if (!isRecord(run)) return config;
+  const bad = (what: string) => new AnimusError(`${file}: run.${what}`);
+  if (run.slots !== undefined) {
+    if (!Number.isInteger(run.slots) || (run.slots as number) < 1) throw bad('slots must be a whole number, 1 or more');
+    config.slots = run.slots as number;
+  }
+  for (const key of ['job_memory', 'reserve_memory'] as const) {
+    if (run[key] === undefined) continue;
+    if (parseMemory(run[key]) === undefined) throw bad(`${key} must be a memory size such as 2g or 512m`);
+    config[key] = String(run[key]);
+  }
+  if (run.tier_limits !== undefined) {
+    if (!isRecord(run.tier_limits)) throw bad('tier_limits must be a mapping of tier to a number');
+    for (const [tier, n] of Object.entries(run.tier_limits)) {
+      if (!(TIERS as readonly string[]).includes(tier)) throw bad(`tier_limits has ${tier}, which is not one of ${TIERS.join(', ')}`);
+      if (!Number.isInteger(n) || (n as number) < 1) throw bad(`tier_limits.${tier} must be a whole number, 1 or more`);
+      config.tier_limits[tier as Tier] = n as number;
+    }
+  }
+  return config;
 }

@@ -4,6 +4,7 @@ import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
+import { openLocalQueue } from '../src/local-queue.ts';
 import { runJob } from '../src/pipeline.ts';
 import { describeJob } from '../src/remote.ts';
 import { clean, deps, done, fakeAgent, makeRepo, writeSpec } from './helpers.ts';
@@ -37,20 +38,20 @@ test('describeJob shows links only when Helix sent them', () => {
   assert.match(describeJob({ ...j, links: ['Tailscale: https://h.ts.net/jobs/4'] }), /watch it:\n {4}Tailscale: https:\/\/h\.ts\.net\/jobs\/4/);
 });
 
-// Protects: the CLI wires the where-it-runs line into the job, so `animus start` itself prints the watch line next. Fails when: cli.ts stops passing runsLine, or prints the runs line apart from the watch line.
-test('animus start --local prints where it runs, then the watch line, then the job line', () => {
+// Protects: `animus start --local` queues the job and returns at once, saying where it runs and how to follow it; the loop's `animus run` prints the watch line in the job's own log. Fails when: start waits for the job, or prints the runs line apart from the job line.
+test('animus start --local queues the job, says where it runs and how to follow it, and returns', () => {
   const cli = join(import.meta.dirname, '..', 'src', 'cli.ts');
   const repo = makeRepo();
   const spec = writeSpec('size: small\ndifficulty: routine\ntype: feature');
   const home = mkdtempSync(join(tmpdir(), 'animus-home-'));
-  // A Claude command that cannot start: the job stops at its first session, after the lines this checks, and no model runs.
+  // A Claude command that cannot start: the loop's job stops at its first session and no model runs.
   const env = { ...process.env, ANIMUS_HOME: home, ANIMUS_CLAUDE: join(home, 'no-such-claude') };
   const r = spawnSync(process.execPath, ['--disable-warning=ExperimentalWarning', cli, 'start', spec, '--local', '--dry-run', '--repo', repo], { env, encoding: 'utf8', timeout: 60_000 });
-  const lines = `${r.stdout}${r.stderr}`.split('\n');
 
-  const at = lines.findIndex((l) => l.startsWith('this job runs on this machine:'));
-  assert.ok(at >= 0, `no where-it-runs line in:\n${lines.join('\n')}`);
-  const job = /^watch it: animus ui, then open \/jobs\/(\S+)$/.exec(lines[at + 1] ?? '')?.[1];
-  assert.ok(job, `no watch line after the where-it-runs line in:\n${lines.join('\n')}`);
-  assert.match(lines[at + 2] ?? '', new RegExp(`^job ${job}: `));
+  assert.equal(r.status, 0, r.stderr);
+  assert.match(r.stderr, /^this job runs on this machine: asked for --local$/m);
+  assert.match(r.stdout, /^job 1 is queued on this machine: Say done\nfollow it with: animus status 1\n/);
+  const queue = openLocalQueue(home);
+  assert.equal(queue.get(1)?.title, 'Say done');
+  queue.close();
 });

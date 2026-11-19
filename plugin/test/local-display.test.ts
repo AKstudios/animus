@@ -13,8 +13,9 @@ import { jobNotice, peopleNotice, personNotice, route } from '../display/pages.t
 import type { Display, DisplayJob, JobListPage, JobPage } from '../display/shape.ts';
 import { view } from '../display/view.ts';
 import { listenLocal, localJobs, localServer } from '../src/local-display.ts';
+import { openLocalQueue } from '../src/local-queue.ts';
 import { outcomesFile } from '../src/outcomes.ts';
-import { appendRun, jobDir, loadProgress, saveProgress, saveState, writeJson, type JobState, type Run } from '../src/log.ts';
+import { animusHome, appendRun, jobDir, loadProgress, saveProgress, saveState, writeJson, type JobState, type Run } from '../src/log.ts';
 import { runJob } from '../src/pipeline.ts';
 import { git } from '../src/proc.ts';
 import { clean, cli, deps, done, fakeAgent, fakeOpener, makeRepo, write, writeSpec, type Step } from './helpers.ts';
@@ -168,7 +169,7 @@ test('the local display names a job by its PR, links it, has people pages, and s
   assert.equal(personNotice('ana', false, undefined, true), undefined);
   assert.match(personNotice('ana', false, 404, true) ?? '', /No job on this machine names ana/);
   const page = jobView({ at: d.at, stages: d.stages, job: d.jobs[0]!, log: '' }, 0, true);
-  assert.match(page.noLog, /went to the terminal it ran in/);
+  assert.match(page.noLog, /kept no log/);
 });
 
 // Protects: one bad request does not end the display. Fails when: an unreadable run log ends the server, or answers with anything but a 500 and a one-line reason.
@@ -299,6 +300,49 @@ test('a local fix carries the id and title of the job it fixes', () => {
   const jobs = localJobs();
   const pick = (id: string) => { const j = jobs.find((x) => x.id === id)!; return [j.fix_of, j.fix_of_title]; };
   assert.deepEqual([pick('opens-pr'), pick('fixes-pr')], [[undefined, undefined], ['opens-pr', 'Title opens-pr']]);
+});
+
+// ---- jobs of this machine's queue
+
+// Protects: criterion 6, a queued or waiting job is on the display with its project and what it holds for. Fails when: it is missing, shows as "unknown project", or loses its reason.
+test('the local display lists queued and waiting jobs with their project and why they are held', () => {
+  const queue = openLocalQueue();
+  const base = { repo: '/work/shop', spec: '/work/shop/docs/specs/a.md', title: 'Held spec', flags: [], submitted: '2026-11-17T10:00:00.000Z' };
+  const room = queue.add({ ...base, state: 'queued', waiting: 'only 1.0 GB is free; a job needs 4g', queued: base.submitted });
+  const wait = queue.add({ ...base, title: 'Later spec', state: 'waiting', waiting: "waiting for a.md's pull request", queued: base.submitted });
+  queue.close();
+  const jobs = localJobs();
+  const pick = (id: number) => jobs.find((j) => j.id === id)!;
+  assert.deepEqual([pick(room.id).state, pick(room.id).repo, pick(room.id).waiting], ['queued', 'shop', 'only 1.0 GB is free; a job needs 4g']);
+  assert.deepEqual([pick(wait.id).state, pick(wait.id).repo, pick(wait.id).waiting], ['waiting', 'shop', "waiting for a.md's pull request"]);
+});
+
+// Protects: criterion 6, a job's output is on its page and its project is known before it has state. Fails when: the loop's log is not shown, the job shows twice, or a job that died in setup is "unknown project".
+test('a queue job that stopped in setup shows its project and its log once, under its folder', async () => {
+  saveProgress('died-in-setup', 'setup', 'script');
+  writeJson(join(jobDir('died-in-setup'), 'progress.json'), { ...loadProgress('died-in-setup')!, pid: deadPid() });
+  const queue = openLocalQueue();
+  const job = queue.add({ state: 'ended', outcome: 'failed', animus_job: 'died-in-setup', repo: '/work/shop', spec: '/nope.md', title: 'Died', flags: [], submitted: '2026-11-17T10:00:00.000Z' });
+  queue.close();
+  write(animusHome(), `queue/${job.id}/log.txt`, 'job died-in-setup: Died\nsetup blew up\n');
+  const shown = localJobs().filter((j) => j.id === 'died-in-setup' || j.id === job.id);
+  const s = await served();
+  const page = (await (await s.get('/jobs/died-in-setup/page-data')).json()) as JobPage;
+  const byQueueId = (await s.get(`/jobs/${job.id}/page-data`)).status;
+  s.stop();
+  assert.deepEqual(shown.map((j) => [j.id, j.repo]), [['died-in-setup', 'shop']]);
+  assert.equal(page.log, 'job died-in-setup: Died\nsetup blew up\n');
+  assert.equal(byQueueId, 200);
+});
+
+// Protects: criterion 3 and 6, a job queued again keeps its queue state on the display. Fails when: an answered job with a folder still shows as ended with its question, or loses the room reason.
+test('a job with a folder that is queued again shows as queued with its room reason', () => {
+  seed('answered', { outcome: 'needs-input' });
+  const queue = openLocalQueue();
+  const job = queue.add({ state: 'queued', animus_job: 'answered', repo: '/work/shop', spec: '/nope.md', title: 'Answered', flags: [], submitted: '2026-11-17T10:00:00.000Z', queued: '2026-11-17T11:00:00.000Z', waiting: 'only 1.0 GB is free; a job needs 4g' });
+  queue.close();
+  const shown = localJobs().filter((j) => j.id === 'answered' || j.id === String(job.id));
+  assert.deepEqual(shown.map((j) => [j.id, j.state, j.outcome, j.question, j.waiting]), [['answered', 'queued', undefined, undefined, 'only 1.0 GB is free; a job needs 4g']]);
 });
 
 // Protects: criteria 1, 2 and 9 on the local display. Fails when: the git name is not the person, tokens of a job's runs are not added, a person's page lacks their usage, or an unknown person is not a 404.
