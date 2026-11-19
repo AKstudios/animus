@@ -12,6 +12,8 @@ export type Finding = {
   /** A product or intent question the spec does not settle: for the person, not the implementer. */
   for_person?: boolean;
   cause?: string;
+  /** The acceptance criterion (from 1) this finding is about. */
+  criterion?: number;
 };
 
 export type Verdict = { criterion: number; met: boolean; proof: string };
@@ -81,7 +83,12 @@ export const REPORT_SCHEMA = {
 export function asReview(output: unknown): Review | undefined {
   const o = output as Partial<Review> | undefined;
   if (!o || typeof o !== 'object' || !Array.isArray(o.findings)) return undefined;
-  return { status: o.status === 'not-ready' ? 'not-ready' : 'reviewed', summary: o.summary ?? '', criteria: Array.isArray(o.criteria) ? o.criteria : [], findings: o.findings };
+  const criteria = Array.isArray(o.criteria) ? o.criteria : [];
+  // An unmet criterion is a blocker whether or not the reviewer filed one: a blocker that gives its number already covers it.
+  const unmet = criteria
+    .filter((v) => v.met === false && !o.findings!.some((f) => f.criterion === v.criterion))
+    .map((v): Finding => ({ severity: 'blocker', criterion: v.criterion, problem: `Criterion ${v.criterion} is not met: ${v.proof}`, cause: 'implementation' }));
+  return { status: o.status === 'not-ready' ? 'not-ready' : 'reviewed', summary: o.summary ?? '', criteria, findings: [...o.findings, ...unmet] };
 }
 
 export function asReport(output: unknown): Report | undefined {
