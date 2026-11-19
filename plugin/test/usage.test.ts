@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { loadFactory } from '../src/profiles.ts';
 import type { Run } from '../src/log.ts';
-import { personOf, profilesInfo, tokensByJob, usageOf } from '../src/usage.ts';
+import { personNamer, personOf, profilesInfo, tokensByJob, usageOf } from '../src/usage.ts';
 
 const tok = (input: number, output = 0, cache_read = 0, cache_write = 0) => ({ input, output, cache_read, cache_write });
 const agent = (role: string, model: string, cost_usd: number, tokens: ReturnType<typeof tok>) => ({ role, model, cost_usd, tokens, stage: role, tier: 'fast', effort: '', ok: true, status: 'ok', ms: 0, turns: 0 });
@@ -46,4 +46,11 @@ test('the profiles explain each size, difficulty and type that runs, and the mod
   assert.deepEqual(info.types.map((t) => t.name), Object.keys(f.types).filter((n) => !later.includes(n)));
   assert.deepEqual(info.models, Object.fromEntries(Object.entries(f.providers[f.provider]!)));
   assert.deepEqual(info.difficulties.map((d) => d.name), Object.keys(f.difficulties));
+});
+
+// Protects: criterion 3, one name per person. Fails when: a nameless record keeps the part before the @ beside a named one, or git's name is not used for the machine's email.
+test('a nameless record takes the name of another with its email, else git\'s for the machine\'s email, else the part before the @', () => {
+  const rows = [{ submitter: 'Ana@x.io' }, { submitter: 'ana@x.io', submitter_name: 'Ana Lee' }, { submitter: 'me@x.io' }, { submitter: 'other@x.io' }];
+  const name = personNamer(rows, { name: 'Me Myself', email: 'me@x.io' });
+  assert.deepEqual(rows.map((r) => name(r)), ['Ana Lee', 'Ana Lee', 'Me Myself', 'other']);
 });

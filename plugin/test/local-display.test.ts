@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { spawn, spawnSync } from 'node:child_process';
-import { appendFileSync, mkdirSync, mkdtempSync, rmSync } from 'node:fs';
+import { appendFileSync, mkdirSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import http from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { hostname, tmpdir } from 'node:os';
@@ -15,7 +15,7 @@ import { view } from '../display/view.ts';
 import { listenLocal, localJobs, localServer } from '../src/local-display.ts';
 import { openLocalQueue } from '../src/local-queue.ts';
 import { outcomesFile } from '../src/outcomes.ts';
-import { animusHome, appendRun, jobDir, loadProgress, saveProgress, saveState, writeJson, type JobState, type Run } from '../src/log.ts';
+import { animusHome, appendRun, jobDir, loadProgress, loadState, saveProgress, saveState, writeJson, type JobState, type Run } from '../src/log.ts';
 import { runJob } from '../src/pipeline.ts';
 import { git } from '../src/proc.ts';
 import { clean, cli, deps, done, fakeAgent, fakeOpener, makeRepo, write, writeSpec, type Step } from './helpers.ts';
@@ -73,12 +73,12 @@ test('an ended local job shows its run log row, with no way to resume', () => {
 
 // Protects: a person is shown by name. Fails when the address, or the git name the run recorded, is not what shows.
 test('a local job shows its person by the recorded git name, else the part of the address before the @', () => {
-  for (const [job, extra] of [['named', { submitter_name: 'Ana Lima' }], ['unnamed', {}]] as const) {
+  for (const [job, who, extra] of [['named', 'ana@example.com', { submitter_name: 'Ana Lima' }], ['unnamed', 'bob@example.com', {}]] as const) {
     saveState({ job, repo: '/work/shop', spec: '', workspace: {} as JobState['workspace'], plan: {} as JobState['plan'], outcome: 'pr' });
-    appendRun({ job, repo: '/work/shop', submitter: 'ana@example.com', title: job, started: '2026-01-01T00:00:00.000Z', ended: '2026-01-01T00:05:00.000Z', outcome: 'pr', cost_usd: 1, ...extra } as Run);
+    appendRun({ job, repo: '/work/shop', submitter: who, title: job, started: '2026-01-01T00:00:00.000Z', ended: '2026-01-01T00:05:00.000Z', outcome: 'pr', cost_usd: 1, ...extra } as Run);
   }
   const person = (id: string) => localJobs().find((j) => j.id === id)!.person;
-  assert.deepEqual([person('named'), person('unnamed')], ['Ana Lima', 'ana']);
+  assert.deepEqual([person('named'), person('unnamed')], ['Ana Lima', 'bob']);
 });
 
 // Protects: a running job's page names its person and its start. Fails when person is empty or started is missing while cost stays unknown.
@@ -359,4 +359,33 @@ test('local people are named by git user name, with tokens and usage, and an unk
   assert.deepEqual([job.person, job.tokens, job.started], ['Zed Quill', 42, '2026-01-01T01:00:00.000Z']);
   assert.ok(((await people.json()) as { people: { name: string }[] }).people.some((p) => p.name === 'Zed Quill'));
   assert.deepEqual([person.status, ((await person.json()) as { usage: { runs: number } }).usage.runs, nobody.status], [200, 2, 404]);
+});
+
+// Protects: criterion 4, a running job names who started it from its own files. Fails when: it takes the newest run of the whole log, whoever wrote it.
+test('a running job is its starter\'s, even when the newest run in the log is someone else\'s', async () => {
+  seed('mine-running');
+  saveState({ ...loadState('mine-running')!, submitter: 'ola@example.com', submitter_name: 'Ola Berg' });
+  appendRun({ job: 'theirs', repo: '/work/shop', submitter: 'zed@example.com', submitter_name: 'Zed Quill', title: 'Theirs', started: '2099-01-01T00:00:00.000Z', ended: '2099-01-01T00:05:00.000Z', outcome: 'pr', cost_usd: 1 } as Run);
+  const s = await served();
+  const page = (await (await s.get('/jobs/mine-running/page-data')).json()) as JobPage;
+  const display = (await (await s.get('/display')).json()) as Display;
+  s.stop();
+  assert.deepEqual([localJobs().find((j) => j.id === 'mine-running')!.person, page.job.person], ['Ola Berg', 'Ola Berg']);
+  assert.deepEqual([typeof display.version, display.pid], ['string', process.pid]);
+});
+
+// Protects: criterion 3 on the local display, one name per email across jobs. Fails when: a record without a name shows as the part before the @ beside a named one.
+test('records with and without a name for one email are one person here', () => {
+  const row = (job: string, name?: string) => ({ job, repo: '/work/shop', submitter: 'kim@example.com', ...(name ? { submitter_name: name } : {}), title: job, started: '2026-01-01T00:00:00.000Z', ended: '2026-01-01T00:05:00.000Z', outcome: 'pr', cost_usd: 1 }) as Run;
+  for (const job of ['kim-old', 'kim-new']) saveState({ job, repo: '/work/shop', spec: '', workspace: {} as JobState['workspace'], plan: {} as JobState['plan'], outcome: 'pr' });
+  appendRun(row('kim-old'));
+  appendRun(row('kim-new', 'Kim Park'));
+  assert.deepEqual(['kim-old', 'kim-new'].map((id) => localJobs().find((j) => j.id === id)!.person), ['Kim Park', 'Kim Park']);
+});
+
+// Protects: criterion 2, People asks for its data on the first load. Fails when: the first fetch waits for /display to say it is local, so the list is blank until the second refresh.
+test('the page asks for the people list without waiting for /display', () => {
+  const app = readFileSync(join(import.meta.dirname, '..', 'display', 'app.ts'), 'utf8');
+  const read = /async function readPeople[\s\S]*?\n}\n/.exec(app)![0];
+  assert.doesNotMatch(read, /state\.display/);
 });

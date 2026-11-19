@@ -22,7 +22,7 @@ import { resolveAfter } from './after.ts';
 import { loopConfig, personalFor, readSkillsFile, skillsForRole, snapshotSkills, whereToRun, type PersonalSkill, type Where } from './personal.ts';
 import { accept, describeLessons, dismiss, readLessons } from './lessons.ts';
 import { runRetro } from './retro.ts';
-import { listenLocal, localServer } from './local-display.ts';
+import { claimLocal, gitIdentity, localServer } from './local-display.ts';
 import { enqueue, ensureLoop, openLocalQueue, queueFile, type LocalQueue } from './local-queue.ts';
 import { answerLocal, cancelLocal, describeLocalJob, describeLocalJobs, localJob, logTail, needsYou } from './local-status.ts';
 import { logFile, runLoop } from './local-loop.ts';
@@ -567,8 +567,11 @@ async function main(argv: string[]): Promise<number> {
       }
       if (command === 'ui' && !positionals.length) {
         const server = localServer();
-        const url = `http://127.0.0.1:${await listenLocal(server, LOCAL_PORT)}`;
+        gitIdentity();
+        const { port, reused } = await claimLocal(server, LOCAL_PORT, (m) => console.error(m));
+        const url = `http://127.0.0.1:${port}`;
         openPage(url);
+        if (reused) { say(`The jobs this machine ran, at ${url} (already running).`); return 0; }
         say(`The jobs this machine ran, at ${url}. Press Ctrl-C to stop.`);
         // Whether each PR merged or closed comes from outcomes.json: read GitHub now and every ten minutes, in a process of its own so the display never waits on it.
         const outcomes = () => { if (onPath('gh')) spawn(process.execPath, [...process.execArgv, process.argv[1]!, 'outcomes'], { stdio: 'ignore' }).on('error', () => {}); };

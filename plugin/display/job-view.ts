@@ -77,7 +77,7 @@ export type TimelineSession = {
 
 /** One label's row in the explainer: its name, what it runs, and whether this job has it. */
 export type ExplainRow = { name: string; text: string; runs: string; on: boolean };
-export type Explainer = { models: string; groups: { title: string; rows: ExplainRow[] }[]; /** The agents this job ran, as role · model (tier). */ used: string[] };
+export type Explainer = { models: string; /** This job's own labels, each in one plain sentence saying what it changes in the run. */ mine: { k: string; v: string; text: string }[]; groups: { title: string; rows: ExplainRow[] }[]; /** The agents this job ran, as role · model (tier). */ used: string[] };
 
 export const OUTCOMES: Record<string, string> = { pr: 'pull request', 'draft-pr': 'draft pull request', 'dry-run': 'dry run', 'needs-input': 'needs input', failed: 'failed' };
 const CHECK: Record<string, [string, Tone]> = { ok: ['✓', 'ink'], fail: ['✗', 'fail'], skip: ['skip', 'mute'] };
@@ -197,7 +197,23 @@ function explainerOf(p: ProfilesInfo, labels: { k: string; v: string }[], agents
       ...(x.prove === 'fails-on-base' ? ['its tests must fail on the base first'] : []),
     ].join(' · ') || 'the standard path',
   }));
+  const tier = (t: string) => `a ${t}-tier model (${p.models[t] ?? t})`;
+  const sentence = (k: string, v: string): string => {
+    if (k === 'size') {
+      const x = p.sizes.find((z) => z.name === v);
+      const parts = [...(p.planner?.sizes.includes(v) ? ['a planner cuts the work into slices'] : []), ...(x?.review && x.review !== 'none' ? [`${tier(x.review)} reviews it`] : [])];
+      return parts.join(', then ') || 'no planner and no extra review: the spec goes to the implementer as it is';
+    }
+    if (k === 'difficulty') {
+      const x = p.difficulties.find((z) => z.name === v);
+      return x ? `${tier(x.tier)} implements each slice, at ${x.effort} effort${x.review ? `, and ${tier(x.review)} always reviews it` : ''}` : '';
+    }
+    const x = p.types.find((z) => z.name === v);
+    const who = x?.reviewer ? `a ${x.reviewer.replace(/-reviewer$/, '').replace(/^ui$/, 'UI')} reviewer ${x.evidence?.includes('screenshots') ? 'checks screenshots of the pages' : 'reviews the change'}` : '';
+    return [who, ...(x?.prove === 'fails-on-base' ? ['its tests must fail on the base first'] : [])].filter(Boolean).join('; ') || 'it takes the standard path';
+  };
   return {
+    mine: labels.map((l) => ({ ...l, text: sentence(l.k, l.v) })).filter((l) => l.text),
     models: Object.entries(p.models).map(([tier, m]) => `${tier} = ${m}`).join(' · '),
     groups: [{ title: 'Size', rows: sizes }, { title: 'Difficulty', rows: difficulties }, { title: 'Type', rows: types }],
     used: [...new Set(agents.map((a) => `${a.role} · ${a.model || a.tier} (${a.tier})`))],

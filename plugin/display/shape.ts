@@ -124,6 +124,9 @@ export type DisplayRepo ={ name: string; base?: string; gates?: string[] };
 
 export type Display = {
   name: string;
+  /** The local display's release and process id, so `animus ui` can tell an older one from itself. */
+  version?: string;
+  pid?: number;
   /** The source's clock, so a display with another clock still counts elapsed time right. */
   at: string;
   slots: number;

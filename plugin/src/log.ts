@@ -133,6 +133,9 @@ export type JobState = {
   job: string;
   repo: string;
   spec: string;
+  /** Who started the job, as the run log will name them: lets the display name a job that has no run row yet. */
+  submitter?: string;
+  submitter_name?: string;
   /** The spec file the job was started from; spec is the job's own copy of it. */
   source?: string;
   workspace: Workspace;
