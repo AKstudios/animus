@@ -11,6 +11,7 @@ import { projectDir, type SetupRun } from '../src/projects.ts';
 import { queueProvision } from '../src/provision.ts';
 import { runProvision } from '../src/provision-loop.ts';
 import { openStore } from '../src/store.ts';
+import { supervise } from '../src/supervisor.ts';
 
 const git = (cwd: string, ...args: string[]) => execFileSync('git', args, { cwd, encoding: 'utf8' }).trim();
 const DOCKERFILE = 'ARG ANIMUS_JOB\nFROM $ANIMUS_JOB\n';
@@ -43,7 +44,7 @@ function provisioning() {
   };
   /** What the job's branch holds beyond the base: the files it changed. */
   const changedOnBranch = () => git(project.dir, 'diff', '--name-only', 'origin/main', `animus/provision-${job.id}`).split('\n').filter(Boolean);
-  return { run, published, changedOnBranch, job, project };
+  return { run, published, changedOnBranch, job, project, store, home };
 }
 
 const answer = (status: string, extra = {}) => ({ output: { status, summary: 'Installed curl.', ...extra } });
@@ -101,4 +102,23 @@ test('an agent that says it is not an environment problem ends the job failed wi
   assert.match(result.reason!, /not an environment problem: the test fails on its own: it asserts 2 \+ 2 is 5/);
   assert.deepEqual(p.changedOnBranch(), []);
   assert.deepEqual(p.published, []);
+});
+
+// Protects: Helix starts a queued provision job for a project that is still failed, through its own launch, and records the pull request. Fails when: the queue leaves the job unstarted because the project is not ready, or runs it as `animus run`.
+test('Helix starts a provision job on a failed project with the provision launch and records its pull request', async (t) => {
+  const p = provisioning();
+  const result = JSON.stringify({ outcome: 'pr', pr: 'https://github.com/acme/app/pull/9', cost_usd: 0 });
+  const supervisor = supervise({
+    store: p.store, config: { host: '127.0.0.1', port: 0, slots: 1 }, home: p.home,
+    launch: () => ({ command: process.execPath, args: ['-e', 'process.exit(3)'] }),
+    provision: () => ({ command: process.execPath, args: ['-e', 'console.log(process.argv[1])', result] }),
+  });
+  t.after(() => { supervisor.stop(); p.store.close(); });
+  supervisor.wake();
+  let ended = p.store.get(p.job.id);
+  for (let i = 0; i < 500 && ended?.state !== 'ended'; i++) {
+    await new Promise((r) => { setTimeout(r, 20); });
+    ended = p.store.get(p.job.id);
+  }
+  assert.deepEqual([ended?.state, ended?.outcome, ended?.pr], ['ended', 'pr', 'https://github.com/acme/app/pull/9']);
 });
