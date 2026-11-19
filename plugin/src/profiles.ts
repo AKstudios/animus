@@ -17,8 +17,8 @@ export const DIFFICULTIES = ['routine', 'hard', 'risky'] as const;
 export type Difficulty = (typeof DIFFICULTIES)[number];
 
 type Run = { tier: Tier; effort: string };
-type SizeProfile = { setup?: string; gates?: string; review?: string; reject?: string };
-type DifficultyProfile = Run & { review?: Tier; sizes?: Record<string, Partial<Run>> };
+type SizeProfile = { looks_like?: string; setup?: string; gates?: string; review?: string; reject?: string };
+type DifficultyProfile = Run & { signals?: string; review?: Tier; sizes?: Record<string, Partial<Run>> };
 type TypeProfile = { setup?: string; reviewer?: string; evidence?: string[]; prove?: string; later?: string };
 
 export type Factory = {

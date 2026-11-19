@@ -11,6 +11,8 @@ import { folderParts, read, shotFile } from '../../plugin/src/job-folder.ts';
 import { afterOf, fixRounds, insightsData, lessonsCiting } from '../../plugin/src/insights-data.ts';
 import { animusHome, readRuns, STAGES } from '../../plugin/src/log.ts';
 import { readOutcomes } from '../../plugin/src/outcomes.ts';
+import { loadFactory } from '../../plugin/src/profiles.ts';
+import { profilesInfo, tokensByJob, usageOf } from '../../plugin/src/usage.ts';
 import { loadProfile, PROFILE_PATH } from '../../plugin/src/profile.ts';
 import { readyRepos, type Config } from './config.ts';
 import type { HelixJob, Person, Store } from './store.ts';
@@ -38,20 +40,29 @@ function repoOf(name: string, dir: string): DisplayRepo {
   return repo;
 }
 
-/** Each person's jobs' fix rounds from their run logs, by person and Animus job, for the jobs whose gates ran. */
-function fixOf(opts: { store: Store; supervisor: Supervisor }): (j: HelixJob) => { fix_rounds?: number; fix_of_title?: string } {
+/** Each person's jobs' fix rounds (for the jobs whose gates ran) and tokens from their run logs, by person and Animus job. */
+function fixOf(opts: { store: Store; supervisor: Supervisor }): (j: HelixJob) => { fix_rounds?: number; fix_of_title?: string; tokens?: number } {
   const rounds = new Map<string, number>();
+  const tokens = new Map<string, number>();
   for (const person of Object.keys(opts.store.people())) {
-    for (const [job, n] of fixRounds(readRuns(join(opts.supervisor.animusHome(person), 'runs.jsonl')))) rounds.set(`${person}\u0000${job}`, n);
+    const runs = readRuns(join(opts.supervisor.animusHome(person), 'runs.jsonl'));
+    for (const [job, n] of fixRounds(runs)) rounds.set(`${person}\u0000${job}`, n);
+    for (const [job, n] of tokensByJob(runs)) tokens.set(`${person}\u0000${job}`, n);
   }
   return (j) => {
-    const n = rounds.get(`${j.person}\u0000${j.animus_job}`);
+    const key = `${j.person}\u0000${j.animus_job}`;
+    const [n, t] = [rounds.get(key), tokens.get(key)];
     const title = j.fix_of === undefined ? undefined : opts.store.get(j.fix_of)?.title;
-    return { ...(n === undefined ? {} : { fix_rounds: n }), ...(title ? { fix_of_title: title } : {}) };
+    return { ...(n === undefined ? {} : { fix_rounds: n }), ...(t ? { tokens: t } : {}), ...(title ? { fix_of_title: title } : {}) };
   };
 }
 
-function jobOf(job: HelixJob, supervisor: Supervisor, fix: (j: HelixJob) => { fix_rounds?: number; fix_of_title?: string } = () => ({})): DisplayJob {
+/** What every label means, for the job page; nothing when the profiles do not read. */
+function profilesOf(): { profiles?: ReturnType<typeof profilesInfo> } {
+  try { return { profiles: profilesInfo(loadFactory()) }; } catch { return {}; }
+}
+
+function jobOf(job: HelixJob, supervisor: Supervisor, fix: (j: HelixJob) => { fix_rounds?: number; fix_of_title?: string; tokens?: number } = () => ({})): DisplayJob {
   const { spec: _spec, pid: _pid, answer, draft: _draft, interrupted: _interrupted, ...rest } = job;
   const shown = { ...rest, ...fix(job) };
   if (job.state === 'queued' && job.animus_job) return { ...shown, resumed: answer ? 'answer' : 'restart' };
@@ -89,7 +100,7 @@ function rowOf(store: Store, jobs: HelixJob[], name: string, p?: Person): Person
  * show) newest first, the PERSON_JOBS before job `before`, and their activity.
  * Someone who left is still known by their jobs and activity.
  */
-export function personPage(opts: { store: Store }, name: string, before = Infinity): PersonPage | undefined {
+export function personPage(opts: { store: Store; supervisor?: Pick<Supervisor, 'animusHome'> }, name: string, before = Infinity): PersonPage | undefined {
   const { store } = opts;
   const p = store.people()[name];
   const jobs = store.list(-1).reverse();
@@ -104,7 +115,15 @@ export function personPage(opts: { store: Store }, name: string, before = Infini
     jobList: older.slice(0, PERSON_JOBS).map(({ id, title, repo, state, submitted, outcome, pr, cost_usd }) => ({ id, title, repo, state, submitted, ...(outcome ? { outcome } : {}), ...(pr ? { pr } : {}), ...(cost_usd !== undefined ? { cost_usd } : {}) })),
     more: older.length > PERSON_JOBS,
     activity: activity.map(({ at, kind, detail }) => ({ at, kind, ...(detail ? { detail } : {}) })),
+    ...usage(opts, name),
   };
+}
+
+/** What a person's runs used, from their own run log; nothing where Helix keeps none for them. */
+function usage(opts: { supervisor?: Pick<Supervisor, 'animusHome'> }, name: string): { usage?: PersonPage['usage'] } {
+  if (!opts.supervisor) return {};
+  const runs = readRuns(join(opts.supervisor.animusHome(name), 'runs.jsonl'));
+  return runs.length ? { usage: usageOf(runs, Date.now()) } : {};
 }
 
 /**
@@ -119,7 +138,7 @@ export function jobPage(opts: { store: Store; supervisor: Supervisor }, id: numb
   const open = github.prs.find((p) => p.job === id);
   const closed = github.closed.find((c) => c.job === id);
   const pr: Partial<JobPage> = open ? { pr_state: 'open', pr_opened: open.created } : closed ? { pr_state: closed.merged ? 'merged' : 'closed', ...(closed.merged ? { pr_merged: closed.at } : {}) } : {};
-  const page: JobPage = { at: new Date().toISOString(), stages: STAGES, job: jobOf(job, opts.supervisor), ...pr, ...(spec !== undefined ? { spec } : {}), log: opts.supervisor.log(id, Infinity) };
+  const page: JobPage = { at: new Date().toISOString(), stages: STAGES, job: jobOf(job, opts.supervisor, fixOf(opts)), ...pr, ...profilesOf(), ...(spec !== undefined ? { spec } : {}), log: opts.supervisor.log(id, Infinity) };
   const dir = folderOf(opts.supervisor, job);
   if (!job.animus_job || !dir) return page;
   const home = opts.supervisor.animusHome(job.person);

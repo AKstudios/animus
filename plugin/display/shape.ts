@@ -30,6 +30,8 @@ export type DisplayJob = {
   reason?: string;
   question?: string;
   cost_usd?: number;
+  /** Every token its runs' agent sessions used: input, output and cache together. */
+  tokens?: number;
   /** Times its gates sent the work back; left out for a job whose gates have not run. */
   fix_rounds?: number;
   /** A stopped job (its process is gone, with no outcome): the command that picks it up again. */
@@ -83,13 +85,31 @@ export type JobPage = {
   lessons?: InsightsLesson[];
   /** What the job's run has printed, all of it. */
   log: string;
+  /** What every label means: the factory's profiles, for the Labels panel's explainer. */
+  profiles?: ProfilesInfo;
+};
+
+/** Input, output and cache tokens, as the run log keeps them. */
+export type TokenCount = { input: number; output: number; cache_read: number; cache_write: number };
+
+/** The factory's profiles as the display explains them: which models each tier means and what every size, difficulty and type runs. */
+export type ProfilesInfo = {
+  provider: string;
+  /** Tier to model, for the provider in use. */
+  models: Record<string, string>;
+  planner?: { tier: string; effort: string; sizes: string[] };
+  sizes: { name: string; looks_like?: string; setup?: string; gates?: string; review?: string }[];
+  difficulties: { name: string; signals?: string; tier: string; effort: string; review?: string; sizes?: Record<string, { tier?: string; effort?: string }> }[];
+  /** Only the types that run. */
+  types: { name: string; reviewer?: string; evidence?: string[]; prove?: string }[];
 };
 
 /** A job's runs put together, for its page: fix rounds, each gate run's flaky checks, each agent session with its calls, each review finding's fate, and `animus tools` as text. */
 export type JobRun = {
   fix_rounds: number;
   gates: { flaky: string[] }[];
-  agents: { role: string; tier: string; cost_usd: number; calls: number; errors: number }[];
+  /** Each agent session in the order it ran, with its stage, model, wall time and tokens. */
+  agents: { stage: string; role: string; tier: string; model: string; effort: string; ok: boolean; ms: number; turns: number; tokens: TokenCount; cost_usd: number; calls: number; errors: number }[];
   findings: { round: number; severity: string; fate: 'fixed' | 'open' | 'not-acted-on' }[];
   tools: { calls: number; errors: number; text: string };
 };
@@ -114,7 +134,7 @@ export type Display = {
   prs?: DisplayPr[];
   /** The latest closed PRs of those jobs, as GitHub lists them; a job not here has no answer from GitHub. */
   closed?: DisplayClosed[];
-  /** Set by the local display (`animus ui`): one person's own jobs, no sign-in and no people pages, listed by project rather than as a queue. */
+  /** Set by the local display (`animus ui`): this machine's jobs, no sign-in, listed by project rather than as a queue. */
   local?: true;
 };
 
@@ -135,8 +155,21 @@ export type PersonRow = {
 
 export type PeoplePage = { at: string; people: PersonRow[] };
 
-/** A job on a person's page: only Helix has people pages, so its id is Helix's number. */
-export type PersonJob = { id: number } & Pick<DisplayJob, 'title' | 'repo' | 'state' | 'submitted'> & Partial<Pick<DisplayJob, 'outcome' | 'pr' | 'cost_usd'>>;
+/** A job on a person's page: Helix's number, or a local job's own id. */
+export type PersonJob = { id: number | string } & Pick<DisplayJob, 'title' | 'repo' | 'state' | 'submitted'> & Partial<Pick<DisplayJob, 'outcome' | 'pr' | 'cost_usd' | 'tokens'>>;
+
+/** What a person's runs used: cost and tokens in all, by model, by role, and by day over the last USAGE_DAYS days. */
+export type Usage = {
+  runs: number;
+  cost_usd: number;
+  tokens: TokenCount;
+  models: { model: string; sessions: number; cost_usd: number; tokens: number }[];
+  roles: { role: string; sessions: number; cost_usd: number; tokens: number }[];
+  days: { day: string; cost_usd: number; tokens: number }[];
+};
+
+/** How many days a person's page charts. */
+export const USAGE_DAYS = 30;
 
 /** The most jobs a person's page is sent at a time. */
 export const PERSON_JOBS = 30;
@@ -155,6 +188,8 @@ export type PersonPage = PersonRow & {
   more: boolean;
   /** Everything they did that Helix kept, newest first. */
   activity: { at: string; kind: string; detail?: Record<string, string | number> }[];
+  /** What their runs used, from their run log; left out where none is kept. */
+  usage?: Usage;
 };
 
 /** What a job's pull request became, as the Jobs page knows it: left out when GitHub has not said. */
@@ -174,7 +209,7 @@ export type JobListPage = { at: string; jobs: ListJob[]; more: boolean; totals: 
 export type ListJob = DisplayJob & { pr_state?: PrState; pr_merged?: string };
 
 /** Everything the filters match, not only the rows sent. */
-export type JobTotals = { jobs: number; merged: number; failed: number; cost_usd: number };
+export type JobTotals = { jobs: number; merged: number; failed: number; cost_usd: number; tokens: number };
 
 /** One run-log line as the Insights page needs it: the task class, how it ended, what it cost, its gates, agents and review. */
 export type InsightsRun = {

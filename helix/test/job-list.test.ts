@@ -98,12 +98,12 @@ test('/job-list totals cover the whole filter, and the table says each row\'s da
   const all = await h.list();
   const site = await h.list('?project=site');
   h.stop();
-  assert.deepEqual(all.totals, { jobs: 40, merged: 1, failed: 33, cost_usd: 6 });
-  assert.deepEqual(site.totals, { jobs: 2, merged: 0, failed: 0, cost_usd: 0 });
+  assert.deepEqual(all.totals, { jobs: 40, merged: 1, failed: 33, cost_usd: 6, tokens: 0 });
+  assert.deepEqual(site.totals, { jobs: 2, merged: 0, failed: 0, cost_usd: 0, tokens: 0 });
   const v = jobListView(all, false, Date.parse('2026-11-17T12:00:00Z'));
   const why = Object.fromEntries(v.rows.map((r) => [r.title, r.why]));
   assert.deepEqual([why['Asks'], why['PR job 41'], why['PR job 61'], why['PR job 51']], ['It stopped to ask, and did not say what.', 'Waiting for review', 'Closed without merging', undefined]);
-  assert.deepEqual(v.totals, { jobs: '40', merged: '1', mergedShare: '3%', failed: '33', spent: '$6.00', perMerged: '$6.00' });
+  assert.deepEqual(v.totals, { jobs: '40', merged: '1', mergedShare: '3%', failed: '33', spent: '$6.00', tokens: '0', perMerged: '$6.00' });
   assert.equal(v.days[0]!.at, 0);
 });
 
@@ -112,14 +112,14 @@ test('day headings say Today, Yesterday, then the weekday and date', () => {
   const now = new Date(2026, 10, 18, 15).getTime();
   const at = (d: number, h: number) => new Date(2026, 10, d, h).toISOString();
   const row = (id: number, submitted: string) => ({ id, state: 'ended', person: 'a', repo: 'r', title: `J${id}`, submitted, outcome: 'failed' }) as const;
-  const page: JobListPage = { at: new Date(now).toISOString(), more: false, totals: { jobs: 4, merged: 0, failed: 4, cost_usd: 0 }, jobs: [row(4, at(18, 9)), row(3, at(18, 8)), row(2, at(17, 20)), row(1, at(16, 10))] };
+  const page: JobListPage = { at: new Date(now).toISOString(), more: false, totals: { jobs: 4, merged: 0, failed: 4, cost_usd: 0, tokens: 0 }, jobs: [row(4, at(18, 9)), row(3, at(18, 8)), row(2, at(17, 20)), row(1, at(16, 10))] };
   assert.deepEqual(jobListView(page, true, now).days, [{ at: 0, heading: 'Today' }, { at: 2, heading: 'Yesterday' }, { at: 3, heading: 'Mon 16 Nov' }]);
 });
 
 // Protects: criterion 4, To merge. Fails when: it is not the merge time less the job's end, or is not — when unknown.
 test('To merge is the PR\'s merge time less the job\'s end, and — when unknown', () => {
   const base = { id: 1, state: 'ended', person: 'a', repo: 'r', title: 'T', submitted: '2026-11-17T10:00:00Z', started: '2026-11-17T10:00:00Z', ended: '2026-11-17T10:30:00Z', outcome: 'pr', pr: pull(9), cost_usd: 2 } as const;
-  const page = (jobs: JobListPage['jobs']): JobListPage => ({ at: '2026-11-17T20:00:00Z', more: false, totals: { jobs: 2, merged: 1, failed: 0, cost_usd: 4 }, jobs });
+  const page = (jobs: JobListPage['jobs']): JobListPage => ({ at: '2026-11-17T20:00:00Z', more: false, totals: { jobs: 2, merged: 1, failed: 0, cost_usd: 4, tokens: 0 }, jobs });
   const rows = jobListView(page([{ ...base, pr_state: 'merged', pr_merged: '2026-11-17T13:40:00Z' }, { ...base, id: 2, pr_state: 'open' }]), false).rows;
   assert.deepEqual(rows.map((r) => [r.took, r.cost, r.toMerge]), [['30m', '$2.00', '3h 10m'], ['30m', '$2.00', '—']]);
 });
@@ -127,7 +127,7 @@ test('To merge is the PR\'s merge time less the job\'s end, and — when unknown
 // Protects: the Fix rounds column. Fails when: a job whose gates never ran shows 0, or a count is lost.
 test('the Jobs table shows each job\'s fix rounds, and a dash before the gates ran', () => {
   const job = (id: number, over: Partial<ListJob>): ListJob => ({ id, person: 'ana', repo: 'app', title: `J${id}`, submitted: `2026-11-17T10:0${id}:00Z`, state: 'ended', outcome: 'failed', ...over });
-  const rows = jobListView({ at: '2026-11-17T12:00:00Z', jobs: [job(1, { fix_rounds: 2 }), job(2, { fix_rounds: 0 }), job(3, {})], more: false, totals: { jobs: 3, merged: 0, failed: 3, cost_usd: 0 } } as JobListPage, false).rows;
+  const rows = jobListView({ at: '2026-11-17T12:00:00Z', jobs: [job(1, { fix_rounds: 2 }), job(2, { fix_rounds: 0 }), job(3, {})], more: false, totals: { jobs: 3, merged: 0, failed: 3, cost_usd: 0, tokens: 0 } } as JobListPage, false).rows;
   assert.deepEqual(rows.map((r) => r.fixes), ['2', '0', '—']);
 });
 
@@ -136,4 +136,14 @@ test('the Jobs table marks a fix with the job it continues, and not the opening 
   const job = (id: number, over: Partial<ListJob>): ListJob => ({ id, person: 'ana', repo: 'app', title: `J${id}`, submitted: `2026-11-17T10:0${id}:00Z`, state: 'ended', outcome: 'pr', pr: pull(9), pr_state: 'merged', ...over });
   const rows = jobListView({ at: '2026-11-17T12:00:00Z', jobs: [job(2, { fix_of: 1, fix_of_title: 'Add the button' }), job(1, {})], more: false, totals: { jobs: 2, merged: 2, failed: 0, cost_usd: 0 } } as JobListPage, false).rows;
   assert.deepEqual(rows.map((r) => [r.tag, r.fix]), [['Merged #9', { title: 'Add the button', page: '/jobs/1' }], ['Merged #9', undefined]]);
+});
+
+// Protects: criterion 9 in the Jobs table. Fails when: a job's tokens or the total are unabbreviated, a job with none shows 0, or a local job's person has no link.
+test('the Jobs table shows tokens per job and in total, a dash for none, and links a local job\'s person', () => {
+  const job = (id: number, tokens?: number): ListJob => ({ id, person: 'ana', repo: 'app', title: `J${id}`, submitted: `2026-11-17T10:0${id}:00Z`, state: 'ended', outcome: 'failed', ...(tokens ? { tokens } : {}) });
+  const page = { at: '2026-11-17T12:00:00Z', jobs: [job(1, 950), job(2, 12_300), job(3, 1_240_000), job(4)], more: false, totals: { jobs: 4, merged: 0, failed: 4, cost_usd: 0, tokens: 1_253_250 } } as JobListPage;
+  const v = jobListView(page, true);
+  assert.deepEqual(v.rows.map((r) => r.tokens), ['950', '12k', '1.24M', '—']);
+  assert.equal(v.totals.tokens, '1.25M');
+  assert.equal(v.rows[0]!.personPage, '/people/ana');
 });

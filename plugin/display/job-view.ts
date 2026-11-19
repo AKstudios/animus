@@ -3,8 +3,8 @@
 // No DOM here, so the wording is tested without a browser
 // (helix/test/job-page.test.ts), as view.ts is.
 import { jobPage, personPage } from './pages.ts';
-import type { DisplayClosed, JobPage } from './shape.ts';
-import { clock, recent, span, type Tone } from './view.ts';
+import type { DisplayClosed, JobPage, ProfilesInfo, TokenCount } from './shape.ts';
+import { clock, recent, span, tokens, type Tone } from './view.ts';
 
 export type JobPageView = {
   id: number | string;
@@ -12,6 +12,8 @@ export type JobPageView = {
   /** The result tag, and the one line under the title: project, person, when it started, and how long a merged PR took to merge. */
   tag: { text: string; tone: Tone };
   line: string;
+  /** The same line in parts, the person's linking to their page. */
+  lineParts: { text: string; page?: string }[];
   /** `Jobs / <project> / <job>`: the project and the job's own name. */
   trail: { project: string; job: string };
   /** Time taken, cost, gate runs, and slices passed or review rounds. */
@@ -20,8 +22,12 @@ export type JobPageView = {
   bar: { name: string; took: string; pct: number; at: number; label: string; on: boolean }[];
   /** The side panel for the job's pull request: its number, state, branch and times; left out for a job with none. */
   pr?: { number: string; href?: string; state: string; tone: Tone; rows: { k: string; v: string }[] };
-  /** The Agents panel: cost by role and tier, biggest first, each with its share of the cost as a bar and its sessions and tool calls. */
+  /** The Agents panel: cost by role and tier, biggest first, each with its share of the cost as a bar and its sessions, tool calls and tokens. */
   agents: { name: string; cost: string; pct: number; calls: string }[];
+  /** Where the time went, opened: each stage with what it took and used, then each agent session placed on the same bar. */
+  timeline: { stages: TimelineStage[]; sessions: TimelineSession[] };
+  /** The Labels panel's explainer: what every size, difficulty and type runs, the job's own marked; left out when the page was sent no profiles. */
+  explain?: Explainer;
   /** "What this run taught": the lessons citing the job, each with its state; the panel is left out when none does. */
   taught: { text: string; state: string }[];
   /** A check that was flaky, as the chip says it: `test was flaky once`. */
@@ -43,7 +49,8 @@ export type JobPageView = {
   spec: string;
   /** Every stage, with how long the job spent in it; `on` is the one it is in now. */
   stages: { name: string; took: string; on: boolean }[];
-  slices: { title: string; delivers: string; done: boolean }[];
+  /** Each slice with where it is: passed, being worked on now, still to come, or left when the job ended. */
+  slices: { title: string; delivers: string; done: boolean; state: 'done' | 'now' | 'next' | 'left' }[];
   checks: { name: string; command: string; tag: string; tone: Tone; detail: string; output?: string }[];
   /** Each finding says its fate: `fixed in round 2`, `still open`, `not acted on`; empty where the run log has none for it. */
   reviews: { title: string; summary: string; findings: { tag: string; tone: Tone; fate: string; where: string; problem: string; fix: string }[] }[];
@@ -56,6 +63,21 @@ export type JobPageView = {
   /** While the job may still write to it, the page reads its log again every two seconds and keeps to its end. */
   follow: boolean;
 };
+
+export type TimelineStage = { name: string; took: string; share: string; sessions: number; tokens: string; cost: string };
+export type TimelineSession = {
+  /** role · model */
+  name: string; stage: string; tier: string; effort: string; ok: boolean;
+  /** Where its part of the bar starts and how wide it is, in % of the job's time. */
+  at: number; pct: number;
+  took: string; cost: string; tokens: string;
+  /** in, out, cache read and written, turns and tool calls, as one line. */
+  detail: string;
+};
+
+/** One label's row in the explainer: its name, what it runs, and whether this job has it. */
+export type ExplainRow = { name: string; text: string; runs: string; on: boolean };
+export type Explainer = { models: string; groups: { title: string; rows: ExplainRow[] }[]; /** The agents this job ran, as role · model (tier). */ used: string[] };
 
 export const OUTCOMES: Record<string, string> = { pr: 'pull request', 'draft-pr': 'draft pull request', 'dry-run': 'dry run', 'needs-input': 'needs input', failed: 'failed' };
 const CHECK: Record<string, [string, Tone]> = { ok: ['✓', 'ink'], fail: ['✗', 'fail'], skip: ['skip', 'mute'] };
@@ -103,27 +125,99 @@ function agentsOf(agents: NonNullable<JobPage['run']>['agents']): JobPageView['a
   return [...Map.groupBy(agents, (a) => `${a.role} · ${a.tier}`)].map(([name, as]) => {
     const cost = as.reduce((n, a) => n + a.cost_usd, 0);
     const [calls, errors] = [as.reduce((n, a) => n + a.calls, 0), as.reduce((n, a) => n + a.errors, 0)];
-    return { name, cost, pct: total ? Math.round((cost / total) * 100) : 0, calls: [plural(as.length, 'session'), plural(calls, 'tool call'), ...(errors ? [plural(errors, 'error')] : [])].join(' · ') };
+    const used = as.reduce((n, a) => n + allTokens(a.tokens), 0);
+    return { name, cost, pct: total ? Math.round((cost / total) * 100) : 0, calls: [plural(as.length, 'session'), plural(calls, 'tool call'), ...(errors ? [plural(errors, 'error')] : []), ...(used ? [`${tokens(used)} tokens`] : [])].join(' · ') };
   }).sort((a, b) => b.cost - a.cost).map((a) => ({ ...a, cost: `$${a.cost.toFixed(2)}` }));
 }
 
-/** A time as the page shows it: in UTC, so every screen that shows the job says the same. */
-export const when = (iso: string) => `${iso.slice(0, 10)} ${iso.slice(11, 16)} UTC`;
+const allTokens = (t: Partial<TokenCount> | undefined) => (t?.input ?? 0) + (t?.output ?? 0) + (t?.cache_read ?? 0) + (t?.cache_write ?? 0);
 
-/** The job page for one moment: `now` is Helix's clock in ms; `local` for the local display, which has no people pages. */
+/** A time as the page shows it, in the viewer's own time and words: `Nov 17, 10:05 AM`, with the year when it is not this one. */
+export function when(iso: string, now = Date.now()): string {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return iso;
+  const year = d.getFullYear() !== new Date(now).getFullYear();
+  return d.toLocaleString(undefined, { month: 'short', day: 'numeric', ...(year ? { year: 'numeric' } : {}), hour: 'numeric', minute: '2-digit' });
+}
+
+/** Each stage's line in the opened time bar, and each agent session placed inside its stage's part of the bar, in the order it ran. */
+function timelineOf(bar: JobPageView['bar'], agents: NonNullable<JobPage['run']>['agents'], ms: Record<string, number>): JobPageView['timeline'] {
+  const byStage = Map.groupBy(agents, (a) => a.stage);
+  const total = Object.values(ms).reduce((a, b) => a + b, 0);
+  const stages = bar.map((b) => {
+    const as = byStage.get(b.name) ?? [];
+    const used = as.reduce((n, a) => n + allTokens(a.tokens), 0);
+    const cost = as.reduce((n, a) => n + a.cost_usd, 0);
+    return { name: b.name, took: b.took, share: `${Math.round(total ? ((ms[b.name] ?? 0) / total) * 100 : 0)}%`, sessions: as.length, tokens: used ? tokens(used) : '–', cost: as.length ? `$${cost.toFixed(2)}` : '–' };
+  });
+  const sessions = bar.flatMap((b) => {
+    const as = byStage.get(b.name) ?? [];
+    const stageMs = ms[b.name] ?? 0;
+    // Sessions of a stage ran one after another; the rest of its time was the script's (gates, git). Sessions that add up to more than the stage are scaled to fit.
+    const fit = Math.max(stageMs, as.reduce((n, a) => n + a.ms, 0)) || 1;
+    let from = b.at;
+    return as.map((a) => {
+      const pct = Math.round((a.ms / fit) * b.pct * 10) / 10;
+      const part = {
+        name: `${a.role} · ${a.model || a.tier}`, stage: a.stage, tier: a.tier, effort: a.effort, ok: a.ok, at: from, pct,
+        took: span(a.ms), cost: `$${a.cost_usd.toFixed(2)}`, tokens: tokens(allTokens(a.tokens)),
+        detail: [`in ${tokens(a.tokens.input)}`, `out ${tokens(a.tokens.output)}`, `cache read ${tokens(a.tokens.cache_read)}`, `cache written ${tokens(a.tokens.cache_write)}`, plural(a.turns, 'turn'), plural(a.calls, 'tool call')].join(' · '),
+      };
+      from += pct;
+      return part;
+    });
+  });
+  return { stages, sessions };
+}
+
+/** What every label runs, from the factory's profiles, with this job's labels and the agents it ran marked. */
+function explainerOf(p: ProfilesInfo, labels: { k: string; v: string }[], agents: NonNullable<JobPage['run']>['agents']): Explainer {
+  const on = (k: string, v: string) => labels.some((l) => l.k === k && l.v === v);
+  const model = (tier: string, effort?: string) => `${p.models[tier] ?? tier} (${tier}${effort ? `, ${effort} effort` : ''})`;
+  const sizes = p.sizes.map((x) => ({
+    name: x.name, text: x.looks_like ?? '', on: on('size', x.name),
+    runs: [
+      ...(p.planner?.sizes.includes(x.name) ? [`planner ${model(p.planner.tier, p.planner.effort)}`] : []),
+      `review ${!x.review || x.review === 'none' ? 'none' : model(x.review)}`,
+      ...(x.setup ? [`setup ${x.setup}`] : []), ...(x.gates ? [`gates ${x.gates}`] : []),
+    ].join(' · '),
+  }));
+  const difficulties = p.difficulties.map((x) => ({
+    name: x.name, text: x.signals ?? '', on: on('difficulty', x.name),
+    runs: [
+      `implementer ${model(x.tier, x.effort)}`,
+      ...Object.entries(x.sizes ?? {}).map(([size, o]) => `${size}: ${model(o.tier ?? x.tier, o.effort ?? x.effort)}`),
+      ...(x.review ? [`always reviewed by ${model(x.review)}`] : []),
+    ].join(' · '),
+  }));
+  const types = p.types.map((x) => ({
+    name: x.name, text: '', on: on('type', x.name),
+    runs: [
+      ...(x.reviewer ? [`reviewer ${x.reviewer}`] : []), ...(x.evidence?.length ? [`evidence ${x.evidence.join(', ')}`] : []),
+      ...(x.prove === 'fails-on-base' ? ['its tests must fail on the base first'] : []),
+    ].join(' · ') || 'the standard path',
+  }));
+  return {
+    models: Object.entries(p.models).map(([tier, m]) => `${tier} = ${m}`).join(' · '),
+    groups: [{ title: 'Size', rows: sizes }, { title: 'Difficulty', rows: difficulties }, { title: 'Type', rows: types }],
+    used: [...new Set(agents.map((a) => `${a.role} · ${a.model || a.tier} (${a.tier})`))],
+  };
+}
+
+/** The job page for one moment: `now` is Helix's clock in ms; `local` for the local display, which keeps no log. */
 export function jobView(p: JobPage, now: number, local = false, closed?: DisplayClosed): JobPageView {
   const j = p.job;
   const pr = j.pr ? /(\d+)\/?$/.exec(j.pr)?.[1] : undefined;
   const facts = [
-    { k: 'project', v: j.repo }, { k: 'person', v: j.person, ...(local ? {} : { page: personPage(j.person) }) }, { k: 'state', v: j.state },
+    { k: 'project', v: j.repo }, ...(j.person ? [{ k: 'person', v: j.person, page: personPage(j.person) }] : []), { k: 'state', v: j.state },
     ...(j.outcome ? [{ k: 'outcome', v: OUTCOMES[j.outcome] ?? j.outcome }] : []),
     ...(j.resume ? [{ k: 'carry on', v: j.resume }] : []),
     ...(j.pr ? [{ k: 'PR', v: pr ? `#${pr}` : j.pr, ...(/^https?:\/\//.test(j.pr) ? { href: j.pr } : {}) }] : []),
     ...(j.fix_of !== undefined ? [{ k: 'fixes', v: j.fix_of_title ?? `job ${typeof j.fix_of === 'number' ? '#' : ''}${j.fix_of}`, page: jobPage(j.fix_of) }] : []),
     ...(j.cost_usd !== undefined ? [{ k: 'cost', v: `$${j.cost_usd.toFixed(2)}` }] : []),
-    { k: 'submitted', v: when(j.submitted) },
-    ...(j.started ? [{ k: 'started', v: when(j.started) }] : []),
-    ...(j.ended ? [{ k: 'ended', v: when(j.ended) }] : []),
+    { k: 'submitted', v: when(j.submitted, now) },
+    ...(j.started ? [{ k: 'started', v: when(j.started, now) }] : []),
+    ...(j.ended ? [{ k: 'ended', v: when(j.ended, now) }] : []),
     ...(j.started && j.ended ? [{ k: 'took', v: span(Date.parse(j.ended) - Date.parse(j.started)) }]
       : j.started && j.state === 'running' ? [{ k: 'running for', v: clock(now - Date.parse(j.started)) }] : []),
   ];
@@ -143,6 +237,12 @@ export function jobView(p: JobPage, now: number, local = false, closed?: Display
   const total = Object.values(p.ms ?? {}).reduce((a, b) => a + b, 0);
   const merged = closed?.merged && j.ended ? Math.max(0, Date.parse(closed.at) - Date.parse(j.ended)) : undefined;
   const done = (p.slices ?? []).filter((s) => s.done).length;
+  const usedTokens = (p.run?.agents ?? []).reduce((n, a) => n + allTokens(a.tokens), 0) || j.tokens || 0;
+  const labels = labelsOf(p.spec ?? '');
+  const lineParts = [
+    { text: j.repo }, ...(j.person ? [{ text: j.person, page: personPage(j.person) }] : []),
+    { text: j.started ? `started ${when(j.started, now)}` : `submitted ${when(j.submitted, now)}` }, ...(merged !== undefined ? [{ text: `merged after ${span(merged)}` }] : []),
+  ];
   const { tag, tone } = recent(j, local, closed);
   let from = 0;
   const bar = p.stages.flatMap((name) => {
@@ -161,23 +261,27 @@ export function jobView(p: JobPage, now: number, local = false, closed?: Display
   return {
     id: j.id, title: j.title, facts, trail: { project: j.repo, job: String(j.animus_job ?? j.id) },
     tag: { text: tag, tone },
-    line: [j.repo, j.person, j.started ? `started ${when(j.started)}` : `submitted ${when(j.submitted)}`, ...(merged !== undefined ? [`merged after ${span(merged)}`] : [])].join(' · '),
+    line: lineParts.map((x) => x.text).join(' · '),
+    lineParts,
     numbers: [
       { k: 'time taken', v: took }, { k: 'cost', v: j.cost_usd !== undefined ? `$${j.cost_usd.toFixed(2)}` : '–' },
       { k: `fix ${p.run?.fix_rounds === 1 ? 'round' : 'rounds'} · ${plural(p.gate_runs ?? 0, 'gate run')}`, v: p.run ? String(p.run.fix_rounds) : '–' },
       p.slices?.length ? { k: 'slices passed', v: `${done} of ${p.slices.length}` } : { k: 'review rounds', v: String(p.reviews?.length ?? 0) },
+      { k: 'tokens', v: usedTokens ? tokens(usedTokens) : '–' },
     ],
     bar,
     ...(j.pr ? { pr: {
       number: pr ? `#${pr}` : j.pr, ...(/^https?:\/\//.test(j.pr) ? { href: j.pr } : {}),
       state: state ?? 'open', tone: (state === 'merged' ? 'merged' : state === 'closed' ? 'mute' : 'open') as Tone,
-      rows: [{ k: 'branch', v: `animus/${j.animus_job ?? j.id}` }, ...(p.pr_opened ? [{ k: 'opened', v: when(p.pr_opened) }] : []), ...(mergedAt ? [{ k: 'merged', v: when(mergedAt) }] : []), ...afterRows(p.after, state === 'merged')],
+      rows: [{ k: 'branch', v: `animus/${j.animus_job ?? j.id}` }, ...(p.pr_opened ? [{ k: 'opened', v: when(p.pr_opened, now) }] : []), ...(mergedAt ? [{ k: 'merged', v: when(mergedAt, now) }] : []), ...afterRows(p.after, state === 'merged')],
     } } : {}),
     agents: agentsOf(p.run?.agents ?? []),
+    timeline: timelineOf(bar, p.run?.agents ?? [], p.ms ?? {}),
+    ...(p.profiles ? { explain: explainerOf(p.profiles, labels, p.run?.agents ?? []) } : {}),
     taught: (p.lessons ?? []).map((l) => ({ text: l.text, state: l.status === 'proposed' ? `Proposed · animus lessons accept ${l.id}` : `Kept · used ${l.uses}×` })),
     flaky: [...Map.groupBy((p.run?.gates ?? []).flatMap((g) => g.flaky), (n) => n)].map(([name, at]) => `${name} was flaky ${at.length === 1 ? 'once' : at.length === 2 ? 'twice' : `${at.length} times`}`),
     ...(p.run?.tools.text ? { tools: { summary: `${p.run.tools.calls} · ${plural(p.run.tools.errors, 'error')}`, text: p.run.tools.text } } : {}),
-    labels: labelsOf(p.spec ?? ''),
+    labels,
     notes: {
       criteria: `${criteria.filter((c) => c.tone === 'ink').length} of ${criteria.length} proven`,
       checks: !checks.length ? '' : failed ? `${failed} failed on the last run` : 'all passed on the last run',
@@ -188,7 +292,8 @@ export function jobView(p: JobPage, now: number, local = false, closed?: Display
     ...(j.reason ? { reason: j.reason } : {}),
     spec: p.spec ?? '',
     stages: p.stages.map((name) => ({ name, took: p.ms?.[name] !== undefined ? span(p.ms[name]) : '', on: j.state === 'running' && j.progress?.stage === name })),
-    slices: p.slices ?? [],
+    // The slice being worked on is the first one not passed, while the job runs.
+    slices: (p.slices ?? []).map((s, i) => ({ ...s, state: s.done ? 'done' : j.state === 'running' && i === done ? 'now' : j.state === 'running' || j.state === 'queued' ? 'next' : 'left' })),
     checks,
     reviews: (p.reviews ?? []).map((r, i) => ({
       title: `Review ${i + 1}`, summary: r.summary,
