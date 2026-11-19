@@ -30,7 +30,7 @@ async function helix() {
   store.add({ ...base, person: 'ben', title: 'Three', outcome: 'draft-pr', pr: 'https://github.com/o/app/pull/5' });
   store.record('ana', 'submitted', { job: 2, repo: 'app' });
   store.record('ben', 'cancelled', { job: 3 });
-  const supervisor = supervise({ store, config, home });
+  const supervisor = supervise({ store, config, home, animusHomeOf: () => join(home, 'animus') });
   const server = serve({ config, store, supervisor, home });
   await new Promise<void>((r) => { server.listen(0, '127.0.0.1', r); });
   const url = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;

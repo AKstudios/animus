@@ -153,8 +153,8 @@ in [helix-deploy.md](helix-deploy.md#the-slack-bot).
   request, and the state in words. `/animus job <id>` answers with the title in
   bold and labelled lines for project, person, state, stage, question or reason,
   and labelled links to the pull request and thread.
-  `/animus status` answers with Helix's slots in use, the queue's length and its
-  version.
+  `/animus status` answers with Helix's slots in use, the queue's length, how
+  many jobs wait for an earlier pull request, and its version.
 - A job that needs input is answered by replying in its thread: any reply in
   the DM, or a reply that mentions @Animus in a channel. It resumes as after
   `animus answer`, and the thread says so. Replies from anyone but the job's
