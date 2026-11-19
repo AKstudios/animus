@@ -152,7 +152,7 @@ export function slackBot(transport: Transport, opts: Core & { supervisor?: Jobs;
       return said ? reply(said) : undefined;
     }
     const [sub, ...args] = event.text.trim().split(/\s+/);
-    if (sub === 'jobs') return reply(jobsCommand(store, person));
+    if (sub === 'jobs') return reply(jobsList(store, person));
     if (sub === 'me') return reply(await meCommand(store, config, person, byOwner, drafts));
     if (sub === 'job') return reply(jobCommand(store, supervisor, owner, byOwner, person, args[0]));
     if (sub === 'cancel') {
@@ -220,21 +220,31 @@ function jobCommand(store: Store, supervisor: Jobs | undefined, owner: string, b
   const id = jobNumber(word);
   const job = id === undefined ? undefined : store.get(id);
   if (!job || (!byOwner && job.person !== person)) return `There is no such job of yours: ${word ?? ''}`.trim();
-  const lines = [`Job ${job.id}: ${job.title}`, `Project ${job.repo}, person ${job.person}`, `State: ${job.state}`];
+  const lines = [`*Job ${job.id}: ${job.title}*`, `*Project:* ${job.repo}`, `*Person:* ${job.person}`, `*State:* ${stateWord(job)}`];
   if (job.state === 'running') {
     const p = supervisor?.progress(job);
-    if (p && job.started && p.at >= job.started) lines.push(`Stage ${p.stage}, ${p.who} working`);
+    if (p && job.started && p.at >= job.started) lines.push(`*Stage:* ${p.stage}, ${p.who} working`);
   }
-  if ((job.state === 'queued' || job.state === 'waiting') && job.waiting) lines.push(`Waiting: ${job.waiting}`);
+  if ((job.state === 'queued' || job.state === 'waiting') && job.waiting) lines.push(`*Waiting:* ${job.waiting}`);
   if (job.state === 'ended') {
-    lines.push(`Outcome: ${job.outcome}`);
-    if (job.outcome === 'needs-input') lines.push(`Question: ${job.question}`);
-    else if (!job.pr) lines.push(`Reason: ${job.reason ?? job.outcome}`);
+    if (job.outcome === 'needs-input') lines.push(`*Question:* ${job.question}`);
+    else if (!job.pr) lines.push(`*Reason:* ${job.reason ?? job.outcome}`);
   }
-  if (job.pr) lines.push(`Pull request: ${job.pr}`);
+  if (job.pr) lines.push(`*Pull request:* <${job.pr}|Open pull request>`);
   const thread = store.slackThread(job.id);
-  if (thread) lines.push(`Thread: ${threadLink(thread)}`);
+  if (thread) lines.push(`*Thread:* <${threadLink(thread)}|Open thread>`);
   return lines.join('\n');
+}
+
+/** /animus jobs: one line per job, the title linked to its thread or pull request, the state in words. */
+function jobsList(store: Store, person: string): string {
+  const mine = [...store.inState('running'), ...store.inState('queued'), ...store.inState('waiting'), ...store.inState('ended').filter((j) => j.outcome === 'needs-input')].filter((j) => j.person === person);
+  if (!mine.length) return 'You have no queued, running or waiting jobs.';
+  return mine.map((j) => {
+    const thread = store.slackThread(j.id);
+    const url = thread ? threadLink(thread) : j.pr;
+    return `Job ${j.id}: ${url ? `<${url}|${j.title}>` : j.title} (${j.repo}), ${stateWord(j)}`;
+  }).join('\n');
 }
 
 /** /helix jobs: the person's jobs that are not over or wait for an answer, each with where to follow it. */
