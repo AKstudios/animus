@@ -30,11 +30,11 @@ export type Headline = { needs: string; rest: string; last?: { when: string; tag
 /** The last 7 days, as strings ready to draw. */
 export type Week = { merged: string; /** Of the jobs whose gates ran. */ firstPass: string; /** All the week's cost over the PRs merged. */ perMerged: string; median: string };
 
-/** meta: how long it took and what it cost; the project and person are drawn from repo and person. */
-export type Recent = { id: number | string; page: string; tag: string; /** Local display: the pull request the tag names, on GitHub. */ href?: string; tone: Tone; title: string; repo: string; person: string; personPage?: string; meta: string; reason?: string; /** A fix: the job it continues. */ fix?: { title: string; page: string } };
+/** meta: how long it took and what it cost; the project and person are drawn from repo and person. took: how long the job ran, all the overview shows besides them. */
+export type Recent = { id: number | string; page: string; tag: string; /** Local display: the pull request the tag names, on GitHub. */ href?: string; tone: Tone; title: string; repo: string; person: string; personPage?: string; meta: string; took: string; reason?: string; /** A fix: the job it continues. */ fix?: { title: string; page: string } };
 
 /** An open pull request on the overview; it links to GitHub and to the job that opened it. */
-export type Pr = { id: number | string; page: string; href: string; tag: string; draft: boolean; title: string; repo: string; person: string; personPage?: string };
+export type Pr = { id: number | string; page: string; href: string; tag: string; draft: boolean; title: string; repo: string; person: string; personPage?: string; /** How long the job that opened it ran. */ took: string };
 
 export type View = {
   name: string;
@@ -123,7 +123,7 @@ export function recent(j: DisplayJob, local = false, closed?: DisplayClosed): Re
   const took = j.started && j.ended ? span(Date.parse(j.ended) - Date.parse(j.started)) : '';
   const made = {
     id: j.id, page: jobPage(j.id), tag, ...(local && j.pr && /^https?:\/\//.test(j.pr) ? { href: j.pr } : {}), tone, title: j.title, repo: j.repo, person: j.person, ...people(j.person, local),
-    meta: [took, j.cost_usd !== undefined ? usd(j.cost_usd) : ''].filter(Boolean).join(' · '),
+    meta: [took, j.cost_usd !== undefined ? usd(j.cost_usd) : ''].filter(Boolean).join(' · '), took,
     ...(j.fix_of !== undefined ? { fix: { title: j.fix_of_title ?? `job ${typeof j.fix_of === 'number' ? '#' : ''}${j.fix_of}`, page: jobPage(j.fix_of) } } : {}),
     ...(j.resume ? { reason: `It stopped before it ended. To carry on: ${j.resume}` } : j.reason ? { reason: firstLine(j.reason) } : {}),
   };
@@ -136,8 +136,9 @@ export function recent(j: DisplayJob, local = false, closed?: DisplayClosed): Re
   return { ...made, tag: `${closed.merged ? 'Merged' : 'Closed'} #${n}`, tone: closed.merged ? 'merged' : 'mute', meta: [made.meta, after].filter(Boolean).join(' · ') };
 }
 
-function pr(p: DisplayPr, local: boolean): Pr {
-  return { id: p.job, page: jobPage(p.job), href: p.url, tag: `${p.draft ? 'Draft' : 'Open'} #${p.number}`, draft: p.draft, title: p.title, repo: p.repo, person: p.person, ...people(p.person, local) };
+function pr(p: DisplayPr, local: boolean, job?: DisplayJob): Pr {
+  const took = job?.started && job.ended ? span(Date.parse(job.ended) - Date.parse(job.started)) : '';
+  return { id: p.job, page: jobPage(p.job), href: p.url, tag: `${p.draft ? 'Draft' : 'Open'} #${p.number}`, draft: p.draft, title: p.title, repo: p.repo, person: p.person, ...people(p.person, local), took };
 }
 
 /** The display for one moment: `now` is Helix's clock in ms, `picked` the project chosen in the list. */
@@ -212,7 +213,7 @@ export function view(d: Display, picked: string | null, now: number): View {
     };
   })();
   const ended = shown.filter((j) => isOver(j) && !open.has(j.id as number)).reverse();
-  const prs = (d.prs ?? []).filter((p) => !sel || p.repo === sel.name).sort((a, b) => Date.parse(b.created) - Date.parse(a.created)).slice(0, PRS).map((p) => pr(p, d.local === true));
+  const prs = (d.prs ?? []).filter((p) => !sel || p.repo === sel.name).sort((a, b) => Date.parse(b.created) - Date.parse(a.created)).slice(0, PRS).map((p) => pr(p, d.local === true, d.jobs.find((j) => j.id === p.job)));
 
   return {
     name: d.name,
