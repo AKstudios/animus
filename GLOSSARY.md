@@ -65,6 +65,11 @@ One run of the factory on one spec, ending in a pull request, a question, or
 a failure.
 _Avoid_: Run, build, task
 
+**Waiting**:
+A job held in the queue, using no slot, until the pull request of the spec it
+builds on is merged; it then starts by itself, on Helix or on one machine.
+_Avoid_: Blocked, pending, paused
+
 **Catch-up**:
 Bringing what the base branch gained since a job started into the job's
 branch, just before its pull request opens.
