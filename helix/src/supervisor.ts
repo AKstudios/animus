@@ -394,7 +394,7 @@ export function supervise(opts: {
       const author = Object.entries(store.people()).find(([, p]) => p.github?.toLowerCase() === pull.author.toLowerCase())?.[0];
       if (!author) throw new Refused(403, `pull request ${f.pr} was opened by ${pull.author}, who is not a person on this Helix, so Helix cannot fix it`);
       if (person !== author && !isOwner(config, person)) throw new Refused(403, `pull request ${f.pr} was opened by ${author}: only ${author} or the owner may fix it`);
-      const onPr = store.list().filter((j) => j.repo === f.repo && j.pr?.endsWith(`/pull/${n}`));
+      const onPr = store.list(-1).filter((j) => j.repo === f.repo && j.pr?.endsWith(`/pull/${n}`));
       const active = onPr.find((j) => j.ask && (j.state === 'queued' || j.state === 'running' || (j.state === 'ended' && j.outcome === 'needs-input')));
       const page = config.url ? ` (${config.url.replace(/\/+$/, '')}/jobs/${active?.id})` : '';
       if (active) throw new Refused(409, `pull request ${f.pr} has a fix ${active.state === 'ended' ? 'waiting for an answer' : active.state}: job ${active.id}${page}`);

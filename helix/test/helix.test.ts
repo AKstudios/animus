@@ -12,8 +12,10 @@ import { animusVersion } from '../../plugin/src/version.ts';
 import { addPerson, hashToken, removePerson, type Config } from '../src/config.ts';
 import type { Display } from '../src/display.ts';
 import { serve } from '../src/server.ts';
-import { openStore } from '../src/store.ts';
+import { deviceCode, keepTokens, pollDevice } from '../src/github-app.ts';
+import { openStore, type Store } from '../src/store.ts';
 import { animusArgs, cancelJobsOf, pauseFile, skillsFile, supervise, type Launch } from '../src/supervisor.ts';
+import { ANIMUS_BODY, fakeGitHub } from './fake-github.ts';
 
 const SPEC = (title: string) => `---\nsize: small\n---\n# ${title}\n\n## Acceptance criteria\n\n1. It works.\n`;
 
@@ -305,6 +307,55 @@ test('remove-person deletes the credentials file Helix keeps for them, and leave
     assert.throws(() => removePerson(store, 'dan'), /no person named dan/);
     store.close();
   } finally {
+    if (before === undefined) delete process.env.HELIX_HOME; else process.env.HELIX_HOME = before;
+  }
+});
+
+/** Ended jobs of a person, past the 50 the job list pages by. */
+const pastAPage = (store: Store, person: string) => {
+  for (let i = 0; i < 60; i++) store.add({ state: 'ended', person, repo: 'app', spec: '', title: `filler ${i}`, draft: false, outcome: 'failed', submitted: '' });
+};
+
+// Protects: criterion 1, a person's list. Fails when: the list is cut to the latest 50 jobs before it is filtered to the person.
+test('a person\'s job list still holds their older jobs after more than 50 others', async () => {
+  const h = await helix();
+  const old = h.store.add({ state: 'ended', person: 'ana', repo: 'app', spec: '', title: 'old', draft: false, outcome: 'pr', submitted: '' });
+  pastAPage(h.store, 'ben');
+  const mine = (await client.jobs()).jobs.map((j) => j.id);
+  h.stop();
+  assert.deepEqual(mine, [old.id]);
+});
+
+// Protects: criterion 1, a fix past 50 jobs. Fails when: the fix looks for the job that opened the pull request, or an active fix on it, among the latest 50 jobs only.
+test('past 50 jobs a fix still resumes the job that opened its pull request, and a second fix is refused while it is active', async () => {
+  const home = mkdtempSync(join(tmpdir(), 'helix-'));
+  const before = process.env.HELIX_HOME;
+  process.env.HELIX_HOME = home;
+  const github = await fakeGitHub();
+  const config: Config = { host: '127.0.0.1', port: 0, slots: 1, github: { client_id: 'Iv23liGood' } };
+  const store = openStore(join(home, 'helix.db'));
+  const envFile = join(home, 'ana.env');
+  writeFileSync(envFile, '');
+  store.putPerson('ana', { token_sha256: hashToken('ana-token'), env_file: envFile, github: 'ana-gh' });
+  const code = await deviceCode('Iv23liGood', github);
+  github.approve(code.user_code, 'ana-gh');
+  keepTokens('ana', envFile, await pollDevice('Iv23liGood', code, github, async () => {}));
+  mkdirSync(join(home, 'repo'));
+  store.putProject({ name: 'app', url: 'https://github.com/o/app.git', dir: join(home, 'repo'), state: 'ready', added: '' });
+  github.addIssue('o/app', 4, { title: 'Add a button', body: ANIMUS_BODY, pull: true, author: 'ana-gh' });
+  const opened = store.add({ state: 'ended', person: 'ana', repo: 'app', spec: '', title: 'Add a button', draft: false, outcome: 'pr', pr: 'https://github.com/o/app/pull/4', submitted: '' });
+  pastAPage(store, 'ana');
+  // The fix holds its slot until Helix stops it.
+  const supervisor = supervise({ store, config, home, github, launch: () => ({ command: process.execPath, args: ['-e', 'setInterval(() => {}, 1000)'] }) });
+  try {
+    const fix = await supervisor.fix('ana', { repo: 'app', pr: '#4', ask: 'make it blue' });
+    pastAPage(store, 'ana');
+    await assert.rejects(supervisor.fix('ana', { repo: 'app', pr: '#4', ask: 'again' }), new RegExp(`has a fix (queued|running): job ${fix.id}`));
+    assert.equal(fix.fix_of, opened.id);
+  } finally {
+    supervisor.stop();
+    store.close();
+    await github.close();
     if (before === undefined) delete process.env.HELIX_HOME; else process.env.HELIX_HOME = before;
   }
 });

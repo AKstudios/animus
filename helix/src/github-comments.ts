@@ -250,7 +250,7 @@ export function commentWatcher(opts: {
     const ask = /^fix(\s|$)/i.test(text) ? text.slice('fix'.length).trim() : text;
     if (!ask) return FIX_USAGE;
     // The latest job on Helix that pushed to it, as the supervisor finds the one a fix continues; its end is the last push.
-    const last = store.list().filter((j) => j.repo === project.name && j.pr?.endsWith(`/pull/${number}`) && j.ended && (j.outcome === 'pr' || j.outcome === 'draft-pr')).sort((a, b) => a.id - b.id).at(-1);
+    const last = store.list(-1).filter((j) => j.repo === project.name && j.pr?.endsWith(`/pull/${number}`) && j.ended && (j.outcome === 'pr' || j.outcome === 'draft-pr')).sort((a, b) => a.id - b.id).at(-1);
     let references: { name: string; text: string }[] = [];
     if (last) {
       const token = await tokenOf(store, config, person, urls);

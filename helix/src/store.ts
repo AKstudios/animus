@@ -133,6 +133,7 @@ export type CommentWatch = { position: string; handled: number[] };
 export type Store = {
   add(job: Omit<HelixJob, 'id'>): HelixJob;
   get(id: number): HelixJob | undefined;
+  /** The latest jobs, oldest first: 50 unless limit says otherwise, every one with -1. */
   list(limit?: number): HelixJob[];
   inState(state: State): HelixJob[];
   save(job: HelixJob): void;
