@@ -14,7 +14,7 @@ import type { Agent, AgentResult } from './agent.ts';
 import { describe, failsOnBase, gateReport, jobChecks, LATER_SLICE, runChecks, type CheckResult } from './gates.ts';
 import { commitAll, mainCheckout, matchesAny, touchedFiles } from './git.ts';
 import { appendRun, CANCELLED_MARKER, jobDir, toolsLog, saveProgress, saveState, writeJson, type Cause, type FindingLog, type JobState, type Outcome, type Run, type Stage } from './log.ts';
-import { evidenceBranch, findPrByTitle, prBody, prDraft, prState, type DraftLookup, type PrFind, type Evidence, type PrLookup, type Publish } from './pr.ts';
+import { evidenceBranch, findPrByTitle, prBody, prDraft, prState, PushRejected, type DraftLookup, type PrFind, type Evidence, type PrLookup, type Publish } from './pr.ts';
 import { admitFile, profileOnBase, refusal, type Admitted } from './admit.ts';
 import { loadProfile } from './profile.ts';
 import { describePlan, escalate, modelFor, PLUGIN_ROOT, raise, readPrompt, resolvePlan, type Factory, type Plan, type Tier } from './profiles.ts';
@@ -757,7 +757,8 @@ async function runJobWith(opts: RunOptions, deps: Deps, live: { run?: Run; start
       } catch (err) {
         if (!(err instanceof AnimusError)) throw err;
         outcome = 'failed';
-        reason = `${reason ? `${reason}\n` : ''}the pull request could not be opened: ${err.message}`;
+        // The push is never forced: across machines it is what keeps two fixes from overwriting each other.
+        reason = fix && err instanceof PushRejected ? 'the branch changed while this fix ran: fix again' : `${reason ? `${reason}\n` : ''}the pull request could not be opened: ${err.message}`;
         log(reason.split('\n').pop()!);
       }
     } else log(`dry run: the pull request's body is in ${join(dir, 'pr-body.md')}; the work is on ${ws.branch}`);

@@ -134,12 +134,16 @@ export const BODY_LIMIT = 65_536;
 
 export type Publish = (p: { cwd: string; branch: string; baseBranch: string; title: string; body: string; draft: boolean }) => string;
 
-/** Pushes the job's branch and opens its pull request, or updates the one already open. Returns its URL. */
+/** GitHub refused the push because its branch has commits this one lacks: nothing was pushed, and the pull request was not touched. */
+export class PushRejected extends AnimusError {}
+
+/** Pushes the job's branch, never forced, and opens its pull request, or updates the one already open. Returns its URL. */
 export const publish: Publish = ({ cwd, branch, baseBranch, title, body, draft }) => {
   try {
     git(cwd, ['push', '--quiet', '-u', 'origin', `${branch}:${branch}`]);
   } catch (err) {
-    throw new AnimusError(`could not push ${branch}: ${(err as Error).message}`);
+    const message = `could not push ${branch}: ${(err as Error).message}`;
+    throw /\[rejected\]|non-fast-forward|fetch first/.test(message) ? new PushRejected(message) : new AnimusError(message);
   }
   const found = gh(cwd, ['pr', 'view', branch, '--json', 'url,isDraft', '--jq', '"\\(.url) \\(.isDraft)"'], undefined, true);
   if (found) {
@@ -183,17 +187,20 @@ export const prDraft: DraftLookup = (url, cwd) => {
   return draft === 'true' ? true : draft === 'false' ? false : undefined;
 };
 
-/** A pull request's description and its two branches, as GitHub has them: all a fix needs when the job that opened it is gone. */
-export type PrSource = { body: string; head: string; base: string };
+/** A pull request's description and its two branches, as GitHub has them: all a fix needs when the job that opened it is gone. Its address, author's login and state too, for a pull request no job here opened. */
+export type PrSource = { body: string; head: string; base: string; url?: string; author?: string; state?: PrState };
 export type PrSourceLookup = (url: string, cwd: string) => PrSource | undefined;
 
 export const prSource: PrSourceLookup = (url, cwd) => {
-  const out = gh(cwd, ['pr', 'view', url, '--json', 'body,headRefName,baseRefName', '--jq', '[.body,.headRefName,.baseRefName]|@json'], undefined, true);
+  const out = gh(cwd, ['pr', 'view', url, '--json', 'body,headRefName,baseRefName,url,author,state', '--jq', '[.body,.headRefName,.baseRefName,.url,.author.login,.state]|@json'], undefined, true);
   if (!out) return undefined;
   // The body has newlines, which gh's output is cut at: ask for JSON on one line.
-  const [body, head, base] = JSON.parse(out) as [string, string, string];
-  return { body, head, base };
+  const [body, head, base, address, author, state] = JSON.parse(out) as [string, string, string, string, string | null, PrState];
+  return { body, head, base, url: address, ...(author ? { author } : {}), state };
 };
+
+/** The GitHub login gh is signed in as here; undefined when it cannot say. */
+export const ghLogin = (cwd: string) => gh(cwd, ['api', 'user', '--jq', '.login'], undefined, true) || undefined;
 
 /** What GitHub records about a pull request. commits holds each commit's committer date. */
 export type PrFacts = { state: PrState; createdAt: string; closedAt?: string; mergedAt?: string; mergeCommit?: string; baseRefName: string; commits: string[]; /** The pull request's last commit. */ head?: string };

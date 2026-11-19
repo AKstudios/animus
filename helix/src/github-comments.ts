@@ -47,6 +47,19 @@ export async function commentBody(store: Store, config: Pick<Config, 'github'>, 
   }
 }
 
+/** A pull request as GitHub has it now, read with the person's token; undefined when GitHub has none by that number. author is the login that opened it. */
+export async function readPull(store: Store, config: Pick<Config, 'github'>, urls: GitHubUrls, person: string, repo: string, number: number): Promise<{ url: string; title: string; body: string; author: string; state: string; merged: boolean } | undefined> {
+  const token = await tokenOf(store, config, person, urls);
+  if (!token) throw new AnimusError(`${person} has no GitHub token to read pull request ${number} with`);
+  try {
+    const p = await gh('GET', `/repos/${repo}/pulls/${number}`, token, urls) as { html_url: string; title: string; body?: string | null; user: { login: string }; state: string; merged?: boolean };
+    return { url: p.html_url, title: p.title, body: p.body ?? '', author: p.user.login, state: p.state, merged: Boolean(p.merged) };
+  } catch (err) {
+    if ((err as { status?: number }).status === 404) return undefined;
+    throw err;
+  }
+}
+
 /** The spec in a draft comment: the first closed `markdown` fence, or undefined when there is none or it is empty. GitHub may save line breaks as CRLF. */
 export function specBlock(comment: string): string | undefined {
   const lines = comment.split(/\r?\n/);
@@ -151,10 +164,10 @@ export function draftComment(spec: string, summary?: string): string {
 function milestone(job: HelixJob, url?: string): string | undefined {
   if (job.state !== 'ended') return undefined;
   if (job.outcome === 'needs-input') return `Job ${job.id} needs input: ${job.question}\nReply with a comment: \`/animus answer <your answer>\``;
-  if (job.fix_of && job.outcome === 'pr') return `Job ${job.id} pushed to this pull request: ${job.ask}\nIt cost $${(job.cost_usd ?? 0).toFixed(2)}.${url ? ` Its page: ${url.replace(/\/+$/, '')}/jobs/${job.id}` : ''}`;
+  if (job.ask && job.outcome === 'pr') return `Job ${job.id} pushed to this pull request: ${job.ask}\nIt cost $${(job.cost_usd ?? 0).toFixed(2)}.${url ? ` Its page: ${url.replace(/\/+$/, '')}/jobs/${job.id}` : ''}`;
   if (job.outcome === 'pr' && job.pr) return `Job ${job.id} opened a pull request: ${job.pr}`;
   // A job that failed after its fix rounds still publishes its report as a draft PR (outcome draft-pr): that is a failure, with the link. A fix's is the pull request it is on.
-  return `Job ${job.id} ${job.outcome === 'refused' ? 'was refused' : 'failed'}: ${job.reason ?? job.outcome}${job.pr && !job.fix_of ? `. The failure report: ${job.pr}` : ''}`;
+  return `Job ${job.id} ${job.outcome === 'refused' ? 'was refused' : 'failed'}: ${job.reason ?? job.outcome}${job.pr && !job.ask ? `. The failure report: ${job.pr}` : ''}`;
 }
 
 /**
@@ -175,7 +188,7 @@ export function githubNotifier(opts: { store: Store; config: Pick<Config, 'githu
 }
 
 const USAGE ='Say what you want after `/animus`, as in `/animus add a login page`.';
-const FIX_USAGE = 'Comment `/animus fix <what to change>` to have Animus change this pull request; it works on an open pull request a job opened.';
+const FIX_USAGE = 'Comment `/animus <what to change>` to have Animus change this pull request; it works on an open pull request an Animus job opened.';
 // fix is for pull requests; on an issue it is not draft text.
 const WORDS = ['submit', 'discard', 'answer', 'cancel', 'fix'];
 
@@ -232,19 +245,20 @@ export function commentWatcher(opts: {
     if (token) await gh('POST', `/repos/${repo}/issues/comments/${id}/reactions`, token, urls, { content: 'eyes' }).catch((err: unknown) => say(`comment ${id} on ${repo}: ${(err as Error).message}`));
   }
 
-  /** `/animus fix <text>` on a pull request: a fix queued as `animus fix` on Helix would queue it, with the reviews since the job's last push; else the one line saying why not. */
+  /** `/animus <text>` (or `/animus fix <text>`) on a pull request: a fix queued as `animus fix` on Helix would queue it, with the reviews since the job's last push; else the one line saying why not. */
   async function fixCommand(person: string, project: Project, repo: string, number: number, text: string): Promise<string | undefined> {
-    const ask = /^fix(\s|$)/i.test(text) ? text.slice('fix'.length).trim() : '';
+    const ask = /^fix(\s|$)/i.test(text) ? text.slice('fix'.length).trim() : text;
     if (!ask) return FIX_USAGE;
-    const token = await tokenOf(store, config, person, urls);
-    if (!token) throw new AnimusError(`${person} has no GitHub token to read pull request ${number} with`);
-    const pull = await gh('GET', `/repos/${repo}/pulls/${number}`, token, urls) as { state: string; merged?: boolean };
-    if (pull.merged || pull.state !== 'open') return `Not queued: pull request ${number} is ${pull.merged ? 'merged' : 'closed'}, so it cannot be fixed.`;
-    // The latest job that pushed to it, as the supervisor finds the one a fix continues; its end is the last push.
+    // The latest job on Helix that pushed to it, as the supervisor finds the one a fix continues; its end is the last push.
     const last = store.list().filter((j) => j.repo === project.name && j.pr?.endsWith(`/pull/${number}`) && j.ended && (j.outcome === 'pr' || j.outcome === 'draft-pr')).sort((a, b) => a.id - b.id).at(-1);
-    const references = last ? await reviewsSince(repo, number, last.ended!, token, urls) : [];
+    let references: { name: string; text: string }[] = [];
+    if (last) {
+      const token = await tokenOf(store, config, person, urls);
+      if (!token) throw new AnimusError(`${person} has no GitHub token to read pull request ${number} with`);
+      references = await reviewsSince(repo, number, last.ended!, token, urls);
+    }
     try {
-      jobs.fix(person, { repo: project.name, pr: String(number), ask, github: { repo, issue: number }, ...(references.length ? { references } : {}) });
+      await jobs.fix(person, { repo: project.name, pr: String(number), ask, github: { repo, issue: number }, ...(references.length ? { references } : {}) });
     } catch (err) {
       if (err instanceof AnimusError) return `Not queued: ${err.message}.`;
       throw err;

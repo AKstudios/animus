@@ -13,9 +13,15 @@ failure (a job that did not end in a PR, a failing gate, a doctor problem),
 
 ### Jobs on this machine
 
-#### `animus start <spec.md> [--local | --helix] [--repo <dir>] [--draft]`
+#### `animus start <spec.md | pr> ["<what to change>"] [--local | --helix] [--repo <dir>] [--draft]`
 
-Starts one job, here or on Helix. Where it runs is decided in this order:
+Starts one job, here or on Helix: from a spec, or a [fix](#fixing-a-pull-request)
+of an open pull request. The argument decides which, and no agent does: an
+existing file is a spec; a number, `#number` or a pull request's URL is a pull
+request, which needs the text of what to change after it (without it the
+command is refused with its usage).
+
+Where a job from a spec runs is decided in this order:
 
 1. `--local` or `--helix`.
 2. `run:` in `~/.animus/config.yaml`, the repository's entry and then the
@@ -54,11 +60,31 @@ the result as JSON; exits 0 when the job ended in a PR.
 Picks up a job that stopped with a question, or was interrupted. `--answer`
 gives it the answer to its question.
 
-#### `animus fix <pr> "<what to change>" [--local | --helix] [--repo <dir>] [--dry-run] [--keep] [--skills <file>]`
+#### Fixing a pull request
 
-Changes an open pull request a job opened: a **fix**
+`animus start <pr> "<what to change>" [--local | --helix] [--repo <dir>] [--dry-run] [--keep]`
+changes an open pull request an Animus job opened: a **fix**
 ([GLOSSARY.md](../GLOSSARY.md)), a new job on the pull request's branch with
 its own id, page, cost and outcome. `<pr>` is its number, `#number` or URL.
+
+A fix runs where its session is:
+
+1. `--local` or `--helix`. A choice that leaves the session of the job that
+   opened the pull request behind says so in one line, and the fix runs from
+   the pull request alone.
+2. Here, when this machine's run log has the job that opened it.
+3. Helix, when this machine has joined one that has the repository: Helix
+   resumes the session when a job there opened the pull request, and runs
+   from the pull request alone otherwise ([helix.md](helix.md#fixes)). It
+   prints the `watch it:` links, as for a spec.
+4. Otherwise here, from the pull request alone.
+
+`run:` in `~/.animus/config.yaml` does not move a fix. A `/animus <text>`
+comment on the pull request reaches only Helix, which watches GitHub; this
+machine never does. `--dry-run` and `--keep` are for a fix on this machine,
+as for `animus run`. On this machine, it runs `animus fix`, as a job from a
+spec runs `animus run`; that process is not a command to type.
+
 The fix:
 
 - runs in the worktree of the job it continues (the pull request's latest job,
@@ -77,21 +103,26 @@ The fix:
   pull request, and reports the reasons. On a pull request that was a draft,
   a reviewer-refused fix pushes and it stays a draft; one that passes marks
   it ready.
-- with the earlier job's folder or worktree gone, runs from the pull request
-  alone: the spec from the collapsed block in its description, the branch from
-  GitHub and a fresh session; the job's run record says `without_session`.
+- never forces its push. When the branch changed on GitHub while it ran
+  (another fix, a hand push), the push is rejected: it pushes nothing, leaves
+  the pull request as it was, and ends failed with "the branch changed while
+  this fix ran: fix again". A later fix starts from the branch as GitHub has
+  it.
+- with no job here that opened the pull request, or that job's folder or
+  worktree gone, runs from the pull request alone: the spec from the collapsed
+  block in its description, the branch from GitHub and a fresh session; the
+  job's run record says `without_session`.
+- uses the personal skills kept in the folder of the job it continues. With
+  no such folder, it uses yours only when your GitHub login opened the pull
+  request, and none otherwise.
 
-Refused with one line, and nothing runs: a pull request no job opened, one
-merged or closed, and one with a fix queued, running or waiting for an answer
-(the fix is named). The run log's `trigger` is `fix` and `fix_of` names the job
-it continues.
-
-Where it runs: with `--local` or `--helix`, there. Otherwise a pull request a
-job on this machine opened is fixed here, and with a Helix set up, one a job
-there opened goes to Helix as `animus submit` does, printing the `watch it:`
-links. Only the person whose job opened the pull request, or the owner, may
-([helix.md](helix.md#fixes)). `--dry-run`, `--keep` and `--skills` are for a fix
-on this machine, as for `animus run`.
+Refused with one line, and nothing runs: a pull request whose description
+holds no spec block, one merged or closed, and one with a fix queued, running
+or waiting for an answer in the same place (the fix is named); one fix at a
+time is checked per place, and across places the push is the guard. On Helix,
+only the person who opened the pull request, or the owner, may ask
+([helix.md](helix.md#fixes)). The run log's `trigger` is `fix` and `fix_of`
+names the job it continues.
 
 #### `animus plan <spec.md> [--slices] [--repo <dir>]`
 
@@ -183,7 +214,7 @@ loses its worktree at once, and its branches (`animus/<job>` and
 `--days` ago (default 30). A job with no PR loses both once it last ran
 that long ago. A job with an open PR, or one waiting for an answer, is
 kept, and so is one whose PR has a fix queued, running or waiting for an
-answer (`animus fix`); a fix counts as its PR's job when the PR ends, even
+answer ([a fix](#fixing-a-pull-request)); a fix counts as its PR's job when the PR ends, even
 one that failed. What a job records stays for analysis: its folder (spec, gate output,
 reviews, screenshots, transcripts), Claude Code's own transcripts and the
 run log. A named job goes whole and at once, folder included. `--dry-run`

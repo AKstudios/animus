@@ -9,6 +9,7 @@ import { uptime } from 'node:os';
 import { basename, dirname, isAbsolute, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { AnimusError } from '../../plugin/src/proc.ts';
+import { specInBody } from '../../plugin/src/fix.ts';
 import { countUses } from '../../plugin/src/lessons.ts';
 import { animusHome, CANCELLED_MARKER, loadProgress, readRuns, type Progress } from '../../plugin/src/log.ts';
 import type { PersonalSkill } from '../../plugin/src/personal.ts';
@@ -17,7 +18,8 @@ import { parseSpec } from '../../plugin/src/spec.ts';
 import { isOwner } from './owner.ts';
 import { readMachine, waitReason, type Reading } from './room.ts';
 import { credentialEnv, personEnv, readyRepos, type Config } from './config.ts';
-import { liveTokenFile } from './github-app.ts';
+import { GITHUB, githubRepo, liveTokenFile, type GitHubUrls } from './github-app.ts';
+import { readPull } from './github-comments.ts';
 import type { HelixJob, Store } from './store.ts';
 
 export const PLUGIN = join(dirname(fileURLToPath(import.meta.url)), '..', '..', 'plugin');
@@ -35,7 +37,7 @@ export const animusArgs = (job: HelixJob, repoDir: string): string[] => {
   const skills = existsSync(skillsFile(job)) ? ['--skills', skillsFile(job)] : [];
   const references = existsSync(referencesDir(job)) ? ['--references', referencesDir(job)] : [];
   // `--` keeps an ask that starts with a dash from being read as an option.
-  if (job.fix_of) return ['fix', '--repo', repoDir, ...skills, ...references, '--', job.pr!, job.ask!];
+  if (job.ask) return ['fix', '--repo', repoDir, ...skills, ...references, '--', job.pr!, job.ask!];
   return ['run', job.spec, '--repo', repoDir, ...(job.draft ? ['--draft'] : []), ...skills];
 };
 
@@ -72,8 +74,8 @@ export type FixRequest = { repo: string; pr: string; ask: string; skills?: Perso
 
 export type Supervisor = {
   submit(person: string, s: Submission): HelixJob;
-  /** Queues a fix of an open pull request a job on this Helix opened, for `person` or the owner. */
-  fix(person: string, f: FixRequest): HelixJob;
+  /** Queues a fix of an open Animus pull request whose author is a person here, asked by that person or the owner; it runs as the author's person. */
+  fix(person: string, f: FixRequest): Promise<HelixJob>;
   cancel(person: string, id: number): HelixJob;
   answer(person: string, id: number, text: string): HelixJob;
   log(id: number, lines?: number): string;
@@ -148,6 +150,8 @@ export function supervise(opts: {
   notify?: (job: HelixJob) => void;
   /** Reads the machine's free memory and load before each start; the machine's own by default, fixed ones in tests. */
   machine?: () => Reading;
+  /** Where GitHub is, for reading the pull request a fix is asked on; github.com by default. */
+  github?: GitHubUrls;
 }): Supervisor {
   const { store, config, home } = opts;
   const launch = opts.launch ?? animus;
@@ -197,8 +201,8 @@ export function supervise(opts: {
       // The profile is read from the base branch as GitHub has it now, with the person's token as their pushes use.
       opts.fresh?.(repoDir, jobEnv);
       // A queued job is admitted again: the profile may have changed since it was submitted. A resumed one was admitted when it first started.
-      // A fix has no spec of its own: the animus process reads the spec of the job it continues.
-      const refused = job.animus_job || job.fix_of ? undefined : opts.admit?.(job, repoDir, jobEnv);
+      // A fix has no spec of its own: the animus process reads the spec of the job it continues, or of its pull request.
+      const refused = job.animus_job || job.ask ? undefined : opts.admit?.(job, repoDir, jobEnv);
       if (refused) {
         saveAndTell({ ...job, state: 'ended', ended: now(), outcome: 'refused', reason: refused });
         say(`job ${job.id} was refused before it started: ${refused.split('\n')[0]}`);
@@ -324,31 +328,43 @@ export function supervise(opts: {
   tick();
 
   return {
-    fix(person, f) {
+    async fix(person, f) {
       readyProject(f.repo);
-      const n = /^#?(\d+)$/.exec(f.pr.trim())?.[1];
-      const onPr = store.list().filter((j) => j.repo === f.repo && j.pr && (j.pr === f.pr.trim() || (n && j.pr.endsWith(`/${n}`))));
-      // A fix that failed has no pull request to its name, so the jobs that ended in one are the ones that opened or updated it.
-      const ended = onPr.filter((j) => j.state === 'ended' && (j.outcome === 'pr' || j.outcome === 'draft-pr')).sort((a, b) => a.id - b.id);
-      const opener = ended[0];
-      const target = ended.at(-1);
-      if (!opener || !target) throw new Refused(404, `no job on Helix opened pull request ${f.pr} of ${f.repo}, so there is nothing to fix`);
-      if (person !== opener.person && !isOwner(config, person)) throw new Refused(403, `pull request ${f.pr} was opened by ${opener.person}'s job ${opener.id}: only ${opener.person} or the owner may fix it`);
-      const active = onPr.find((j) => j.fix_of && (j.state === 'queued' || j.state === 'running' || (j.state === 'ended' && j.outcome === 'needs-input')));
+      const repo = githubRepo(store.project(f.repo)!.url);
+      if (!repo) throw new Refused(400, `the project ${f.repo} is not on GitHub, so Helix cannot fix its pull requests`);
+      const asked = f.pr.trim();
+      const n = Number(/^#?(\d+)$/.exec(asked)?.[1] ?? (asked.toLowerCase().includes(`/${repo.toLowerCase()}/pull/`) ? /\/pull\/(\d+)\/?$/.exec(asked)?.[1] : undefined));
+      if (!n) throw new Refused(400, `${asked} is not a pull request of ${repo}: give its number or its address`);
+      let pull: Awaited<ReturnType<typeof readPull>>;
+      try { pull = await readPull(store, config, opts.github ?? GITHUB, person, repo, n); } catch (err) { throw err instanceof Refused ? err : new Refused(502, (err as Error).message); }
+      if (!pull) throw new Refused(404, `GitHub has no pull request ${n} on ${repo}`);
+      if (pull.merged || pull.state !== 'open') throw new Refused(409, `pull request ${f.pr} is ${pull.merged ? 'merged' : 'closed'}, so it cannot be fixed`);
+      if (!specInBody(pull.body)) throw new Refused(400, `pull request ${f.pr} holds no Animus spec block, so no Animus job opened it and there is nothing to fix`);
+      const author = Object.entries(store.people()).find(([, p]) => p.github?.toLowerCase() === pull.author.toLowerCase())?.[0];
+      if (!author) throw new Refused(403, `pull request ${f.pr} was opened by ${pull.author}, who is not a person on this Helix, so Helix cannot fix it`);
+      if (person !== author && !isOwner(config, person)) throw new Refused(403, `pull request ${f.pr} was opened by ${author}: only ${author} or the owner may fix it`);
+      const onPr = store.list().filter((j) => j.repo === f.repo && j.pr?.endsWith(`/pull/${n}`));
+      const active = onPr.find((j) => j.ask && (j.state === 'queued' || j.state === 'running' || (j.state === 'ended' && j.outcome === 'needs-input')));
       const page = config.url ? ` (${config.url.replace(/\/+$/, '')}/jobs/${active?.id})` : '';
       if (active) throw new Refused(409, `pull request ${f.pr} has a fix ${active.state === 'ended' ? 'waiting for an answer' : active.state}: job ${active.id}${page}`);
-      // It runs as the person whose job opened the pull request: their folder holds the worktree and session it continues.
-      const job = store.add({ state: 'queued', person: opener.person, repo: f.repo, spec: '', title: `fix: ${target.title}`, ...(target.tier ? { tier: target.tier } : {}), draft: false, pr: target.pr!, fix_of: target.id, ask: f.ask, ...(f.github ? { github: f.github } : {}), submitted: now() });
+      // The author's latest job that ended in it (a fix that failed has none to its name), whose session the fix resumes; with none, `animus fix` runs from the pull request alone.
+      const target = onPr.filter((j) => j.person === author && j.state === 'ended' && (j.outcome === 'pr' || j.outcome === 'draft-pr')).sort((a, b) => a.id - b.id).at(-1);
+      // It runs as the author's person: their folder holds the worktree and session it continues, and their token pushes to the branch.
+      const job = store.add({
+        state: 'queued', person: author, repo: f.repo, spec: '', title: `fix: ${target?.title ?? pull.title}`, ...(target?.tier ? { tier: target.tier } : {}), draft: false,
+        pr: target?.pr ?? pull.url, ...(target ? { fix_of: target.id } : {}), ask: f.ask, ...(f.github ? { github: f.github } : {}), submitted: now(),
+      });
       // The job's folder is where a container finds what Helix keeps for the job (its skills); a fix has no spec file in it.
       job.spec = join(home, 'jobs', String(job.id), 'fix');
       mkdirSync(dirname(job.spec), { recursive: true });
-      if (f.skills?.length) writeFileSync(skillsFile(job), `${JSON.stringify(f.skills, null, 2)}\n`);
+      // Skills are the author's alone: the owner's are never sent to a job that runs as someone else.
+      if (f.skills?.length && person === author) writeFileSync(skillsFile(job), `${JSON.stringify(f.skills, null, 2)}\n`);
       if (f.references?.length) {
         mkdirSync(referencesDir(job), { recursive: true });
         f.references.forEach((r, i) => writeFileSync(join(referencesDir(job), `${i + 1}-${r.name}`), r.text));
       }
       store.save(job);
-      store.record(person, 'submitted', { job: job.id, repo: f.repo, fix_of: target.id });
+      store.record(person, 'submitted', { job: job.id, repo: f.repo, ...(target ? { fix_of: target.id } : {}) });
       tick();
       return store.get(job.id)!;
     },
