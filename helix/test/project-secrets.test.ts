@@ -10,13 +10,14 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { test } from 'node:test';
 import { fileURLToPath } from 'node:url';
-import { writeJson } from '../../plugin/src/log.ts';
+import { toolsLog, writeJson } from '../../plugin/src/log.ts';
+import { runJob } from '../../plugin/src/pipeline.ts';
 import { prBody } from '../../plugin/src/pr.ts';
 import { useJobEnv } from '../../plugin/src/profile.ts';
 import { loadFactory, resolvePlan } from '../../plugin/src/profiles.ts';
 import * as client from '../../plugin/src/remote.ts';
 import { parseSpec } from '../../plugin/src/spec.ts';
-import { makeRepo, write } from '../../plugin/test/helpers.ts';
+import { deps, fakeAgent, makeRepo, write, writeSpec, type Step } from '../../plugin/test/helpers.ts';
 import { hashToken, type Config } from '../src/config.ts';
 import { freshBase } from '../src/fresh.ts';
 import { checkProject, projectDir, removeProject, setupHere } from '../src/projects.ts';
@@ -210,4 +211,32 @@ test('inside a job, its job files and its pull request body show each secret of 
   const spec = parseSpec('# Done\n\n## Acceptance criteria\n\n1. It works.\n   $ true\n');
   const body = prBody({ job: 'j', spec, plan: resolvePlan(loadFactory(), spec), summary: 'used long-secret-value', gates: [], gateAttempts: 1, fixRounds: 0, reviewRounds: 0, open: [], protectedTouched: [], escalations: [], models: 'fake', cost_usd: 0 });
   assert.ok(body.includes('used ***') && !body.includes('long-secret-value'));
+});
+
+// Protects: criterion 6 for what a running job writes (on one machine and in a Helix container alike): its gate reports and tool calls, read by the display, and its log, which the queue's loop stores as is. Fails when: a gate's output, a command the agent ran, or a logged failure holds the value.
+test('a job whose gate prints its secret writes *** in its gate reports, its tools.jsonl and its log', async (t) => {
+  process.env.SECRET_MASK_GATE = 'gate-secret-value';
+  t.after(() => { delete process.env.SECRET_MASK_GATE; useJobEnv({ env: {}, secrets: [] }); });
+  const repo = makeRepo();
+  write(repo, '.animus/animus.yaml', 'secrets: [SECRET_MASK_GATE]\ncommands:\n  test: echo "key is $SECRET_MASK_GATE"; false\n');
+  git(repo, 'commit', '-qam', 'secret');
+  let tries = 0;
+  const tried: Step = (req) => {
+    write(req.cwd, 'src/feature.txt', `try ${++tries}\n`);
+    git(req.cwd, 'add', '-A'); git(req.cwd, 'commit', '-qm', 'try');
+    // A failed report with a changed branch is logged with its summary.
+    return { output: { status: 'failed', summary: 'key is gate-secret-value' }, tools: [{ at: '', tool: 'Bash', target: 'curl -H "key: gate-secret-value" example.test', ok: true, ms: 1 }] };
+  };
+  const d = deps(fakeAgent([tried, tried, tried]).agent);
+
+  const run = await runJob({ repo, specFile: writeSpec('size: small\ndifficulty: routine\ntype: feature') }, d);
+
+  assert.equal(run.outcome, 'draft-pr', run.reason);
+  const report = readFileSync(join(run.dir, 'gates', 'run-1.txt'), 'utf8');
+  assert.match(report, /key is \*\*\*/);
+  const tools = readFileSync(toolsLog(run.job), 'utf8');
+  assert.match(tools, /key: \*\*\*/);
+  const log = d.lines.join('\n');
+  assert.match(log, /key is \*\*\*/);
+  for (const text of [report, tools, log, d.published[0]!.body]) assert.ok(!text.includes('gate-secret-value'), text);
 });

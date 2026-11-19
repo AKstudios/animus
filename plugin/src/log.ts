@@ -178,7 +178,7 @@ export type Progress = {
 };
 
 /** A job's files are read by the display: no secret it was given is written into them. */
-const masked = (_key: string, v: unknown) => (typeof v === 'string' ? maskSecrets(v) : v);
+export const masked = (_key: string, v: unknown) => (typeof v === 'string' ? maskSecrets(v) : v);
 
 export function writeJson(file: string, value: unknown): void {
   mkdirSync(join(file, '..'), { recursive: true });

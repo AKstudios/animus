@@ -14,7 +14,7 @@ import { addProject } from './project.ts';
 import { describe, failsOnBase, jobChecks, runChecks } from './gates.ts';
 import { fixAlone, fixFromPr, fixSkills, fixTarget, isPr, keptFromBody, openedHere, whereToFix } from './fix.ts';
 import { githubUrl, mainCheckout, touchedFiles } from './git.ts';
-import { describeRuns, describeTools, jobDir, loadState, readRuns, readTools, type Run } from './log.ts';
+import { describeRuns, describeTools, jobDir, loadState, masked, readRuns, readTools, type Run } from './log.ts';
 import { jobOf, onPath, runJob, uiJobOf } from './pipeline.ts';
 import { describeNumbers, numbers, refreshOutcomes } from './outcomes.ts';
 import { ghLogin, prFacts, publish, pushEvidence } from './pr.ts';
@@ -26,7 +26,7 @@ import { listenLocal, localServer } from './local-display.ts';
 import { enqueue, ensureLoop, openLocalQueue, queueFile, type LocalQueue } from './local-queue.ts';
 import { answerLocal, cancelLocal, describeLocalJob, describeLocalJobs, localJob, logTail, needsYou } from './local-status.ts';
 import { logFile, runLoop } from './local-loop.ts';
-import { loadProfile, PROFILE_PATH, useJobEnv } from './profile.ts';
+import { loadProfile, maskSecrets, PROFILE_PATH, useJobEnv } from './profile.ts';
 import { describePlan, loadFactory, resolvePlan } from './profiles.ts';
 import { admitFile, describeAdmit } from './admit.ts';
 import { git, tryGit, AnimusError, GitError } from './proc.ts';
@@ -237,7 +237,7 @@ async function submitSpec(file: string, checkout: string, draft: boolean, known?
 
 /** Prints a run's result as JSON; the exit code says whether it ended in a pull request. */
 function finish(run: Run): number {
-  console.log(JSON.stringify({ job: run.job, outcome: run.outcome, pr: run.pr, reason: run.reason, question: run.question, branch: run.branch, cost_usd: run.cost_usd, dir: run.dir }, null, 2));
+  console.log(JSON.stringify({ job: run.job, outcome: run.outcome, pr: run.pr, reason: run.reason, question: run.question, branch: run.branch, cost_usd: run.cost_usd, dir: run.dir }, masked, 2));
   return run.outcome === 'pr' || run.outcome === 'dry-run' ? 0 : 1;
 }
 
@@ -676,7 +676,7 @@ async function main(argv: string[]): Promise<number> {
 
 main(process.argv.slice(2)).then((code) => process.exit(code), (err: unknown) => {
   if (err instanceof AnimusError || err instanceof GitError) {
-    console.error(`animus: ${err.message}`);
+    console.error(`animus: ${maskSecrets(err.message)}`);
     process.exit(2);
   }
   throw err;
