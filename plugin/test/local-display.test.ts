@@ -234,3 +234,19 @@ test('the local /job-list tags merged and closed PRs from outcomes.json and filt
   // Totals cover the whole filter, not the page: the project filter changes them.
   assert.deepEqual([all.totals.merged, wiki.totals.jobs, wiki.totals.merged], [1, 1, 0]);
 });
+
+// Protects: criteria 1, 2 and 9 on the local display. Fails when: the git name is not the person, tokens of a job's runs are not added, a person's page lacks their usage, or an unknown person is not a 404.
+test('local people are named by git user name, with tokens and usage, and an unknown name has no page', async () => {
+  const tok = (input: number) => ({ input, output: 1, cache_read: 2, cache_write: 3 });
+  saveState({ job: 'named', repo: '/work/shop', spec: '', workspace: {} as JobState['workspace'], plan: {} as JobState['plan'], outcome: 'pr' });
+  const base = { job: 'named', repo: '/work/shop', submitter: 'zed@example.com', submitter_name: 'Zed Quill', title: 'Named', outcome: 'pr', cost_usd: 1, agents: [] };
+  appendRun({ ...base, started: '2026-01-01T00:00:00.000Z', ended: '2026-01-01T00:05:00.000Z', tokens: tok(10) } as unknown as Run);
+  appendRun({ ...base, started: '2026-01-01T01:00:00.000Z', ended: '2026-01-01T01:05:00.000Z', tokens: tok(20) } as unknown as Run);
+  const s = await served();
+  const [people, person, nobody] = await Promise.all([s.get('/people/page-data'), s.get('/people/Zed%20Quill/page-data'), s.get('/people/nobody/page-data')]);
+  s.stop();
+  const job = localJobs().find((j) => j.id === 'named')!;
+  assert.deepEqual([job.person, job.tokens, job.started], ['Zed Quill', 42, '2026-01-01T01:00:00.000Z']);
+  assert.ok(((await people.json()) as { people: { name: string }[] }).people.some((p) => p.name === 'Zed Quill'));
+  assert.deepEqual([person.status, ((await person.json()) as { usage: { runs: number } }).usage.runs, nobody.status], [200, 2, 404]);
+});

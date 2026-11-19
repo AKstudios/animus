@@ -4,7 +4,7 @@ import type { AddressInfo } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
-import { jobNotice, readToken, route, takeToken, forgetToken, keepToken } from '../../plugin/display/pages.ts';
+import { jobNotice, originOf, readToken, route, takeToken, forgetToken, keepToken } from '../../plugin/display/pages.ts';
 import type { Display, DisplayJob } from '../../plugin/display/shape.ts';
 import { view } from '../../plugin/display/view.ts';
 import { hashToken, type Config } from '../src/config.ts';
@@ -121,4 +121,13 @@ test('Helix answers a job page\'s data only to a valid token, from any person, a
   assert.deepEqual([job.spec, job.pid], [undefined, undefined]);
   assert.equal((await h.get('/jobs/999/page-data', { authorization: 'Bearer ben-token' })).status, 404);
   h.stop();
+});
+
+// Protects: criterion 5, the back link. Fails when: a page opened from elsewhere, from itself or from nowhere gets a back link, or one from a Helix page is named or addressed wrong.
+test('the back link names the Helix page the viewer came from, with its filters, and nothing else', () => {
+  const o = 'https://h.test';
+  const from = (ref: string, here = '/jobs/7') => originOf(ref, o, here);
+  assert.deepEqual(from(`${o}/jobs?result=merged#x`), { name: 'Jobs', href: '/jobs?result=merged#x', page: 'jobs' });
+  assert.deepEqual([from(`${o}/`)?.name, from(`${o}/insights`)?.name, from(`${o}/people`)?.name, from(`${o}/people/ana`)?.name, from(`${o}/jobs/9`)?.name], ['Overview', 'Insights', 'People', 'ana', 'Job #9']);
+  assert.deepEqual([from(''), from('not a url'), from('https://other.test/jobs'), from(`${o}/jobs/7`)], [undefined, undefined, undefined, undefined]);
 });

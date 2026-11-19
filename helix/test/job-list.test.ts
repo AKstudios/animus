@@ -130,3 +130,13 @@ test('the Jobs table shows each job\'s fix rounds, and a dash before the gates r
   const rows = jobListView({ at: '2026-11-17T12:00:00Z', jobs: [job(1, { fix_rounds: 2 }), job(2, { fix_rounds: 0 }), job(3, {})], more: false, totals: { jobs: 3, merged: 0, failed: 3, cost_usd: 0, tokens: 0 } } as JobListPage, false).rows;
   assert.deepEqual(rows.map((r) => r.fixes), ['2', '0', '—']);
 });
+
+// Protects: criterion 9 in the Jobs table. Fails when: a job's tokens or the total are unabbreviated, a job with none shows 0, or a local job's person has no link.
+test('the Jobs table shows tokens per job and in total, a dash for none, and links a local job\'s person', () => {
+  const job = (id: number, tokens?: number): ListJob => ({ id, person: 'ana', repo: 'app', title: `J${id}`, submitted: `2026-11-17T10:0${id}:00Z`, state: 'ended', outcome: 'failed', ...(tokens ? { tokens } : {}) });
+  const page = { at: '2026-11-17T12:00:00Z', jobs: [job(1, 950), job(2, 12_300), job(3, 1_240_000), job(4)], more: false, totals: { jobs: 4, merged: 0, failed: 4, cost_usd: 0, tokens: 1_253_250 } } as JobListPage;
+  const v = jobListView(page, true);
+  assert.deepEqual(v.rows.map((r) => r.tokens), ['950', '12k', '1.24M', '—']);
+  assert.equal(v.totals.tokens, '1.25M');
+  assert.equal(v.rows[0]!.personPage, '/people/ana');
+});

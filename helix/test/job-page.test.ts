@@ -356,3 +356,73 @@ test('a listed screenshot that links outside the job\'s folder is not served', {
   h.stop();
   assert.equal(res.status, 404);
 });
+
+// Protects: criterion 5, times in the viewer's zone with the year only when it is not this one. Fails when: the year is shown for this year or left off another.
+test('a time reads as month, day and time, with the year only when it is not this one', () => {
+  const now = Date.parse('2026-11-17T12:00:00Z');
+  const [thisYear, other] = [when('2026-06-17T12:00:00Z', now), when('2025-06-17T12:00:00Z', now)];
+  assert.match(thisYear, /^Jun 1[67], \d{1,2}:00\s?[AP]M$/);
+  assert.ok(!thisYear.includes('2026') && other.includes('2025'), `${thisYear} | ${other}`);
+});
+
+// Protects: criterion 6, slices first with where each one is. Fails when: the working slice is not the first one not passed, or a slice of an ended job still reads as to come.
+test('a slice is passed, the one being worked on while the job runs, to come, or left once the job ended', () => {
+  const slices = [{ title: 'a', delivers: '', done: true }, { title: 'b', delivers: '', done: false }, { title: 'c', delivers: '', done: false }];
+  assert.deepEqual(jobView(page({ state: 'running' }, { slices }), NOW).slices.map((s) => s.state), ['done', 'now', 'next']);
+  assert.deepEqual(jobView(page({ state: 'ended', outcome: 'failed' }, { slices }), NOW).slices.map((s) => s.state), ['done', 'left', 'left']);
+});
+
+// Protects: criterion 7, a check that is not a criterion's is drawn like one. Fails when: its output is lost from its row or a flaky check is not a note.
+test('a check that is not a criterion keeps its command and output for a row, and a flaky one is a note', () => {
+  const v = jobView(page({ state: 'ended' }, { checks: [{ name: 'lint', command: 'npm run lint', status: 'fail', detail: '1s', output: 'bad' }], run: { fix_rounds: 0, gates: [{ flaky: ['test'] }], agents: [], findings: [], tools: { calls: 0, errors: 0, text: '' } } }), NOW);
+  assert.deepEqual(v.pills, [{ name: 'lint', command: 'npm run lint', tag: '✗', tone: 'fail', output: 'bad' }]);
+  assert.deepEqual(v.flaky, ['test was flaky once']);
+});
+
+// Protects: criteria 8 and 9, the opened time bar and tokens. Fails when: a session is placed outside its stage's part of the bar, a stage's sessions or tokens are wrong, or cache tokens are left out.
+test('the time bar opens into each stage and each agent session placed inside its stage\'s part, with tokens', () => {
+  const t = (input: number, output: number, cache_read: number, cache_write: number) => ({ input, output, cache_read, cache_write });
+  const p = page({ state: 'ended', outcome: 'pr', started: '2026-11-17T10:00:00Z', ended: '2026-11-17T10:10:00Z' }, {
+    ms: { plan: 120_000, implement: 360_000, review: 120_000 },
+    run: { fix_rounds: 0, gates: [], findings: [], tools: { calls: 0, errors: 0, text: '' }, agents: [
+      { ...session, stage: 'implement', role: 'implement', model: 'sonnet', tier: 'standard', effort: 'high', ms: 90_000, turns: 3, calls: 5, cost_usd: 1, tokens: t(100, 200, 300, 400) },
+      { ...session, stage: 'implement', role: 'implement', model: 'sonnet', tier: 'standard', effort: 'high', ms: 90_000, turns: 1, calls: 2, cost_usd: 0.5, tokens: t(1, 1, 1, 1) },
+      { ...session, stage: 'review', role: 'review', model: 'opus', tier: 'deep', effort: '', ms: 60_000, turns: 2, calls: 0, cost_usd: 2, tokens: t(10, 0, 0, 0) },
+    ] },
+  });
+  const v = jobView(p, NOW);
+  assert.deepEqual(v.timeline.stages, [
+    { name: 'plan', took: '2m', share: '20%', sessions: 0, tokens: '–', cost: '–' },
+    { name: 'implement', took: '6m', share: '60%', sessions: 2, tokens: '1.0k', cost: '$1.50' },
+    { name: 'review', took: '2m', share: '20%', sessions: 1, tokens: '10', cost: '$2.00' },
+  ]);
+  // implement's part is 20–80% and its two 90 s sessions are a quarter of its 6 minutes each, one after the other; review's is 80–100% and its session is half of it.
+  assert.deepEqual(v.timeline.sessions.map((s) => [s.name, s.at, s.pct]), [['implement · sonnet', 20, 15], ['implement · sonnet', 35, 15], ['review · opus', 80, 10]]);
+  assert.deepEqual(v.timeline.sessions[0]!.detail, 'in 100 · out 200 · cache read 300 · cache written 400 · 3 turns · 5 tool calls');
+  assert.deepEqual([v.timeline.sessions[0]!.tier, v.timeline.sessions[0]!.effort, v.timeline.sessions[0]!.tokens], ['standard', 'high', '1.0k']);
+  assert.deepEqual(v.numbers.at(-1), { k: 'tokens', v: '1.0k' });
+  assert.match(v.agents[0]!.calls, /tokens$/);
+});
+
+// Protects: criterion 9 on a job page without a run, as the local display sends it. Fails when: the job's own token count is not shown.
+test('a job page with no agent sessions shows the job\'s own token count', () => {
+  assert.deepEqual(jobView(page({ state: 'ended', tokens: 2_500_000 }), NOW).numbers.at(-1), { k: 'tokens', v: '2.50M' });
+});
+
+// Protects: criterion 11, the Labels explainer. Fails when: the job's own labels or the agents it ran are not marked, or a page sent no profiles has one.
+test('the labels explainer says what each label runs, marks the job\'s own, and is left out without profiles', () => {
+  const profiles = {
+    provider: 'claude', models: { fast: 'haiku', standard: 'sonnet' }, planner: { tier: 'fast', effort: 'low', sizes: ['medium'] },
+    sizes: [{ name: 'small', looks_like: 'one file' }, { name: 'medium', review: 'standard' }],
+    difficulties: [{ name: 'routine', tier: 'standard', effort: 'medium' }], types: [{ name: 'feature', reviewer: 'bugs', evidence: ['screenshots'] }, { name: 'fix', prove: 'fails-on-base' }],
+  };
+  const spec = '---\nsize: medium\ndifficulty: routine\ntype: fix\n---\n# T\n';
+  const agents = [{ ...session, stage: 'implement', role: 'implement', model: 'sonnet', tier: 'standard', cost_usd: 1, calls: 0, errors: 0 }];
+  const e = jobView(page({ state: 'ended' }, { spec, profiles, run: { fix_rounds: 0, gates: [], findings: [], tools: { calls: 0, errors: 0, text: '' }, agents } }), NOW).explain!;
+  assert.equal(e.models, 'fast = haiku · standard = sonnet');
+  assert.deepEqual(e.groups.map((g) => [g.title, g.rows.filter((r) => r.on).map((r) => r.name)]), [['Size', ['medium']], ['Difficulty', ['routine']], ['Type', ['fix']]]);
+  assert.equal(e.groups[0]!.rows[1]!.runs, 'planner haiku (fast, low effort) · review sonnet (standard)');
+  assert.deepEqual(e.groups[2]!.rows.map((r) => r.runs), ['reviewer bugs · evidence screenshots', 'its tests must fail on the base first']);
+  assert.deepEqual(e.used, ['implement · sonnet (standard)']);
+  assert.equal(jobView(page({}), NOW).explain, undefined);
+});
