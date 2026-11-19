@@ -1,9 +1,9 @@
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
-import { existsSync, mkdirSync, utimesSync } from 'node:fs';
+import { existsSync, mkdirSync, readdirSync, readFileSync, utimesSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { test } from 'node:test';
-import { installsRoot, pruneInstalls } from '../src/installs.ts';
+import { installKey, installsRoot, pruneInstalls, restoreInstalls, type Install } from '../src/installs.ts';
 import { git } from '../src/proc.ts';
 import { JOB_PID, uiDown, uiUp } from '../src/ui.ts';
 import { makeRepo } from './helpers.ts';
@@ -58,4 +58,19 @@ test('the install cache keeps the two saves used last and any used in the last h
   }
   assert.equal(pruneInstalls(repo, now), 3);
   assert.deepEqual(Object.keys(ages).filter((n) => existsSync(join(dir, n))), ['a', 'b', 'c', 'g.tmp-2']);
+});
+
+test('a save never touches another job\'s partial save of the same key, even one with the same pid', () => {
+  // Helix runs each job in its own container, so every job's animus can have the same pid.
+  const repo = makeRepo();
+  const install: Install = { path: 'deps', key: [], run: 'mkdir -p deps && echo made > deps/f' };
+  const entry = join(installsRoot(repo), 'deps', installKey(repo, install));
+  const other = `${entry}.tmp-${process.pid}`;
+  mkdirSync(join(other, 'files', 'deps'), { recursive: true });
+  writeFileSync(join(other, 'files', 'deps', 'f'), 'theirs');
+  const lines: string[] = [];
+  restoreInstalls(repo, [install], (l) => lines.push(l));
+  assert.equal(readFileSync(join(other, 'files', 'deps', 'f'), 'utf8'), 'theirs');
+  if (!lines.length) assert.equal(readFileSync(join(entry, 'files', 'deps', 'f'), 'utf8'), 'made\n');
+  assert.deepEqual(readdirSync(join(installsRoot(repo), 'deps')).filter((e) => e.includes('.tmp-')), [`${entry.split('/').pop()}.tmp-${process.pid}`]);
 });
