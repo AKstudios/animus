@@ -62,11 +62,12 @@ for (const [name, over, state, resume] of [
   });
 }
 
+// Protects: a local job names its person, never by address. Fails when: the run log's email address is shown.
 test('an ended local job shows its run log row, with no way to resume', () => {
   saveState({ job: 'logged', repo: '/work/shop', spec: '', workspace: {} as JobState['workspace'], plan: {} as JobState['plan'], outcome: 'pr' });
   appendRun({ job: 'logged', repo: '/work/shop', submitter: 'me@example.com', title: 'Logged', started: '2026-01-01T00:00:00.000Z', ended: '2026-01-01T00:05:00.000Z', outcome: 'pr', pr: 'https://example.test/pr/9', cost_usd: 1.5 } as Run);
   const job = localJobs().find((j) => j.id === 'logged')!;
-  assert.deepEqual([job.state, job.outcome, job.pr, job.title, job.person, job.resume], ['ended', 'pr', 'https://example.test/pr/9', 'Logged', 'me@example.com', undefined]);
+  assert.deepEqual([job.state, job.outcome, job.pr, job.title, job.person, job.resume], ['ended', 'pr', 'https://example.test/pr/9', 'Logged', 'me', undefined]);
 });
 
 // Protects: `animus resume` is offered only for a job with state.json. Fails when a run that stopped before saveState (progress.json only) gets a resume command or an empty project name.
@@ -116,7 +117,7 @@ test('a local job page answers with no token, with its checks, spec and run; unk
 });
 
 // Protects: the page is served for a job's address and for people addresses, so a browser never lands on raw JSON. Fails when: /people answers an error, or a job's address does not give the page to a browser.
-test('the local display serves the page for a job and for people addresses, with no people data', async () => {
+test('the local display serves the page for a job and for people addresses, and their data', async () => {
   seed('some-job');
   const s = await served();
   const browser = { accept: 'text/html' };
@@ -124,13 +125,13 @@ test('the local display serves the page for a job and for people addresses, with
   s.stop();
   assert.equal(job.status, 200);
   assert.match(await job.text(), /<div id="helix"/);
-  assert.deepEqual([people.status, person.status, data.status], [200, 200, 404]);
+  assert.deepEqual([people.status, person.status, data.status], [200, 200, 200]);
   assert.match(await people.text(), /<div id="helix"/);
   assert.match(script.headers.get('content-type') ?? '', /javascript/);
 });
 
 // Protects: what the local display says where it lacks something. Fails when: the header still links to people, a job's PR has no number or link, the people pages or the log do not say where the rest is.
-test('the local display names a job by its PR, links it, and says where people and the log are not', () => {
+test('the local display names a job by its PR, links it, has people pages, and says where the log is not', () => {
   const d: Display = {
     name: 'laptop', at: '2026-11-17T12:00:00Z', slots: 0, stages: ['setup'], local: true, repos: [{ name: 'shop' }],
     jobs: [
@@ -141,9 +142,10 @@ test('the local display names a job by its PR, links it, and says where people a
   };
   const v = view(d, null, Date.parse(d.at));
   assert.deepEqual([v.prs.map((p) => [p.tag, p.href]), v.finished.map((j) => [j.tag, j.href])], [[['Draft #8', 'https://github.com/o/shop/pull/8']], [['PR', undefined]]]);
-  assert.equal(v.people, false);
-  assert.match(peopleNotice(false, undefined, true) ?? '', /no people pages/);
-  assert.match(personNotice('ana', false, undefined, true) ?? '', /no people pages/);
+  assert.equal(v.people, true);
+  assert.equal(peopleNotice(false, undefined, true), undefined);
+  assert.equal(personNotice('ana', false, undefined, true), undefined);
+  assert.match(personNotice('ana', false, 404, true) ?? '', /No job on this machine names ana/);
   const page = jobView({ at: d.at, stages: d.stages, job: d.jobs[0]!, log: '' }, 0, true);
   assert.match(page.noLog, /went to the terminal it ran in/);
 });
@@ -228,7 +230,7 @@ test('the local /job-list tags merged and closed PRs from outcomes.json and filt
   const tags = Object.fromEntries(jobListView(all, true).rows.map((r) => [r.title, r.tag]));
   assert.deepEqual([tags['pr-merged'], tags['pr-closed'], tags['pr-unknown']], ['Merged #1', 'Closed #2', 'PR #3']);
   assert.deepEqual([merged.jobs.map((j) => j.id), wiki.jobs.map((j) => j.id), bad], [['pr-merged'], ['pr-unknown'], 400]);
-  assert.equal(jobListView(all, true).rows.every((r) => r.personPage === undefined), true);
+  assert.equal(jobListView(all, true).rows.every((r) => !r.person || r.personPage === `/people/${encodeURIComponent(r.person)}`), true);
   // Totals cover the whole filter, not the page: the project filter changes them.
   assert.deepEqual([all.totals.merged, wiki.totals.jobs, wiki.totals.merged], [1, 1, 0]);
 });

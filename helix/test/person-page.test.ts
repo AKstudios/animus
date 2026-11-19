@@ -52,7 +52,7 @@ test('/people lists each person with their GitHub login, joined, jobs, PRs, spen
     ['cy', '', '', '0', '0', '$0.00'],
   ]);
   // Newest activity of each; none for someone who has done nothing. The time is when it was kept, so only its wording is checked.
-  assert.deepEqual(v.rows.map((r) => r.last.replace(/^\d{4}-\d\d-\d\d \d\d:\d\d UTC/, 'T')), ['T · submitted a job', 'T · cancelled a job', '']);
+  assert.deepEqual(v.rows.map((r) => r.last.replace(/^.+? · /, 'T · ')), ['T · submitted a job', 'T · cancelled a job', '']);
 });
 
 const job = (id: number, over: Partial<DisplayJob>): DisplayJob => ({ id, state: 'queued', person: 'ana lee', repo: 'app', title: `Job ${id}`, submitted: '2026-11-17T11:00:00Z', ...over });

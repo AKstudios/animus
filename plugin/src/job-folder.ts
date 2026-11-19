@@ -74,7 +74,11 @@ function jobRun(dir: string, runs: readonly Run[]): JobRun {
   return {
     fix_rounds: runs.reduce((n, r) => n + (r.fix_rounds ?? 0), 0),
     gates: runs.flatMap((r) => r.gates ?? []).map((g) => ({ flaky: g.checks.filter((c) => c.flaky).map((c) => c.name) })),
-    agents: agents.map((a) => ({ role: a.role, tier: a.tier, cost_usd: a.cost_usd, calls: a.tools?.calls ?? 0, errors: a.tools?.errors ?? 0 })),
+    agents: agents.map((a) => ({
+      stage: a.stage, role: a.role, tier: a.tier, model: a.model ?? '', effort: a.effort ?? '', ok: a.ok !== false, ms: a.ms ?? 0, turns: a.turns ?? 0,
+      tokens: { input: a.tokens?.input ?? 0, output: a.tokens?.output ?? 0, cache_read: a.tokens?.cache_read ?? 0, cache_write: a.tokens?.cache_write ?? 0 },
+      cost_usd: a.cost_usd, calls: a.tools?.calls ?? 0, errors: a.tools?.errors ?? 0,
+    })),
     findings: runs.flatMap((r) => r.review?.log ?? []).map(({ round, severity, fate }) => ({ round, severity, fate })),
     tools: { calls: agents.reduce((n, a) => n + (a.tools?.calls ?? 0), 0), errors: agents.reduce((n, a) => n + (a.tools?.errors ?? 0), 0), text: describeTools(agents, lines) },
   };

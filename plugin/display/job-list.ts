@@ -1,7 +1,7 @@
 // The Jobs page, worked out without the DOM (helix/test/job-list.test.ts):
 // which jobs a filter keeps, thirty at a time, and each row's tag and words.
 import { JOB_LIST, type JobListPage, type JobTotals, type ListJob } from './shape.ts';
-import { recent, span, type Recent } from './view.ts';
+import { recent, span, tokens, type Recent } from './view.ts';
 
 export const RESULTS = ['all', 'merged', 'open', 'failed', 'needs input'] as const;
 export type Result = typeof RESULTS[number];
@@ -41,15 +41,16 @@ export function listJobs(jobs: readonly ListJob[], f: Partial<JobFilter>, before
   const totals: JobTotals = {
     jobs: matched.length, merged: matched.filter((j) => j.pr_state === 'merged').length,
     failed: matched.filter((j) => keeps(j, 'failed')).length, cost_usd: matched.reduce((sum, j) => sum + (j.cost_usd ?? 0), 0),
+    tokens: matched.reduce((sum, j) => sum + (j.tokens ?? 0), 0),
   };
   return { jobs: older.slice(0, JOB_LIST), more: older.length > JOB_LIST, totals };
 }
 
 /** A row of the table: the finished list's tag, with a PR as GitHub last said; took, cost and to merge are `—` when unknown. */
-export type JobRow = Recent & { submitted: string; took: string; /** Times the gates sent the work back; — before they ran. */ fixes: string; cost: string; toMerge: string; /** Under the title. */ why?: string };
+export type JobRow = Recent & { submitted: string; took: string; /** Times the gates sent the work back; — before they ran. */ fixes: string; cost: string; tokens: string; toMerge: string; /** Under the title. */ why?: string };
 
 /** The totals above the table, as strings ready to draw. */
-export type Totals = { jobs: string; merged: string; mergedShare: string; failed: string; spent: string; perMerged: string };
+export type Totals = { jobs: string; merged: string; mergedShare: string; failed: string; spent: string; tokens: string; perMerged: string };
 
 export type JobListView = { rows: JobRow[]; /** The row each day heading goes before. */ days: { at: number; heading: string }[]; more: boolean; totals: Totals };
 
@@ -67,7 +68,7 @@ export function dayHeading(iso: string, now: number): string {
 
 export function jobListView(p: JobListPage, local: boolean, now = Date.parse(p.at)): JobListView {
   const rows = p.jobs.map((j): JobRow => {
-    const { personPage: link, ...row } = recent(j, false);
+    const { personPage: link, ...row } = recent(j, local);
     const n = j.pr && /(\d+)\/?$/.exec(j.pr)?.[1];
     const tag = n && j.pr_state ? `${j.pr_state === 'open' ? 'Open' : j.pr_state === 'merged' ? 'Merged' : 'Closed'} #${n}` : row.tag;
     const why = j.state === 'running' ? (j.progress ? j.progress.stage[0]!.toUpperCase() + j.progress.stage.slice(1) : 'Starting')
@@ -79,8 +80,9 @@ export function jobListView(p: JobListPage, local: boolean, now = Date.parse(p.a
       took: j.started && end !== undefined ? span(end - Date.parse(j.started)) : '—',
       fixes: j.fix_rounds === undefined ? '—' : String(j.fix_rounds),
       cost: j.cost_usd !== undefined ? usd(j.cost_usd) : '—',
+      tokens: j.tokens ? tokens(j.tokens) : '—',
       toMerge: j.pr_merged && j.ended ? span(Date.parse(j.pr_merged) - Date.parse(j.ended)) : '—',
-      ...(why ? { why } : {}), ...(local || !link ? {} : { personPage: link }),
+      ...(why ? { why } : {}), ...(link ? { personPage: link } : {}),
     };
   });
   const days = rows.flatMap((r, at) => {
@@ -90,6 +92,6 @@ export function jobListView(p: JobListPage, local: boolean, now = Date.parse(p.a
   const t = p.totals;
   return { rows, days, more: p.more, totals: {
     jobs: String(t.jobs), merged: String(t.merged), mergedShare: t.jobs ? `${Math.round((t.merged / t.jobs) * 100)}%` : '—', failed: String(t.failed),
-    spent: usd(t.cost_usd), perMerged: t.merged ? usd(t.cost_usd / t.merged) : '—',
+    spent: usd(t.cost_usd), tokens: tokens(t.tokens ?? 0), perMerged: t.merged ? usd(t.cost_usd / t.merged) : '—',
   } };
 }
