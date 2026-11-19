@@ -7,7 +7,7 @@ import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { AnimusError, failureExcerpt } from '../../plugin/src/proc.ts';
 import { docker as realDocker, type Docker } from './container.ts';
-import { freshBase } from './fresh.ts';
+import { cloneBase, freshBase } from './fresh.ts';
 
 export const DOCKERFILE = '.animus/Dockerfile';
 /** The repository every project image is a tag of. */
@@ -20,6 +20,9 @@ export function readDockerfile(clone: string, commit: string): string | undefine
   const r = spawnSync('git', ['show', `${commit}:${DOCKERFILE}`], { cwd: clone, encoding: 'utf8' });
   return r.status === 0 ? r.stdout : undefined;
 }
+
+/** The Dockerfile a project's jobs build from now, without fetching: its base branch as the machine's clone last fetched it, before its last job (jobImageOf). */
+export const currentDockerfile = (clone: string): string | undefined => readDockerfile(clone, `origin/${cloneBase(clone)}`);
 
 export function projectImageName(dockerfile: string, jobImageId: string): string {
   return `${PROJECT_IMAGE}:${createHash('sha256').update(dockerfile).update('\0').update(jobImageId).digest('hex').slice(0, 16)}`;

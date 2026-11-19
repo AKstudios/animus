@@ -123,7 +123,8 @@ const USAGE = `helix: runs Animus jobs for several people on one machine
         Remove what finished jobs leave on this machine: animus cleanup in
         each person's Animus home, with their credentials (a merged or
         closed pull request's worktree at once, its branches --days after,
-        default ${KEEP_DAYS}), and the job images of other releases. Job folders,
+        default ${KEEP_DAYS}), the job images of other releases, and the
+        project images no project's current Dockerfile gives. Job folders,
         logs and transcripts are kept. helix serve runs it once a day.
   helix slack setup
         Turn on the Slack bot: asks for the Slack app's bot token (xoxb-),
