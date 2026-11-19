@@ -369,7 +369,7 @@ function insightsMain(local: boolean, now: number): string {
   const proposed = v.proposed.map((l) => `<div class="lesson" data-key="lp-${l.id}"><span><span class="scope-chip">${esc(l.scope)}</span>${esc(l.text)}</span><span class="src">${esc(l.source)}</span><span class="cmd">${esc(l.command)}</span></div>`).join('');
   const kept = v.kept.map((l) => `<div class="li" data-key="lk-${l.id}"><span class="pill ${l.used ? 'p-open' : 'p-plain'}">${esc(l.uses)}</span><span class="tt">${esc(l.text)}</span><span class="r">${esc(l.where)}</span></div>`).join('');
   return `<main class="main">${top}${tiles}
-    <div class="two">${section('classes', 'By task class', classes)}${section('causes', `Why jobs did not deliver${hn(v.causeCount)}`, (causes ? `<div>${causes}</div>` : none('Every job delivered.')) + (v.causeCount ? `<p class="note">Each job's cause is set by script from where it stopped.</p>` : ''))}</div>
+    <div class="two">${section('classes', 'By task class', classes)}${section('causes', `Why jobs did not deliver${hn(v.causeCount)}`, causes ? `<div>${causes}<p class="note">Each job's cause is set by script from where it stopped.</p></div>` : none('Every job delivered.'))}</div>
     <div class="two">${section('agents', 'Agents', agents)}${section('flaky', `Flaky checks${hn('failed, then passed on the same code')}`, flaky || none('No flaky check.'))}</div>
     ${section('lessons', `Proposed lessons${hn('from the weekly retro · each needs your yes')}`, proposed || none('No lesson is waiting for a yes.'))}
     ${section('kept', `Kept lessons${hn(v.kept.length ? String(v.kept.length) : '')}`, kept || none('No lesson is kept.'))}</main>`;
