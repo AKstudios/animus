@@ -587,16 +587,13 @@ answering and cancelling need a person's token. Click a project to narrow the
 page to it; `?theme=dark` or `?theme=light` fixes the theme.
 
 Every job on it links to its own page, `/jobs/<id>`, an address that can be
-shared and opened cold. A job page needs a sign-in: paste your Helix token
-(`~/.animus/helix.json`), or open an address ending `#token=<token>`, which
-that browser keeps and takes out of the address bar; `animus ui --helix`
-opens Helix that way, signed in as you. Sign out from the
-header. Do not sign in on a shared wall screen: the token can also submit and
-cancel jobs as you.
+shared and opened cold. No page of the display asks for a sign-in, and its
+header has no sign-in or sign-out: `animus ui --helix` only opens Helix in
+your browser.
 
 Every person named on the overview or a job page links to their page,
 `/people/<name>`. `/people` (the header's PEOPLE) lists each person on the
-Helix, for anyone signed in: their GitHub login, the day they joined (blank
+Helix, for anyone who can reach it: their GitHub login, the day they joined (blank
 for a person who joined before Helix kept it), jobs submitted, PRs opened,
 total spent and their last activity. Someone who has left is not listed.
 
@@ -634,40 +631,42 @@ there whole.
 
 ## HTTP API
 
-Every route but the display's pages, `/display`, `/version`, `/invite` and
-`/join` needs a person's Helix token as `Authorization: Bearer <token>`. The
+The display's pages and the data they read, `/display`, `/version`, `/invite`
+and `/join` need no token: anyone who can reach Helix can read them. Every
+other route needs a person's Helix token as `Authorization: Bearer <token>`,
+and the owner's for the owner's routes; the Token column says which. The
 client sends its version, and Helix answers 426 to one it cannot work with;
-the display's own request for a job page's data sends none.
+the display's own requests send none.
 
-| Route | What it does |
-| --- | --- |
-| `GET /` | The display page |
-| `GET /jobs/<id>`, `/people`, `/people/<name>` | The display page, to a browser asking for HTML |
-| `GET /jobs/<id>/page-data` | What a job page shows, for any person; besides the job's folder it carries `run` (fix rounds, flaky checks, each agent session's cost and tool calls, review findings' fates, `animus tools` as text), `after` (human commits and lines after the job, the 30-day watch) and `lessons` citing the job |
-| `GET /people/page-data` | What the people list shows, for any person |
-| `GET /people/<name>/page-data[?before=<job id>]` | What a person's page shows: their numbers, thirty jobs older than that one, and all their activity; 404 for a name Helix never heard of |
-| `GET /insights-data[?scope=<project>]` | What the Insights page (`/insights`) shows, for any person: `{ at, scope, projects, runs, outcomes, lessons }`, the run lines of the last 60 days from Helix's own Animus home and each person's (trimmed to what the page sums), the outcomes of their PRs, and Helix's lessons; `scope` is `factory` (the default) or a project's name, which keeps only that project's runs and lessons |
-| `GET /job-list[?result=&project=&person=&before=<submitted>]` | What the Jobs page (`/jobs`) shows, for any person: `{ at, jobs, more }`, thirty jobs newest first from the whole table, filtered by result (`all`, `merged`, `open`, `failed`, `needs input`), project and person, each with `pr_state` (`open`, `merged`, `closed`) where GitHub has said, and `fix_rounds` where its gates ran; 400 for an unknown result |
-| `GET /jobs/<id>/shots/<name>` | One of a job's screenshots, by its name in `shots/manifest.json`; nothing outside its shots folder |
-| `GET /display` | What the display shows, as JSON, with the open PRs of the jobs (`prs`) |
-| `GET /version` | Helix's version |
-| `POST /invite` | Who an invite code is for, and the projects there |
-| `POST /join` | Join with a code and both tokens; returns the Helix token |
-| `POST /leave` | Take yourself off; refused for the owner |
-| `POST /people` | The owner only: invite `name`, optionally with `github` and `slack` |
-| `DELETE /people/<name>` | The owner only: take a person off, as `helix remove-person` does |
-| `GET /projects` | The projects, each with `provision` (`{ job, state, pr? }`) while it has a [provision job](#provision-jobs) queued, running or with an open pull request |
-| `POST /projects` | Add a project; its check runs in the background (202) |
-| `GET /projects/<name>` | One project, with its check's log |
-| `DELETE /projects/<name>` | Remove a project you added, or any for the owner |
-| `GET /projects/<name>/secrets` | `{ secrets }`: the shared ones and your own, each `name`, `scope` (`shared` or `mine`) and `by`; never a value |
-| `POST /projects/<name>/secrets` | Set one: `name`, `value`, and `mine` (true for your own). A shared one only by whoever added the project or the owner (403). Answers `{ project, name, mine, masked }`, `masked` false for a value too short to be shown as `***` |
-| `DELETE /projects/<name>/secrets/<NAME>[?mine]` | Remove a shared one (whoever added the project, or the owner), or with `?mine` your own |
-| `GET /lessons[?project=<name>]` | The lessons in Helix's Animus home, with a project's and the factory's only when one is named: `{ lessons }` |
-| `POST /lessons/<id>` | `action`: `accept` or `dismiss` (404 for an unknown id, 409 for one that cannot change that way); the lesson |
-| `GET /jobs` | The slots and your jobs; `?all`, every person's, for the owner only |
-| `POST /jobs` | Submit: `repo`, `spec`, and optionally `name`, `draft`, `skills`, `profile` (the checkout's profile text, to warn when it differs from the base branch's). The spec is admitted first: 400 with the list of problems when it is refused; the answer's `warnings` when it is admitted with any |
-| `POST /jobs/fix` | Submit a fix (`animus start <pr>`): `repo`, `pr` (a number, `#number` or URL) and `ask`, and optionally `skills`. 400 when its description holds no spec block, 404 when GitHub has no such pull request, 403 when its author is not a person here or for anyone but the author's person or the owner, 409 when it is merged or closed or a fix is queued, running or waiting for an answer; the answer is the job, as submit's |
-| `GET /jobs/<id>` | One job, with the end of its log |
-| `POST /jobs/<id>/answer` | Answer its question (`answer`); it is queued again |
-| `POST /jobs/<id>/cancel` | Cancel your job, or anyone's for the owner |
+| Route | Token | What it does |
+| --- | --- | --- |
+| `GET /` | no | The display page |
+| `GET /jobs/<id>`, `/people`, `/people/<name>` | no | The display page, to a browser asking for HTML |
+| `GET /jobs/<id>/page-data` | no | What a job page shows; besides the job's folder it carries `run` (fix rounds, flaky checks, each agent session's cost and tool calls, review findings' fates, `animus tools` as text), `after` (human commits and lines after the job, the 30-day watch) and `lessons` citing the job |
+| `GET /people/page-data` | no | What the people list shows |
+| `GET /people/<name>/page-data[?before=<job id>]` | no | What a person's page shows: their numbers, thirty jobs older than that one, and all their activity; 404 for a name Helix never heard of |
+| `GET /insights-data[?scope=<project>]` | no | What the Insights page (`/insights`) shows: `{ at, scope, projects, runs, outcomes, lessons }`, the run lines of the last 60 days from Helix's own Animus home and each person's (trimmed to what the page sums), the outcomes of their PRs, and Helix's lessons; `scope` is `factory` (the default) or a project's name, which keeps only that project's runs and lessons |
+| `GET /job-list[?result=&project=&person=&before=<submitted>]` | no | What the Jobs page (`/jobs`) shows: `{ at, jobs, more }`, thirty jobs newest first from the whole table, filtered by result (`all`, `merged`, `open`, `failed`, `needs input`), project and person, each with `pr_state` (`open`, `merged`, `closed`) where GitHub has said, and `fix_rounds` where its gates ran; 400 for an unknown result |
+| `GET /jobs/<id>/shots/<name>` | no | One of a job's screenshots, by its name in `shots/manifest.json`; nothing outside its shots folder |
+| `GET /display` | no | What the display shows, as JSON, with the open PRs of the jobs (`prs`) |
+| `GET /version` | no | Helix's version |
+| `POST /invite` | no | Who an invite code is for, and the projects there |
+| `POST /join` | no | Join with a code and both tokens; returns the Helix token |
+| `POST /leave` | yes | Take yourself off; refused for the owner |
+| `POST /people` | the owner's | The owner only: invite `name`, optionally with `github` and `slack` |
+| `DELETE /people/<name>` | the owner's | The owner only: take a person off, as `helix remove-person` does |
+| `GET /projects` | yes | The projects, each with `provision` (`{ job, state, pr? }`) while it has a [provision job](#provision-jobs) queued, running or with an open pull request |
+| `POST /projects` | yes | Add a project; its check runs in the background (202) |
+| `GET /projects/<name>` | yes | One project, with its check's log |
+| `DELETE /projects/<name>` | yes | Remove a project you added, or any for the owner |
+| `GET /projects/<name>/secrets` | yes | `{ secrets }`: the shared ones and your own, each `name`, `scope` (`shared` or `mine`) and `by`; never a value |
+| `POST /projects/<name>/secrets` | yes | Set one: `name`, `value`, and `mine` (true for your own). A shared one only by whoever added the project or the owner (403). Answers `{ project, name, mine, masked }`, `masked` false for a value too short to be shown as `***` |
+| `DELETE /projects/<name>/secrets/<NAME>[?mine]` | yes | Remove a shared one (whoever added the project, or the owner), or with `?mine` your own |
+| `GET /lessons[?project=<name>]` | yes | The lessons in Helix's Animus home, with a project's and the factory's only when one is named: `{ lessons }` |
+| `POST /lessons/<id>` | yes | `action`: `accept` or `dismiss` (404 for an unknown id, 409 for one that cannot change that way); the lesson |
+| `GET /jobs` | yes; `?all` the owner's | The slots and your jobs; `?all`, every person's, for the owner only |
+| `POST /jobs` | yes | Submit: `repo`, `spec`, and optionally `name`, `draft`, `skills`, `profile` (the checkout's profile text, to warn when it differs from the base branch's). The spec is admitted first: 400 with the list of problems when it is refused; the answer's `warnings` when it is admitted with any |
+| `POST /jobs/fix` | yes | Submit a fix (`animus start <pr>`): `repo`, `pr` (a number, `#number` or URL) and `ask`, and optionally `skills`. 400 when its description holds no spec block, 404 when GitHub has no such pull request, 403 when its author is not a person here or for anyone but the author's person or the owner, 409 when it is merged or closed or a fix is queued, running or waiting for an answer; the answer is the job, as submit's |
+| `GET /jobs/<id>` | yes | One job, with the end of its log |
+| `POST /jobs/<id>/answer` | yes | Answer its question (`answer`); it is queued again |
+| `POST /jobs/<id>/cancel` | yes | Cancel your job, or anyone's for the owner |

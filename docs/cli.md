@@ -450,10 +450,8 @@ outside the queue.
 
 #### `animus ui --helix`
 
-Opens Helix's display in your browser, already signed in: it opens
-`<url>/#token=<token>` with the address and token you joined with, and the
-page keeps the token and takes it out of the address bar. Do not run it on a
-shared wall screen: the token can also submit and cancel jobs as you.
+Opens the display of the Helix this machine joined in your browser. The
+display needs no sign-in, so your token stays on this machine.
 
 ### Inside a job's worktree
 

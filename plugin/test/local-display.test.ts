@@ -9,7 +9,7 @@ import { setTimeout as sleep } from 'node:timers/promises';
 import { test } from 'node:test';
 import { jobView } from '../display/job-view.ts';
 import { jobListView } from '../display/job-list.ts';
-import { jobNotice, peopleNotice, personNotice, route } from '../display/pages.ts';
+import { jobNotice, personNotice, route } from '../display/pages.ts';
 import type { Display, DisplayJob, JobListPage, JobPage } from '../display/shape.ts';
 import { view } from '../display/view.ts';
 import { listenLocal, localJobs, localServer } from '../src/local-display.ts';
@@ -189,9 +189,8 @@ test('the local display names a job by its PR, links it, has people pages, and s
   const v = view(d, null, Date.parse(d.at));
   assert.deepEqual([v.prs.map((p) => [p.tag, p.href]), v.finished.map((j) => [j.tag, j.href])], [[['Draft #8', 'https://github.com/o/shop/pull/8']], [['PR', undefined]]]);
   assert.equal(v.people, true);
-  assert.equal(peopleNotice(false, undefined, true), undefined);
-  assert.equal(personNotice('ana', false, undefined, true), undefined);
-  assert.match(personNotice('ana', false, 404, true) ?? '', /No job on this machine names ana/);
+  assert.equal(personNotice('ana', undefined, true), undefined);
+  assert.match(personNotice('ana', 404, true) ?? '', /No job on this machine names ana/);
   const page = jobView({ at: d.at, stages: d.stages, job: d.jobs[0]!, log: '' }, 0, true);
   assert.match(page.noLog, /kept no log/);
 });
@@ -264,7 +263,7 @@ test('the overview lists local jobs in the sections Helix has, a stopped one wit
   assert.deepEqual(v.finished[1], { id: 'a-9', page: '/jobs/a-9', tag: 'Stopped', tone: 'fail', title: 'a-9', repo: 'shop', person: '', meta: '', took: '', reason: 'It stopped before it ended. To carry on: animus resume a-9' });
   assert.deepEqual(route('/jobs/a-9'), { page: 'job', id: 'a-9' });
   assert.deepEqual(route('/jobs/12'), { page: 'job', id: 12 });
-  assert.equal(jobNotice('a-9', false, undefined, true), undefined);
+  assert.equal(jobNotice('a-9', undefined, true), undefined);
 });
 
 // Protects: `animus ui` end to end. Fails when: it prints no address, opens none, serves nothing there, or does not stop on Ctrl-C.

@@ -147,18 +147,26 @@ test('the display\'s page and scripts need no token, and no path climbs out of i
   h.stop();
 });
 
+// Protects: the display is open to read and closed to change. Fails when: a write route or the owner's every-queue view answers without the right token.
 test('what the display shows needs no token, and everything else still does', async () => {
   const h = await helix();
+  h.config.owner = 'ana';
   const bare = (path: string, init: RequestInit = {}) => fetch(new URL(path, process.env.HELIX_URL), init);
   const job = await h.submit('Shown');
   assert.equal((await bare('/display')).status, 200);
   assert.equal((await bare('/jobs')).status, 401);
   assert.equal((await bare(`/jobs/${job.id}`)).status, 401);
   assert.equal((await bare('/jobs', { method: 'POST', body: JSON.stringify({ repo: 'app', spec: SPEC('No'), name: 'spec.md' }) })).status, 401);
+  assert.equal((await bare(`/jobs/${job.id}/answer`, { method: 'POST', body: JSON.stringify({ answer: 'yes' }) })).status, 401);
   assert.equal((await bare(`/jobs/${job.id}/cancel`, { method: 'POST', body: '{}' })).status, 401);
+  assert.equal((await bare('/jobs/fix', { method: 'POST', body: JSON.stringify({ repo: 'app', pr: '1', ask: 'x' }) })).status, 401);
   assert.equal((await bare('/display', { method: 'POST', body: '{}' })).status, 401);
+  // Every person's queue is the owner's alone: no token, or another person's, is refused.
+  assert.equal((await bare('/jobs?all')).status, 401);
+  assert.equal((await bare('/jobs?all', { headers: { authorization: 'Bearer ben-token', 'animus-version': animusVersion() } })).status, 403);
   writeFileSync(h.release, '');
-  await h.ended(job.id);
+  // Neither the answer nor the cancel reached the job.
+  assert.deepEqual([(await h.ended(job.id)).outcome, h.store.get(job.id)?.answer], ['pr', undefined]);
   h.stop();
 });
 

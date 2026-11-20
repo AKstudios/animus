@@ -85,10 +85,8 @@ h1, h2, p { margin: 0; }
 /* Helix does not answer: what is shown is old, so nothing on it moves. */
 .is-offline .seg.on, .is-offline .cursor, .is-offline .pulse { animation: none; }
 
-/* ------------------------------------------------------------ sign-in */
-.sign-out, .sign-in button, .more { min-height: 36px; padding: 6px 14px; background: transparent; color: var(--ink); border: 1px solid var(--line); border-radius: 8px; cursor: pointer; font-size: 13px; }
-.sign-in { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 14px; }
-.sign-in input { flex: 0 1 360px; min-width: 0; min-height: 36px; box-sizing: border-box; padding: 6px 10px; background: var(--panel); color: var(--ink); border: 1px solid var(--line); border-radius: 8px; font-family: var(--mono); font-size: 14px; }
+/* ------------------------------------------------------------ show more */
+.more { min-height: 36px; padding: 6px 14px; background: transparent; color: var(--ink); border: 1px solid var(--line); border-radius: 8px; cursor: pointer; font-size: 13px; }
 .people { width: 100%; border-collapse: collapse; font-size: 14px; }
 .people th, .people td { padding: 10px 12px 10px 4px; border-bottom: 1px solid var(--soft); text-align: left; overflow-wrap: anywhere; }
 .people td.num { font-family: var(--mono); }

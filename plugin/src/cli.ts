@@ -182,7 +182,7 @@ With Helix, the machine that runs jobs for everyone:
   animus ui                 Show the jobs this machine ran in your browser, by
                             project, at 127.0.0.1 (port 7420 or the next free
                             one). Ctrl-C stops it.
-  animus ui --helix         Open Helix's display in your browser, signed in.
+  animus ui --helix         Open Helix's display in your browser.
 
 Inside a job's worktree (the implementer runs these):
   animus check              Run the job's gates now.
@@ -623,9 +623,9 @@ async function main(argv: string[]): Promise<number> {
         const login = helix.helixLogin();
         if (!login) throw new AnimusError('this machine has not joined a Helix: animus join <url> <code>, with a code from whoever runs it (or set HELIX_URL and HELIX_TOKEN)');
         const base = login.url.replace(/\/+$/, '');
-        // The token goes only to the browser, which keeps it and takes it out of the address bar.
-        openPage(`${base}/#token=${encodeURIComponent(login.token)}`);
-        say(`Opening ${base} in your browser, signed in${login.name ? ` as ${login.name}` : ''}. If none opens, open ${base} and paste your Helix token from ${login.from}.`);
+        // The display needs no sign-in, so the token stays on this machine.
+        openPage(`${base}/`);
+        say(`Opening ${base} in your browser. If none opens, open it yourself.`);
         return 0;
       }
       if (command === 'ui' && !positionals.length) {
