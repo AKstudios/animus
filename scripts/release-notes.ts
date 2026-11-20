@@ -12,10 +12,11 @@ export type Deps = {
 };
 export type Notes = { breaking: { pull: Pull; text: string }[]; changes: Pull[]; direct: string[] };
 
-/** What a pull request body says under `## Breaking`, or undefined when it has no such section. */
+/** What a pull request body says under `## Breaking`, or undefined when it has no such section or the section says only "None." */
 export function breakingOf(body: string): string | undefined {
   const m = /^## Breaking[ \t]*\n([\s\S]*?)(?=^## |^<details>|(?![\s\S]))/m.exec(body.replace(/\r\n/g, '\n'));
-  return m?.[1]?.trim() || undefined;
+  const text = m?.[1]?.trim();
+  return text && !/^none\.?$/i.test(text) ? text : undefined;
 }
 
 // shortcut: only merge commits ("Merge pull request #N") name a pull request, so a squash merge is listed by its subject; upgrade when merges are squashed.
