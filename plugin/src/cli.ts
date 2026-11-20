@@ -282,6 +282,10 @@ async function main(argv: string[]): Promise<number> {
     console.log(usageFor(command));
     return 0;
   }
+  if (command === undefined || command === 'help' || command === '--help' || command === '-h') {
+    console.log(USAGE);
+    return 0;
+  }
   const cwd = process.cwd();
   if (command !== 'loop' && command !== 'session-start') keepLoop();
   /** Whether a command about one job goes to Helix: --helix says so, --local says here, and otherwise Helix when this machine has joined one (a job here is then named with --local). */
@@ -694,9 +698,6 @@ async function main(argv: string[]): Promise<number> {
     }
     case 'version':
       console.log(`${animusVersion()} (${factoryVersion()})`);
-      return 0;
-    case undefined: case 'help': case '--help': case '-h':
-      console.log(USAGE);
       return 0;
     default:
       throw new AnimusError(`unknown command ${command}\n\n${USAGE}`);
