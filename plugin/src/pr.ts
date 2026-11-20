@@ -231,15 +231,15 @@ export const prSource: PrSourceLookup = (url, cwd) => {
 export const ghLogin = (cwd: string) => gh(cwd, ['api', 'user', '--jq', '.login'], undefined, true) || undefined;
 
 /** What GitHub records about a pull request. commits holds each commit's committer date. */
-export type PrFacts = { state: PrState; createdAt: string; closedAt?: string; mergedAt?: string; mergeCommit?: string; baseRefName: string; commits: string[]; /** The pull request's last commit. */ head?: string };
+export type PrFacts = { state: PrState; createdAt: string; closedAt?: string; mergedAt?: string; mergeCommit?: string; baseRefName: string; commits: string[]; /** The pull request's last commit. */ head?: string; /** Its description. */ body?: string };
 
 export const prFacts = (url: string, cwd: string): PrFacts | undefined => {
-  const out = gh(cwd, ['pr', 'view', url, '--json', 'state,createdAt,closedAt,mergedAt,mergeCommit,baseRefName,commits,headRefOid'], undefined, true);
+  const out = gh(cwd, ['pr', 'view', url, '--json', 'state,createdAt,closedAt,mergedAt,mergeCommit,baseRefName,commits,headRefOid,body'], undefined, true);
   if (!out) return undefined;
-  const j = JSON.parse(out) as { state: PrState; createdAt: string; closedAt: string | null; mergedAt: string | null; mergeCommit: { oid: string } | null; baseRefName: string; headRefOid?: string; commits: { committedDate: string }[] };
+  const j = JSON.parse(out) as { state: PrState; createdAt: string; closedAt: string | null; mergedAt: string | null; mergeCommit: { oid: string } | null; baseRefName: string; headRefOid?: string; body?: string; commits: { committedDate: string }[] };
   return {
     state: j.state, createdAt: j.createdAt, baseRefName: j.baseRefName, commits: j.commits.map((c) => c.committedDate),
-    ...(j.headRefOid ? { head: j.headRefOid } : {}),
+    ...(j.headRefOid ? { head: j.headRefOid } : {}), ...(j.body ? { body: j.body } : {}),
     ...(j.closedAt ? { closedAt: j.closedAt } : {}), ...(j.mergedAt ? { mergedAt: j.mergedAt } : {}), ...(j.mergeCommit ? { mergeCommit: j.mergeCommit.oid } : {}),
   };
 };

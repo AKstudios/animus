@@ -69,6 +69,14 @@ export function issuesAsked(ask: string, listed: readonly ShouldFixIssue[]): { n
 export const sameFinding = (f: Finding, issue: { title: string; body?: string | undefined }) =>
   issue.title === issueTitle(f) && (issue.body === undefined || /^In `([^`]+?)(?::\d+)?`:/.exec(issue.body)?.[1] === f.file);
 
+/** Closes a pull request's should-fix issues as not planned, as the job's person; one GitHub refuses stays as it is. */
+export type CloseIssues = (p: { cwd: string; pr: string; numbers: readonly number[] }) => void;
+
+export const closeIssues: CloseIssues = ({ cwd, pr, numbers }) => {
+  // By address, as the clone may not be here; gh leaves an issue already closed as it is, so one a person settled keeps its reason.
+  for (const n of numbers) gh(cwd, ['issue', 'close', pr.replace(/\/pull\/\d+$/, `/issues/${n}`), '--reason', 'not planned'], undefined, true);
+};
+
 /** The should-fix issues a pull request's description lists under "Needs you" (pr.ts writes them). */
 export function issuesInBody(body: string): ShouldFixIssue[] {
   // The acceptance criteria always follow it; the spec further down may hold lines of the same shape.

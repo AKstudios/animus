@@ -7,7 +7,7 @@ import { test } from 'node:test';
 import type { Display, DisplayPr } from '../../plugin/display/shape.ts';
 import { view } from '../../plugin/display/view.ts';
 import { hashToken, type Config } from '../src/config.ts';
-import { openPrs, type GithubPr, type ListPrs } from '../src/open-prs.ts';
+import { openPrs, type CloseIssues, type GithubPr, type ListPrs } from '../src/open-prs.ts';
 import { serve } from '../src/server.ts';
 import { openStore } from '../src/store.ts';
 import { supervise } from '../src/supervisor.ts';
@@ -130,4 +130,19 @@ test('lists the latest closed PRs of jobs, merged or not, and is empty when GitH
   assert.deepEqual((await prs.closed()).map((c) => [c.number, c.merged, c.at]), [[1, true, '2026-11-17T12:00:00Z'], [2, false, '2026-11-17T13:00:00Z']]);
   const failing = openPrs({ store, list: github([gh(1)]).list, listClosed: async () => { throw new Error('GitHub answered 500'); } });
   assert.deepEqual([(await failing()).length, await failing.closed()], [1, []]);
+});
+
+// Protects: criterion 6. Fails when: a PR closed unmerged leaves its should-fix issues open, a merged one closes them, they are closed with another person's token, or every minute's look closes them again.
+test('a PR of a job closed without merging has the should-fix issues its description lists closed, once, as its person', async () => {
+  const { store } = table([{ n: 1, person: 'ana' }, { n: 2, person: 'ben' }]);
+  const body = '## Needs you\n\n- Should fix: #7 A problem\n- Should fix: #8 Another problem\n\n## Acceptance criteria\n';
+  const listClosed: ListPrs = async () => [gh(1, { closed_at: '2026-11-17T13:00:00Z', body }), gh(2, { merged_at: '2026-11-17T12:00:00Z', body })];
+  const asked: [string, number[], string][] = [];
+  const closeIssues: CloseIssues = async (repo, numbers, token) => { asked.push([repo, numbers, token]); };
+  let clock = 1_000_000;
+  const prs = openPrs({ store, list: github([]).list, listClosed, closeIssues, now: () => clock });
+  await prs.closed();
+  clock += 61_000;
+  await prs.closed();
+  assert.deepEqual(asked, [['https://github.com/o/app.git', [7, 8], 'ana-gh']]);
 });

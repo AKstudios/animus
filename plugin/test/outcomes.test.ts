@@ -7,6 +7,7 @@ import { join } from 'node:path';
 import { describeNumbers, numbers, outcomesFile, refreshOutcomes, type Outcomes } from '../src/outcomes.ts';
 import { runJob } from '../src/pipeline.ts';
 import type { PrFacts } from '../src/pr.ts';
+import type { CloseIssues } from '../src/issues.ts';
 import { git, tryGit } from '../src/proc.ts';
 import { clean, deps, done, fakeAgent, makeRepo, write, writeSpec } from './helpers.ts';
 
@@ -93,6 +94,18 @@ test('a closed pull request is settled and not asked about again; an open or new
   let asked = 0;
   refreshOutcomes((pr) => { if (pr === url) asked += 1; return undefined; });
   assert.equal(asked, 0);
+});
+
+// Protects: criterion 5. Fails when: a pull request closed unmerged leaves its should-fix issues open, or a merged one closes them.
+test('a pull request recorded as closed unmerged closes the should-fix issues its description lists; a merged one leaves them', async () => {
+  const body = '## Needs you\n\n- Should fix: #7 A problem\n- Should fix: #8 Another problem\n\n## Acceptance criteria\n';
+  const merged = await mergedJob();
+  const closed = await mergedJob();
+  const asked: [string, number[]][] = [];
+  const close: CloseIssues = ({ pr, numbers }) => { asked.push([pr, [...numbers]]); };
+  const shut: PrFacts = { state: 'CLOSED', createdAt: closed.facts.createdAt, closedAt: closed.facts.mergedAt!, baseRefName: 'main', commits: [], body };
+  refreshOutcomes((pr) => (pr === merged.url ? { ...merged.facts, body } : pr === closed.url ? shut : undefined), Date.now(), close);
+  assert.deepEqual(asked, [[closed.url, [7, 8]]]);
 });
 
 test('the five numbers are counted per job and split by task class', () => {

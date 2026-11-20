@@ -6,6 +6,7 @@
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { revParse } from './git.ts';
+import { closeIssues, issuesInBody, type CloseIssues } from './issues.ts';
 import { animusHome, readRuns, writeJson, type Run } from './log.ts';
 import type { PrFacts, PrState } from './pr.ts';
 import { tryGit } from './proc.ts';
@@ -61,8 +62,8 @@ function linesBetween(repo: string, from: string, to: string): { added: number; 
   return total;
 }
 
-/** Asks GitHub about every pull request in the run log whose outcome can still change, and saves what it says. */
-export function refreshOutcomes(facts: (url: string, cwd: string) => PrFacts | undefined, now = Date.now()): Outcomes {
+/** Asks GitHub about every pull request in the run log whose outcome can still change, and saves what it says; one it finds closed unmerged has its should-fix issues closed as not planned. */
+export function refreshOutcomes(facts: (url: string, cwd: string) => PrFacts | undefined, now = Date.now(), close: CloseIssues = closeIssues): Outcomes {
   const outcomes = readOutcomes();
   const last = new Map<string, Run>();
   for (const run of readRuns()) if (run.pr) last.set(run.pr, run);
@@ -80,6 +81,9 @@ export function refreshOutcomes(facts: (url: string, cwd: string) => PrFacts | u
     if (lines) o.human_lines = lines;
     const closed = f.state === 'MERGED' ? f.mergedAt : f.state === 'CLOSED' ? f.closedAt : undefined;
     if (closed) o.closed = closed;
+    // Recorded closed once: a closed outcome is settled and not asked about again.
+    const issues = f.state === 'CLOSED' ? issuesInBody(f.body ?? '') : [];
+    if (issues.length) close({ cwd: hasRepo ? run.repo : animusHome(), pr, numbers: issues.map((i) => i.number) });
     if (f.state === 'MERGED' && f.mergedAt) {
       o.ms_to_merge = Date.parse(f.mergedAt) - Date.parse(f.createdAt);
       if (hasRepo && f.mergeCommit) Object.assign(o, afterMerge(run.repo, f.baseRefName, f.mergeCommit, f.mergedAt, pr));
