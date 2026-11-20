@@ -45,6 +45,8 @@ export type HelixJob = {
   /** A fix (GLOSSARY.md), which ask marks: the job on this Helix it continues (none when no job here opened its pull request), and what was asked. Its pr is the pull request it updates, set when it is queued. */
   fix_of?: number;
   ask?: string;
+  /** A fix from a /animus comment: how many reviews and inline comments by people not on this Helix it was not given. */
+  left_out?: number;
   /** A provision job (provision.ts): queued by a failed add check to fix its project's environment; its spec is Helix's. */
   provision?: boolean;
   /** A provision job's pull request, once Helix has seen it merged or closed (provision.ts provisionEnded). */
@@ -133,6 +135,7 @@ export type CommentWatch = { position: string; handled: number[] };
 export type Store = {
   add(job: Omit<HelixJob, 'id'>): HelixJob;
   get(id: number): HelixJob | undefined;
+  /** The latest jobs, oldest first: 50 unless limit says otherwise, every one with -1. */
   list(limit?: number): HelixJob[];
   inState(state: State): HelixJob[];
   save(job: HelixJob): void;

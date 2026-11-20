@@ -420,6 +420,23 @@ test('renewing for running jobs renews only a running job\'s person, and only on
   assert.deepEqual(said, []);
 });
 
+// Protects: criterion 2. Fails when: renewal looks for running jobs among the latest 50 only.
+test('renewing for running jobs renews a running job\'s person however many jobs were submitted after it', async () => {
+  const github = await fakeGitHub();
+  const h = await helixWithApp(github);
+  await joinCleo(h);
+  h.store.add({ state: 'running', person: 'cleo', repo: 'app', spec: '', title: 'long', draft: false, submitted: '' });
+  for (let i = 0; i < 60; i++) h.store.add({ state: 'ended', person: 'cleo', repo: 'app', spec: '', title: `later ${i}`, draft: false, submitted: '' });
+  storedEnd(new Date(Date.now() + 10 * 60 * 1000));
+
+  await renewForRunningJobs(h.store, h.config, () => {}, github);
+  const token = readFileSync(liveTokenFile('cleo'), 'utf8');
+  h.stop();
+  await github.close();
+
+  assert.equal(token, 'ghu_2');
+});
+
 // Protects: the jobs that did all their work and then could not open their pull request. Fails when: a job starts for a repository whose installation lacks Pull requests (or Contents) write, or the reason does not say what the app needs and who accepts it.
 test('a job for a repository whose installation cannot write pull requests fails before it starts, saying what the app needs', async () => {
   const github = await fakeGitHub();

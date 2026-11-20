@@ -176,6 +176,8 @@ function main(argv: string[]): number | undefined | Promise<number> {
         if (bad.length) console.error(describeFindings(name, bad));
       }
       const say = (line: string) => console.error(`${new Date().toISOString().slice(0, 19)} ${line}`);
+      // Last resort: a rejection nothing awaited is said, and Helix and its running jobs go on.
+      process.on('unhandledRejection', (err) => say(`Helix failed and went on: ${err instanceof Error ? err.stack ?? err.message : String(err)}`));
       // A pause left by helix upgrade ends with the restart it asked for.
       if (existsSync(pauseFile(home)) && readFileSync(pauseFile(home), 'utf8').trim() === UNTIL_RESTART) rmSync(pauseFile(home));
       if (existsSync(pauseFile(home))) say(`${pauseFile(home)} is there, so no job starts until it is removed`);
