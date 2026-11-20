@@ -35,8 +35,8 @@ test('a small job is implemented, gated, reviewed by a fresh read-only session, 
   assert.ok(!existsSync(calls[0]!.cwd));
   // The body shows each criterion with its check's result and the reviewer's verdict.
   const body = d.published[0]!.body;
-  assert.match(body, /\| 1 \| The feature says done\. \| passed: `grep -q done src\/feature\.txt` \| met: src\/feature\.txt \|/);
-  assert.match(body, /Nothing flagged/);
+  assert.match(body, /\| 1 \| The feature says done\. \| passed \| met \|[^]*Check: passed: `grep -q done src\/feature\.txt`[^]*Review: met: src\/feature\.txt/);
+  assert.doesNotMatch(body, /Needs you/);
 });
 
 // Protects: a job Helix submitted from an issue. Fails when: its pull request does not say it closes the issue, or a failure report's draft does.
@@ -161,7 +161,7 @@ test('blockers still open after the one fix round end the job as a draft PR that
   const d = deps(agent);
   const run = await runJob({ repo, specFile: writeSpec(SMALL) }, d);
   assert.equal(run.outcome, 'draft-pr');
-  assert.match(d.published[0]!.body, /Still open after the review's fix round: It is wrong\./);
+  assert.match(d.published[0]!.body, /1 blocker still open: It is wrong\./);
   assert.equal(run.review?.open, 1);
   assert.deepEqual(run.review?.log?.map((l) => l.fate), ['fixed', 'open']);
 });
@@ -223,7 +223,7 @@ test('a criterion still unmet after the fix round ends as a draft PR that names 
   const run = await runJob({ repo, specFile: writeSpec(SMALL) }, d);
   assert.equal(run.outcome, 'draft-pr');
   assert.equal(d.published[0]!.draft, true);
-  assert.match(d.published[0]!.body, /Still open after the review's fix round: .*[Cc]riterion 1.*still missing/);
+  assert.match(d.published[0]!.body, /blockers? still open: .*[Cc]riterion 1.*still missing/);
   assert.equal(run.review?.open, 1);
 });
 
@@ -235,7 +235,7 @@ test('a trivial job skips the review and says so in the PR', async () => {
   assert.equal(run.outcome, 'pr');
   assert.deepEqual([calls[0]!.tier, calls[0]!.effort], ['fast', 'low']);
   assert.equal(run.review, null);
-  assert.match(d.published[0]!.body, /Not reviewed: a trivial job skips the review/);
+  assert.match(d.published[0]!.body, /Review: no review: a trivial job skips it/);
 });
 
 test('an implementer that raises the job to risky gets it reviewed at the deep tier', async () => {
@@ -326,7 +326,7 @@ test('a ui job hands the reviewer the screenshots a script took, and lists them 
   assert.equal(calls[1]!.role, 'ui-reviewer');
   assert.match(calls[1]!.prompt, /build\/home@390x844\.png/);
   assert.match(calls[0]!.prompt, /This is a UI job on the app target/);
-  assert.match(d.published[0]!.body, /## Screenshots[\s\S]*build\/home@390x844\.png/);
+  assert.match(d.published[0]!.body, /Screenshots \(1\)[\s\S]*build\/home@390x844\.png/);
 });
 
 test('pushed screenshots are shown in the PR as images, and a failed push falls back to their paths', async () => {
@@ -362,7 +362,7 @@ test('a job of another type that changes a ui target\'s files gets screenshots t
   assert.equal(run.outcome, 'pr');
   assert.deepEqual(targets, ['app']);
   assert.equal(calls[1]!.role, 'reviewer');
-  assert.match(d.published[0]!.body, /## Screenshots/);
+  assert.match(d.published[0]!.body, /Screenshots \(1\)/);
 });
 
 const BUG = 'size: small\ndifficulty: routine\ntype: bug';

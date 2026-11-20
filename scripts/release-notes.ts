@@ -14,7 +14,7 @@ export type Notes = { breaking: { pull: Pull; text: string }[]; changes: Pull[];
 
 /** What a pull request body says under `## Breaking`, or undefined when it has no such section. */
 export function breakingOf(body: string): string | undefined {
-  const m = /^## Breaking[ \t]*\n([\s\S]*?)(?=^## |(?![\s\S]))/m.exec(body.replace(/\r\n/g, '\n'));
+  const m = /^## Breaking[ \t]*\n([\s\S]*?)(?=^## |^<details>|(?![\s\S]))/m.exec(body.replace(/\r\n/g, '\n'));
   return m?.[1]?.trim() || undefined;
 }
 

@@ -59,7 +59,7 @@ test('a medium job is cut by the planner and done slice by slice, each in a fres
   assert.deepEqual(run.gates[0]!.checks.map((c) => [c.name, c.skipped]), [['test', true], ['acceptance-1', false], ['acceptance-2', true], ['acceptance-3', true]]);
   assert.deepEqual(run.gates[2]!.checks.filter((c) => !c.skipped).map((c) => c.name), ['acceptance-1', 'acceptance-2', 'acceptance-3']);
 
-  assert.match(d.published[0]!.body, /^Done in this order[^\n]*\n\n1\. \*\*The feature\*\*: src\/feature\.txt says done\.\n2\. \*\*The second file\*\*: src\/second\.txt says two\.\n3\. \*\*The third file\*\*: src\/third\.txt says three\.\n/);
+  assert.match(d.published[0]!.body, /^Done in this order[^\n]*\n\n1\. \*\*The feature\*\*: src\/feature\.txt says done\.\n2\. \*\*The second file\*\*: src\/second\.txt says two\.\n3\. \*\*The third file\*\*: src\/third\.txt says three\.\n/m);
 });
 
 test('a slice whose gates fail gets its own fix rounds in its own session, and one that still fails ends the job with the slices not done', async () => {
