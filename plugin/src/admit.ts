@@ -1,13 +1,14 @@
 // Admit (docs/adr/0007): decides whether a spec can run on a project, against
 // the factory and the project's profile, and lists every problem at once, each
 // marked as fixed in the spec or in the profile. A script that only reads: no
-// model, no serve command, no acceptance command. A job calls it before any
+// model, no serve command, no acceptance command (the shell only parses each
+// one, to refuse a command that could never run). A job calls it before any
 // work, so a job never fails at start for a reason admit did not name.
 import { readFileSync } from 'node:fs';
 import { basename } from 'node:path';
 import { checksFor, loadProfile, parseProfile, PROFILE_PATH, type Profile, type UiPage, type UiTarget } from './profile.ts';
 import { resolvePlan, type Factory, type Plan } from './profiles.ts';
-import { AnimusError, tryGit } from './proc.ts';
+import { AnimusError, shellSyntaxError, tryGit } from './proc.ts';
 import { parseSpec, type Spec } from './spec.ts';
 import { isLiteralPage, pagesOf, uiTarget } from './ui.ts';
 import { baseCommit } from './workspace.ts';
@@ -65,6 +66,12 @@ export function admit(factory: Factory, text: string, facts: Facts, name = 'spec
   if (!proves && !spec.criteria.some((c) => c.commands.length)) {
     specProblem('no acceptance criterion has a `$ command` line, so nothing is run to check the work: put one under at least one criterion');
   }
+  spec.criteria.forEach((c, i) => {
+    for (const command of c.commands) {
+      const why = shellSyntaxError(command);
+      if (why) specProblem(`criterion ${i + 1}'s command is not valid shell, so it would fail without running: \`${command}\` (${why}). A \`$\` line holds only the command; put notes in the criterion's text`);
+    }
+  });
 
   const base = spec.base ?? profile.base;
   const baseThere = facts.hasBranch(base);

@@ -38,14 +38,22 @@ const CHECK_TIMEOUT_MS = 20 * 60 * 1000;
 /** Runs a profile command through the shell, stdout and stderr together. */
 export function sh(command: string, cwd: string, env: NodeJS.ProcessEnv = {}, timeout = CHECK_TIMEOUT_MS): ShResult {
   const started = Date.now();
-  const r = spawnSync('/bin/sh', ['-c', `${command} 2>&1`], {
+  // stderr is joined to stdout before the command is read, so a command the shell cannot parse shows why.
+  const r = spawnSync('/bin/sh', ['-c', 'exec 2>&1; eval "$1"', 'sh', command], {
     cwd, encoding: 'utf8', env: { ...process.env, ...env }, timeout, maxBuffer: 64 * 1024 * 1024,
   });
   const code = r.status ?? (r.signal ? 128 : 1);
   return { code, output: r.stdout ?? '', ms: Date.now() - started };
 }
 
-export const ANSI = /\x1b\[[0-9;?]*[A-Za-z]/g;
+/** Why the shell cannot parse a command, or undefined when it can. Reads the command without running it. */
+export function shellSyntaxError(command: string): string | undefined {
+  const r = spawnSync('/bin/sh', ['-n', '-c', command], { encoding: 'utf8' });
+  if (r.status === 0) return undefined;
+  return (r.stderr || r.error?.message || `sh exited ${r.status}`).trim().split('\n')[0];
+}
+
+export const ANSI =/\x1b\[[0-9;?]*[A-Za-z]/g;
 const ERROR_LINE = /\b(error|errors|failed|failure|fail|exception|traceback|not found|no such file|cannot|can't|no tests ran|assert\w*)\b|✗|×|✖/i;
 
 /**
