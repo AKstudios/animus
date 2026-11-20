@@ -358,7 +358,7 @@ whose GitHub token may push to the repository can then submit for it.
 
 #### `animus project list`
 
-The projects on Helix: state (ready, checking or failed, with the reason), GitHub address and who added each.
+The projects on Helix: state (ready, checking or failed, with the reason), GitHub address and who added each. A failed project's whole reason follows the table when its row cannot hold it.
 
 #### `animus project remove <name>`
 

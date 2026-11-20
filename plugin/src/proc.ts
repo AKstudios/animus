@@ -70,5 +70,14 @@ export function failureExcerpt(text: string, lines: number): string {
   return out.length > EXCERPT_MAX ? `…\n${out.slice(-EXCERPT_MAX)}` : out;
 }
 
+/**
+ * Why a process that should have printed JSON did not: its start, where a CLI
+ * says what it refused, and its end, where a crash says how it ended.
+ */
+export function exitExcerpt(text: string, chars = 400): string {
+  const t = text.replace(ANSI, '').trim();
+  return t.length <= chars * 2 ? t : `${t.slice(0, chars)}\n…\n${t.slice(-chars)}`;
+}
+
 const EXCERPT_LINE = 300;
 const EXCERPT_MAX = 8_000;
