@@ -112,6 +112,20 @@ test('a draft session is given the project, and the problems admit finds go back
   assert.doesNotMatch(readFileSync(join(folder, 'summary.md'), 'utf8'), /problem/i);
 });
 
+// Protects: a `$` line with notes on it never reaches a job. Fails when: a command the shell cannot parse is not sent back to the drafter, or the drafter is not told a `$` line holds only the command.
+test('a draft whose command is not valid shell goes back to the drafter, which is told a $ line is only the command', () => {
+  const folder = projectFolder();
+  const noted = FEATURE_SPEC.replace('$ npm test', '$ npm test  (src/page.test.ts: add a case for `/page`)');
+  const { agent, calls } = fakeAgent([() => ({ output: { spec: noted } }), () => ({ output: { spec: FEATURE_SPEC } })]);
+
+  writeDraft({ ...deps(agent), folder, cwd: makeRepo(), env: {} });
+
+  assert.match(calls[0]!.system ?? '', /nothing else on that line/);
+  assert.equal(calls.length, 2);
+  assert.match(calls[1]!.prompt, /criterion 1's command is not valid shell/);
+  assert.equal(readFileSync(join(folder, 'draft.md'), 'utf8'), FEATURE_SPEC);
+});
+
 // Protects: criterion 6's once. Fails when: a retry that fails loses the first draft, or the draft is posted without its problems, or the session is asked a third time.
 test('a retry that fails leaves the first draft, with its problems in the summary', () => {
   const folder = projectFolder();
