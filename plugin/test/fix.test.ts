@@ -297,7 +297,7 @@ test('animus start <pr> "<text>" fixes the pull request here from it alone when 
   assert.match(refused.out, /usage: animus start <pr> "<what to change>"/);
 });
 
-const notReady = () => ({ output: { status: 'not-ready', summary: 'It misses the point.', criteria: [], findings: [{ severity: 'blocker', problem: 'It is wrong.' }] } });
+const notReady = () => ({ output: { status: 'not-ready', summary: 'It misses the point.', criteria: [], findings: [] } });
 
 // Protects: criterion 4. Fails when: a pull request no job opened, a merged or closed one, or one with a fix running or waiting is fixed anyway, or the refusal does not name the fix.
 test('a fix is refused, with one line, on a pull request no job opened, a merged or closed one, and one with a fix running or waiting', async () => {
@@ -345,7 +345,6 @@ test('a fix the reviewer refuses pushes nothing on a ready pull request, and pus
   assert.equal(ready.run.outcome, 'failed');
   assert.match(ready.run.reason!, /the reviewer says the work is not ready: It misses the point/);
   assert.equal(ready.d.published.length, 0);
-  assert.ok(ready.d.lines.some((l) => /It is wrong\./.test(l)));
 
   const draft = await fixOf(repo, 'Say it twice', fakeAgent([say('done differently'), () => notReady()]).agent, { prDraft: () => true });
   assert.equal(draft.run.outcome, 'draft-pr');

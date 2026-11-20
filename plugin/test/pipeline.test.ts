@@ -166,6 +166,67 @@ test('blockers still open after the one fix round end the job as a draft PR that
   assert.deepEqual(run.review?.log?.map((l) => l.fate), ['fixed', 'open']);
 });
 
+// Protects: criterion 1 of the review-blockers spec. Fails when: a not-ready status ends the job though the review holds blockers a fix round would settle.
+test('a not-ready review with a blocker sends it to the fix round like a reviewed one', async () => {
+  const repo = makeRepo();
+  const blocker = { severity: 'blocker', file: 'src/feature.txt', problem: 'It does not say please.', cause: 'implementation' };
+  const { agent, calls } = fakeAgent([
+    say('done'),
+    () => ({ output: { status: 'not-ready', summary: 'Not ready.', criteria: [], findings: [blocker] } }),
+    say('done please'),
+    () => clean(),
+  ]);
+  const run = await runJob({ repo, specFile: writeSpec(SMALL) }, deps(agent));
+  assert.equal(run.outcome, 'pr');
+  assert.deepEqual(calls.map((c) => c.role), ['implementer', 'reviewer', 'implementer', 'reviewer']);
+  assert.match(calls[2]!.prompt, /It does not say please/);
+});
+
+// Protects: criterion 2. Fails when: a not-ready review with nothing to fix is passed on, or loses the reviewer's summary as the reason.
+test('a not-ready review with no blocker ends the job as failed with the summary as the reason', async () => {
+  const repo = makeRepo();
+  const { agent, calls } = fakeAgent([say('done'), () => ({ output: { status: 'not-ready', summary: 'Nothing here is usable.', criteria: [], findings: [{ severity: 'should-fix', problem: 'Name it better.' }] } })]);
+  const run = await runJob({ repo, specFile: writeSpec(SMALL) }, deps(agent));
+  assert.equal(run.outcome, 'draft-pr');
+  assert.match(run.reason!, /Nothing here is usable\./);
+  assert.equal(calls.length, 2);
+});
+
+const unmet = (proof: string) => () => ({ output: { status: 'reviewed', summary: 'One criterion fails.', criteria: [{ criterion: 1, met: false, proof }], findings: [] } });
+
+// Protects: criterion 3. Fails when: an unmet verdict without a blocker lets the job open a ready pull request.
+test('a criterion the review marks unmet becomes a blocker naming it, with the proof, and goes to the fix round', async () => {
+  const repo = makeRepo();
+  const { agent, calls } = fakeAgent([say('done'), unmet('src/feature.txt lacks please'), say('done please'), () => clean()]);
+  const run = await runJob({ repo, specFile: writeSpec(SMALL) }, deps(agent));
+  assert.equal(run.outcome, 'pr');
+  assert.deepEqual(calls.map((c) => c.role), ['implementer', 'reviewer', 'implementer', 'reviewer']);
+  assert.match(calls[2]!.prompt, /criterion 1[\s\S]*src\/feature\.txt lacks please/i);
+  assert.deepEqual([run.review?.blockers, run.review?.acted_on], [1, 1]);
+});
+
+// Protects: criterion 3's "no blocker of that review names it". Fails when: a blocker that already gives the criterion number is doubled by the script.
+test('an unmet criterion that a blocker already names by number adds no second blocker', async () => {
+  const repo = makeRepo();
+  const named = () => ({ output: { status: 'reviewed', summary: 'x', criteria: [{ criterion: 1, met: false, proof: 'p' }], findings: [{ severity: 'blocker', criterion: 1, problem: 'Says nothing.' }] } });
+  const { agent, calls } = fakeAgent([say('done'), named, say('done please'), () => clean()]);
+  const run = await runJob({ repo, specFile: writeSpec(SMALL) }, deps(agent));
+  assert.equal(run.review?.blockers, 1);
+  assert.doesNotMatch(calls[2]!.prompt, /Criterion 1 is not met/);
+});
+
+// Protects: criterion 4. Fails when: a criterion still unmet after the fix round opens a ready pull request, or the description does not name it.
+test('a criterion still unmet after the fix round ends as a draft PR that names it as open', async () => {
+  const repo = makeRepo();
+  const { agent } = fakeAgent([say('done'), unmet('first'), say('done again'), unmet('still missing')]);
+  const d = deps(agent);
+  const run = await runJob({ repo, specFile: writeSpec(SMALL) }, d);
+  assert.equal(run.outcome, 'draft-pr');
+  assert.equal(d.published[0]!.draft, true);
+  assert.match(d.published[0]!.body, /Still open after the review's fix round: .*[Cc]riterion 1.*still missing/);
+  assert.equal(run.review?.open, 1);
+});
+
 test('a trivial job skips the review and says so in the PR', async () => {
   const repo = makeRepo();
   const { agent, calls } = fakeAgent([say('done')]);
