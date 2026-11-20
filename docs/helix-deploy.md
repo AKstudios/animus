@@ -70,12 +70,19 @@ written `<org>` below.
      but it.
    - **Webhook**: untick **Active**. Helix takes no events from GitHub.
    - **Repository permissions**: Contents read and write, Pull requests read
-     and write; Metadata read-only comes with them. Nothing else: Workflows in
-     particular would let a job change CI, which the factory keeps for people.
+     and write, Issues read and write; Metadata read-only comes with them.
+     Nothing else: Workflows in particular would let a job change CI, which
+     the factory keeps for people. Issues is for the should-fix issues a job
+     opens with its pull request, and closes when the pull request is closed
+     unmerged ([ADR 0012](adr/0012-should-fix-findings-become-github-issues.md)).
      A permission changed later reaches an installation only once its owner
      accepts it (its **Settings**, **GitHub Apps**, the app, **Review
-     request**); until then Helix refuses jobs for its repositories, saying so,
-     and `animus join` lists them.
+     request**); until then Helix refuses jobs for its repositories when
+     Contents or Pull requests is missing, saying so, and `animus join` lists
+     them. A missing Issues is never a reason to refuse: until the owner
+     accepts it, jobs run as before and their pull request lists the
+     should-fix findings as text, with one line saying why no issues were
+     opened.
    - **Logo**: [helix/deploy/github/logo.png](../helix/deploy/github/logo.png).
    - **Where can this GitHub App be installed?**: **Any account**, so
      projects outside `<org>` can install it too.

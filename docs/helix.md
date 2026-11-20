@@ -211,7 +211,9 @@ with the person's own token, so they show as that person with the app's badge.
 - A plain `/animus <what to change>` on an open pull request an Animus job
   opened is a fix: it gets a 👀 and queues a [fix](#fixes) with that text as
   its ask, as `animus start <pr> "<text>" --helix` does.
-  `/animus fix <what to change>` does the same. When a job on this Helix
+  `/animus fix <what to change>` does the same. `/animus fix #61 #62` hands
+  the fix those should-fix issues, and `/animus fix should-fix` every open
+  one the pull request lists ([Fixes](#fixes)). When a job on this Helix
   pushed to the pull request, Helix fetches its review bodies and inline
   comments made since the last push of its latest job and gives them to the
   fix as references. The fix comments on the pull request when it pushed (what
@@ -500,6 +502,32 @@ continues, or of the pull request. Its push is never forced, so one whose
 branch changed on GitHub while it ran pushes nothing and ends failed with "the
 branch changed while this fix ran: fix again". Its job page names and links
 the job it fixes.
+
+### Should-fix issues
+
+A job's pull request opens with a GitHub issue, labelled `should-fix`, for
+each should-fix finding of its review, listed by number and title under
+"Needs you" ([ADR 0012](adr/0012-should-fix-findings-become-github-issues.md)).
+The job opens them, and the label when the repository lacks it, as its
+person, with their GitHub App token, which needs **Issues** read and write
+([helix-deploy.md](helix-deploy.md#the-github-app)). An app made before that
+permission gets it in its settings, and each installation's owner then
+accepts it (**Settings**, **GitHub Apps**, the app, **Review request**).
+Until they do, and for a repository with issues turned off or a profile that
+sets `should_fix_issues: false` ([configuration.md](configuration.md)), jobs
+run as before and the pull request lists the findings as text, with one line
+saying why no issues were opened. Neither `helix check` nor the permission
+check before a job asks for Issues, so its absence never refuses a job or a
+project.
+
+A fix whose ask names issues (`/animus fix #61`, from the pull request's
+person or the owner) is handed their text; one whose ask says `should-fix`
+and no number gets every open should-fix issue the pull request lists. Its
+review says which it settled, and the pull request gains `Closes #N` (or
+`Refs #N` where `issue_link` is `refs`) for each. When Helix sees a pull
+request one of its jobs opened closed without merging, it closes that pull
+request's open should-fix issues as not planned, as its person. A merged one
+leaves its unsettled issues open.
 
 ## Lessons
 
