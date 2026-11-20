@@ -51,7 +51,7 @@ export type PrInput = {
 
 const cell = (text: string) => text.replace(/\s*\n\s*/g, ' ').replace(/\|/g, '\\|');
 const where = (f: Finding) => (f.file ? `\`${f.file}${f.line ? `:${f.line}` : ''}\` ` : '');
-const finding = (f: Finding) => `${where(f)}${f.problem}${f.fix ? ` (fix: ${f.fix})` : ''}`;
+const finding = (f: Finding) => `${where(f)}${cell(f.problem)}${f.fix ? ` (fix: ${cell(f.fix)})` : ''}`;
 const OUTPUT_LINES = 25;
 
 function tail(output: string): string {
@@ -59,68 +59,78 @@ function tail(output: string): string {
   return (lines.length > OUTPUT_LINES ? ['…', ...lines.slice(-OUTPUT_LINES)] : lines).join('\n').replaceAll('```', "'''");
 }
 
+const fold = (summary: string, ...lines: string[]) => ['<details>', `<summary>${summary}</summary>`, '', ...lines, '', '</details>', ''];
+/** A criterion's text cut to one table line. */
+const oneLine = (text: string) => { const t = cell(text); return t.length > 100 ? `${t.slice(0, 99)}…` : t; };
+
 export function prBody(p: PrInput): string {
   const out: string[] = [];
   if (p.failure) out.push(`**This job failed and needs you.** ${p.failure.split('\n')[0]}`, '');
-  if (p.slices?.length) {
-    out.push('Done in this order, each slice by a fresh session and gated before the next began:', '');
-    p.slices.forEach((x, i) => out.push(`${i + 1}. **${cell(x.title)}**: ${x.summary ? cell(x.summary) : '*not finished*'}`));
-    out.push('');
-  } else if (p.summary) out.push(p.summary, '');
+  if (p.summary) out.push(p.summary, '');
   if (p.closes) out.push(`${p.issueLink === 'refs' ? 'Refs' : 'Closes'} #${p.closes}`, '');
 
   if (p.breaking) out.push('## Breaking', '', p.breaking.trim(), '');
 
   const here: string[] = [];
-  if (p.failure && p.failure.includes('\n')) here.push(`- The failure in full:\n\n\`\`\`\n${tail(p.failure)}\n\`\`\``);
-  for (const f of p.open) here.push(`- Still open after the review's fix round: ${finding(f)}`);
-  for (const f of p.review?.findings.filter((x) => x.for_person) ?? []) here.push(`- The reviewer asks you: ${finding(f)}`);
-  if (p.caughtUp?.resolved?.length) here.push(`- Conflicts with ${p.caughtUp.branch} that the implementer resolved: ${p.caughtUp.resolved.map((f) => `\`${f}\``).join(', ')}. No reviewer read the resolution; the gates passed on it.`);
+  for (const f of p.open) here.push(`- ${p.open.length === 1 ? '1 blocker' : 'Blocker'} still open: ${finding(f)}`);
+  for (const f of p.review?.findings.filter((x) => x.for_person) ?? []) here.push(`- The reviewer asks: ${finding(f)}`);
+  p.spec.criteria.forEach((c, i) => { if (!c.commands.length) here.push(`- Criterion ${i + 1} has no check: ${p.review ? 'only the reviewer judged it' : 'nothing checked it'}`); });
+  for (const f of p.review?.findings.filter((x) => x.severity === 'should-fix' && !x.for_person) ?? []) here.push(`- Should fix: ${finding(f)}`);
   if (p.protectedTouched.length) here.push(`- Changes under protected paths: ${p.protectedTouched.map((f) => `\`${f}\``).join(', ')}`);
-  for (const e of p.escalations) here.push(`- The implementer raised the job to ${[e.size, e.difficulty].filter(Boolean).join(', ')}: ${e.why}`);
-  const unproved = p.spec.criteria.flatMap((c, i) => (c.commands.length ? [] : [i + 1]));
-  if (unproved.length) here.push(`- ${unproved.length === 1 ? `Criterion ${unproved[0]} has` : `Criteria ${unproved.join(', ')} have`} no check command: ${p.review ? 'only the reviewer judged ' : 'nothing checked '}${unproved.length === 1 ? 'it' : 'them'}.`);
-  if (!p.review && !p.failure) here.push(`- Not reviewed: a ${p.plan.size} job skips the review.`);
-  if (p.notes) here.push(`- From the implementer: ${cell(p.notes)}`);
-  out.push('## Review here', '', ...(here.length ? here : ['Nothing flagged: the gates passed, and the review found nothing to fix.']), '');
+  if (here.length) out.push('## Needs you', '', ...here, '');
 
   if (p.fixes?.length) out.push('## Fixes', '', '| # | Ask | Job | Cost |', '| --- | --- | --- | --- |', ...p.fixes.map((f, i) => `| ${i + 1} | ${cell(f.ask)} | \`${f.job}\` | $${f.cost_usd.toFixed(2)} |`), '');
 
-  out.push('## Acceptance criteria', '', '| # | Criterion | Check | Reviewer |', '| --- | --- | --- | --- |');
+  out.push('## Acceptance criteria', '', '| # | Criterion | Check | Review |', '| --- | --- | --- | --- |');
   p.spec.criteria.forEach((c, i) => {
-    const ran = p.gates.filter((g) => g.criterion === i + 1);
-    const check = !c.commands.length ? 'no command' : !ran.length ? 'not run' : ran.map((g) => `${g.ok ? 'passed' : '**failed**'}: \`${cell(g.command)}\``).join('<br>');
+    const ran = p.gates.filter((g) => g.criterion === i + 1 && !g.skipped);
+    const check = !c.commands.length || !ran.length ? 'none' : ran.every((g) => g.ok) ? 'passed' : '**failed**';
     const v = p.review?.criteria.find((x) => x.criterion === i + 1);
-    out.push(`| ${i + 1} | ${cell(c.text)} | ${check} | ${v ? `${v.met ? 'met' : '**not met**'}: ${cell(v.proof)}` : p.review ? 'no verdict' : 'not reviewed'} |`);
+    out.push(`| ${i + 1} | ${oneLine(c.text)} | ${check} | ${v ? (v.met ? 'met' : '**not met**') : 'no verdict'} |`);
   });
   out.push('');
 
-  const ran = p.gates.filter((g) => !g.skipped);
-  if (ran.length) {
-    out.push(`<details><summary>Evidence: the output of ${ran.length} check(s), captured by Animus on the final commit</summary>`, '');
-    for (const g of ran) out.push(`**${g.name}** ${g.ok ? 'passed' : 'failed'} in ${(g.ms / 1000).toFixed(1)}s: \`${g.command}\``, '', '```', tail(g.output), '```', '');
-    out.push('</details>', '');
-  }
-  const skipped = p.gates.filter((g) => g.skipped);
-  if (skipped.length) out.push(`Skipped: ${skipped.map((g) => `${g.name} (${g.output})`).join('; ')}.`, '');
-
   if (p.shots?.files.length) {
     const urls = p.shots.urls;
-    out.push('## Screenshots', '', `Animus took these of the running app on the final commit${p.review ? ', and the reviewer looked at them' : ''}. Each is one window high; a taller page comes in numbered parts from the top.`, '');
+    const lines = [`Animus took these of the running app on the final commit${p.review ? ', and the reviewer looked at them' : ''}. Each is one window high; a taller page comes in numbered parts from the top.`, ''];
     for (const f of p.shots.files) {
       const name = basename(f).replace(/\.[^.]+$/, '');
       const url = urls?.[f];
       const width = Number(/@(\d+)x/.exec(name)?.[1] ?? 0);
-      if (url) out.push(`**${name}**`, '', width && width <= 500 ? `<img src="${url}" alt="${name}" width="${width}">` : `![${name}](${url})`, '');
-      else out.push(`- \`${f}\``);
+      if (url) lines.push(`**${name}**`, '', width && width <= 500 ? `<img src="${url}" alt="${name}" width="${width}">` : `![${name}](${url})`, '');
+      else lines.push(`- \`${f}\``);
     }
-    out.push(urls ? `The images are on the branch \`${p.shots.branch}\`, which is not part of this change. Delete it when you no longer need them.` : `The images were not pushed. They are on the machine that ran the job, in \`${p.shots.dir}\`.`, '');
+    lines.push(urls ? `The images are on the branch \`${p.shots.branch}\`, which is not part of this change. Delete it when you no longer need them.` : `The images were not pushed. They are on the machine that ran the job, in \`${p.shots.dir}\`.`);
+    out.push(...fold(`Screenshots (${p.shots.files.length})`, ...lines));
   }
-  const followUps = p.review?.findings.filter((f) => f.severity === 'should-fix' && !f.for_person) ?? [];
-  if (followUps.length) out.push('## Follow-ups', '', 'Should-fix findings that did not go back for a fix:', '', ...followUps.map((f) => `- ${finding(f)}`), '');
 
-  const review = !p.review ? 'no review' : `${p.reviewRounds} review round(s): ${p.review.summary}`;
-  out.push('## Run', '', `- Profile: ${p.plan.size}, ${p.plan.difficulty}, ${p.plan.type}`, `- Models: ${p.models}`, `- Gates: ${p.gateAttempts} run(s), sent back ${p.fixRounds} time(s)`, `- Review: ${cell(review)}`, ...(p.caughtUp ? [`- Caught up with ${p.caughtUp.branch} at ${p.caughtUp.commit}, merged in before the push`] : []), `- Cost: $${p.cost_usd.toFixed(2)} (API-equivalent)`, '', `Built by Animus, job \`${p.job}\`.`);
+  const ran = p.gates.filter((g) => !g.skipped);
+  const skipped = p.gates.filter((g) => g.skipped);
+  const evidence: string[] = [];
+  p.spec.criteria.forEach((c, i) => {
+    const v = p.review?.criteria.find((x) => x.criterion === i + 1);
+    const cmds = p.gates.filter((g) => g.criterion === i + 1 && !g.skipped).map((g) => `${g.ok ? 'passed' : '**failed**'}: \`${cell(g.command)}\``);
+    evidence.push(`${i + 1}. ${oneLine(c.text)}`, `   - Check: ${cmds.length ? cmds.join('<br>') : c.commands.length ? 'not run' : 'no command'}`, `   - Review: ${v ? `${v.met ? 'met' : '**not met**'}: ${cell(v.proof)}` : p.review ? 'no verdict' : 'not reviewed'}`);
+  });
+  evidence.push('');
+  for (const g of ran) evidence.push(`**${g.name}** ${g.ok ? 'passed' : 'failed'} in ${(g.ms / 1000).toFixed(1)}s: \`${g.command}\``, '', '```', tail(g.output), '```', '');
+  if (skipped.length) evidence.push(`Skipped: ${skipped.map((g) => `${g.name} (${g.output})`).join('; ')}.`);
+  out.push(...fold(`Evidence: the output of ${ran.length} check${ran.length === 1 ? '' : 's'}, captured by Animus on the final commit`, ...evidence));
+
+  const built: string[] = [];
+  if (p.slices?.length) {
+    built.push('Done in this order, each slice by a fresh session and gated before the next began:', '');
+    p.slices.forEach((x, i) => built.push(`${i + 1}. **${cell(x.title)}**: ${x.summary ? cell(x.summary) : '*not finished*'}`));
+    built.push('');
+  }
+  for (const e of p.escalations) built.push(`- The implementer raised the job to ${[e.size, e.difficulty].filter(Boolean).join(', ')}: ${e.why}`);
+  if (p.notes) built.push(`- From the implementer: ${cell(p.notes)}`);
+  if (p.caughtUp?.resolved?.length) built.push(`- Conflicts with ${p.caughtUp.branch} that the implementer resolved: ${p.caughtUp.resolved.map((f) => `\`${f}\``).join(', ')}. No reviewer read the resolution; the gates passed on it.`);
+  built.push(`- Review: ${cell(!p.review ? `no review${p.failure ? '' : `: a ${p.plan.size} job skips it`}` : `${p.reviewRounds} review round(s): ${p.review.summary}`)}`);
+  out.push(...fold('How it was built', ...built));
+
+  out.push(...fold('Run', `- Profile: ${p.plan.size}, ${p.plan.difficulty}, ${p.plan.type}`, `- Models: ${p.models}`, `- Gates: ${p.gateAttempts} run(s), sent back ${p.fixRounds} time(s)`, ...(p.caughtUp ? [`- Caught up with ${p.caughtUp.branch} at ${p.caughtUp.commit}, merged in before the push`] : []), `- Cost: $${p.cost_usd.toFixed(2)} (API-equivalent)`));
+  out.push(`Built by Animus, job \`${p.job}\`.`);
   const body = maskSecrets(out.join('\n'));
   // The spec rides along, so a fix can run from the pull request alone; fenced longer than any fence it holds.
   const fence = '`'.repeat(Math.max(3, ...[...p.spec.text.matchAll(/`+/g)].map((m) => m[0].length + 1)));

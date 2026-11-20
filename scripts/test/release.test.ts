@@ -55,6 +55,12 @@ test('counts every commit when there is no release tag yet', () => {
   assert.equal(collect(fake('Merge pull request #1 from a/b', '')).changes.length, 1);
 });
 
+// Protects: criterion 4 of the quick-to-read spec. Fails when: Breaking, placed above the folded blocks, is read to the end of the description or not found.
+test('breakingOf stops at the next section or folded block', () => {
+  assert.equal(breakingOf('s\n\n## Breaking\n\nA is now B.\n\n<details>\n<summary>Run</summary>\n\nx\n</details>\n'), 'A is now B.');
+  assert.equal(breakingOf('s\n\n## Breaking\n\nA is now B.\n\n## Needs you\n\n- x\n\n<details>\n'), 'A is now B.');
+});
+
 test('breakingOf ignores an empty section', () => {
   assert.equal(breakingOf('## Breaking\n\n## Review here\n'), undefined);
 });
