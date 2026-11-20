@@ -60,9 +60,9 @@ test('/helix jobs privately lists the sender\'s queued, running and waiting jobs
   h.stop();
 
   assert.deepEqual(h.respondedTo(), [[
-    `Job ${running.id} running: runs (app) https://slack.com/app_redirect?channel=D0ANA&message_ts=1.5`,
-    `Job ${queued.id} queued: waits (app)`,
-    `Job ${asking.id} needs input: asks (app) https://example.test/pr/1`,
+    `Job ${running.id}: <https://slack.com/app_redirect?channel=D0ANA&message_ts=1.5|runs> (app), Running`,
+    `Job ${queued.id}: waits (app), Queued`,
+    `Job ${asking.id}: <https://example.test/pr/1|asks> (app), Needs input`,
   ].join('\n')]);
 });
 
@@ -173,10 +173,10 @@ test('/helix job shows the title, project, person, state and links, and what is 
   h.stop();
 
   const [w, d, f, a] = h.respondedTo();
-  assert.equal(w, `Job ${waiting.id}: waits\nProject app, person ana\nState: queued\nWaiting: waiting for memory: 1 GB free`);
-  assert.equal(d, `Job ${done.id}: done\nProject app, person ana\nState: ended\nOutcome: pr\nPull request: https://example.test/pr/2\nThread: https://slack.com/app_redirect?channel=D0ANA&message_ts=1.5`);
-  assert.match(f!, /Outcome: failed\nReason: gates failed/);
-  assert.match(a!, /Outcome: needs-input\nQuestion: which one\?/);
+  assert.equal(w, `*Job ${waiting.id}: waits*\n*Project:* app\n*Person:* ana\n*State:* Queued\n*Waiting:* waiting for memory: 1 GB free`);
+  assert.equal(d, `*Job ${done.id}: done*\n*Project:* app\n*Person:* ana\n*State:* Pull request opened\n*Pull request:* <https://example.test/pr/2|Open pull request>\n*Thread:* <https://slack.com/app_redirect?channel=D0ANA&message_ts=1.5|Open thread>`);
+  assert.match(f!, /\*State:\* Failed\n\*Reason:\* gates failed/);
+  assert.match(a!, /\*State:\* Needs input\n\*Question:\* which one\?/);
 });
 
 // Protects: criterion 1, a running job. Fails when: the stage and who is working are missing, or shown from before the job started.
@@ -196,7 +196,7 @@ test('/helix job shows a running job\'s stage and who is working, only from prog
   h.stop();
 
   const [shown, hidden] = h.respondedTo();
-  assert.match(shown!, /State: running\nStage review, the reviewer working/);
+  assert.match(shown!, /\*State:\* Running\n\*Stage:\* review, the reviewer working/);
   assert.doesNotMatch(hidden!, /Stage/);
 });
 
@@ -277,11 +277,10 @@ test('pressing Cancel job on a job that is already over replies privately and re
   await h.slack.deliver(press('U0ANA', job.id));
   h.stop();
 
-  const text = `Job ${job.id} was cancelled`;
-  assert.deepEqual(h.slack.sent, [
-    { method: 'update', channel: 'D0ANA', ts: '9.1', text, blocks: [{ type: 'section', text: { type: 'mrkdwn', text } }] },
-    { method: 'respond', url: URL, text: `Job ${job.id} has already ended.` },
-  ]);
+  const [update, said] = h.slack.sent as { text: string; blocks: { type: string }[] }[];
+  assert.equal(update!.text, `Job ${job.id}: too late, Cancelled`);
+  assert.equal(update!.blocks.some((b) => b.type === 'actions'), false);
+  assert.equal(said!.text, `Job ${job.id} has already ended.`);
 });
 
 // Protects: criterion 4. Fails when: /helix me omits a part of the profile, lists another person's or more than five ended jobs, links the wrong page, or shows a token hash.
