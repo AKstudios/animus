@@ -110,6 +110,21 @@ test('the description opens with the summary and what needs the person, then one
   assert.match(body, /<details>\n<summary>Evidence: the output of 2 checks[^]*npm run proof-one[^]*PROOF-TEXT/);
 });
 
+// Protects: criterion 1. Fails when: blockers or unchecked criteria share one bullet, a failure lands in Needs you, or a multi-line problem breaks a bullet.
+test('each open blocker and each unchecked criterion is its own line, and a failure stays out of Needs you', () => {
+  const body = prBody({
+    ...base(), failure: 'It broke\nin detail', open: [{ severity: 'blocker', problem: 'One\nsplit', file: 'a.ts', line: 1 }, { severity: 'blocker', problem: 'Two', file: 'b.ts', line: 2 }],
+    spec: parseSpec('# T\n\n## Acceptance criteria\n\n1. A.\n2. B.\n'),
+  } as Parameters<typeof prBody>[0]);
+  const needs = body.slice(body.indexOf('## Needs you'), body.indexOf('## Acceptance criteria'));
+
+  assert.deepEqual(needs.split('\n').filter((l) => l.startsWith('- ')), [
+    '- Blocker still open: `a.ts:1` One split', '- Blocker still open: `b.ts:2` Two',
+    '- Criterion 1 has no check: nothing checked it', '- Criterion 2 has no check: nothing checked it',
+  ]);
+  assert.doesNotMatch(needs, /in detail/);
+});
+
 // Protects: criterion 1. Fails when: an empty "Needs you" section is written.
 test('there is no Needs you section when nothing needs the person', () => {
   assert.doesNotMatch(prBody({ ...base(), spec: parseSpec('# T\n\n## Acceptance criteria\n\n1. A.\n   $ true\n'), gates: [gate(1, true, 'true')] }), /Needs you/);

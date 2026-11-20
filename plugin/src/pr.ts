@@ -51,7 +51,7 @@ export type PrInput = {
 
 const cell = (text: string) => text.replace(/\s*\n\s*/g, ' ').replace(/\|/g, '\\|');
 const where = (f: Finding) => (f.file ? `\`${f.file}${f.line ? `:${f.line}` : ''}\` ` : '');
-const finding = (f: Finding) => `${where(f)}${f.problem}${f.fix ? ` (fix: ${f.fix})` : ''}`;
+const finding = (f: Finding) => `${where(f)}${cell(f.problem)}${f.fix ? ` (fix: ${cell(f.fix)})` : ''}`;
 const OUTPUT_LINES = 25;
 
 function tail(output: string): string {
@@ -72,11 +72,9 @@ export function prBody(p: PrInput): string {
   if (p.breaking) out.push('## Breaking', '', p.breaking.trim(), '');
 
   const here: string[] = [];
-  if (p.failure && p.failure.includes('\n')) here.push(`- The failure in full:\n\n\`\`\`\n${tail(p.failure)}\n\`\`\``);
-  if (p.open.length) here.push(`- ${p.open.length} blocker${p.open.length === 1 ? '' : 's'} still open: ${p.open.map(finding).join('; ')}`);
+  for (const f of p.open) here.push(`- ${p.open.length === 1 ? '1 blocker' : 'Blocker'} still open: ${finding(f)}`);
   for (const f of p.review?.findings.filter((x) => x.for_person) ?? []) here.push(`- The reviewer asks: ${finding(f)}`);
-  const unproved = p.spec.criteria.flatMap((c, i) => (c.commands.length ? [] : [i + 1]));
-  if (unproved.length) here.push(`- ${unproved.length === 1 ? `Criterion ${unproved[0]} has` : `Criteria ${unproved.join(', ')} have`} no check: ${p.review ? 'only the reviewer judged ' : 'nothing checked '}${unproved.length === 1 ? 'it' : 'them'}`);
+  p.spec.criteria.forEach((c, i) => { if (!c.commands.length) here.push(`- Criterion ${i + 1} has no check: ${p.review ? 'only the reviewer judged it' : 'nothing checked it'}`); });
   for (const f of p.review?.findings.filter((x) => x.severity === 'should-fix' && !x.for_person) ?? []) here.push(`- Should fix: ${finding(f)}`);
   if (p.protectedTouched.length) here.push(`- Changes under protected paths: ${p.protectedTouched.map((f) => `\`${f}\``).join(', ')}`);
   if (here.length) out.push('## Needs you', '', ...here, '');
