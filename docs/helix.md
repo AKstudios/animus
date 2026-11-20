@@ -136,14 +136,25 @@ in [helix-deploy.md](helix-deploy.md#the-slack-bot).
 - `/animus link @alex alex`, sent by the owner, links someone who joined
   before. `animus leave` and `helix remove-person` remove the link.
 - Every job a linked person starts, from `animus submit` or anywhere else,
-  posts to one DM thread of its own: started (or resumed), needs input with
-  the question, the pull request's link, or failed with the reason.
+  posts to one DM thread of its own. The thread opens with the job's card, not
+  a reply: the title as a heading, the project and job number, the state
+  (Queued, Running, Needs input, Pull request opened, Failed, Refused or
+  Cancelled), the job page linked once per address Helix has set, the pull
+  request once there is one, and the Cancel button while the job can be
+  cancelled. The card is updated in place and never holds the question or the
+  reason. The thread gets one reply per event with the detail: the pull
+  request's link, the question as a quote with how to answer it, the failure's
+  or refusal's reason set apart, that an answer was taken, who cancelled the
+  job. No message uses emoji.
   `/animus notify off` stops these for the person who sends it and
   `/animus notify on` starts them again; they are on by default.
 - `/animus jobs` answers privately with the sender's queued, running and
-  needs-input jobs, each with its thread or pull request link.
-  `/animus status` answers with Helix's slots in use, the queue's length and its
-  version.
+  needs-input jobs, one line each: the title linked to its thread or pull
+  request, and the state in words. `/animus job <id>` answers with the title in
+  bold and labelled lines for project, person, state, stage, question or reason,
+  and labelled links to the pull request and thread.
+  `/animus status` answers with Helix's slots in use, the queue's length, how
+  many jobs wait for an earlier pull request, and its version.
 - A job that needs input is answered by replying in its thread: any reply in
   the DM, or a reply that mentions @Animus in a channel. It resumes as after
   `animus answer`, and the thread says so. Replies from anyone but the job's

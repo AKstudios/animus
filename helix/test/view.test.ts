@@ -68,6 +68,17 @@ test('a waiting job says which spec\'s pull request it waits for and has no plac
   ]);
 });
 
+// Protects: the Queued heading's count. Fails when: it leaves out the waiting jobs the section lists (two waiting jobs read "Queued 0"), or counts another project's jobs once one is picked.
+test('the Queued heading counts every job its section lists, waiting ones too, for the project picked', () => {
+  const jobs = [
+    job({ id: 1, state: 'waiting', waiting: "waiting for a.md's pull request" }),
+    job({ id: 2, state: 'waiting', waiting: "waiting for b.md's pull request" }),
+    job({ id: 3, repo: 'site', state: 'queued' }),
+  ];
+  assert.equal(view(shown(jobs), null, NOW).queued, 3);
+  assert.equal(view(shown(jobs), 'app', NOW).queued, 2);
+});
+
 // Protects: the headline sentence, its ask-coloured part and the last-finished tag. Fails when: a count or plural is wrong, the quiet words show while a job needs the person, or the last finished job's tag is missing.
 test('the headline is built from the counts and names the last job that finished', () => {
   const ask = job({ state: 'ended', outcome: 'needs-input', question: '?', ended: ago(50) });

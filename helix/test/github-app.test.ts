@@ -251,13 +251,13 @@ test('a refresh GitHub refuses fails the job before it starts with "run animus g
   writeFileSync(credentialsFile('cleo'), 'CLAUDE_CODE_OAUTH_TOKEN=sk-ant-oat01-cleo\nGH_TOKEN=ghu_1\nGH_REFRESH_TOKEN=ghr_revoked\n');
 
   const job = await cleosJob(h, 'app');
-  await until('the DM', () => h.slack.sent.some((s) => s.method === 'post'));
+  await until('the DM and its reply', () => h.slack.sent.filter((s) => s.method === 'post').length >= 2);
   h.stop();
   await github.close();
 
   assert.equal(h.launched.length, 0);
   assert.match(job.reason!, /GitHub no longer takes your sign-in .*bad_refresh_token.*: run `animus github login`/);
-  assert.deepEqual(h.slack.sent.filter((s) => s.method === 'post').map((s) => [s.channel, s.text]), [['D-U0CLEO', `Job ${job.id} failed: ${job.reason}`]]);
+  assert.deepEqual(h.slack.sent.filter((s) => s.method === 'post').map((s) => [s.channel, s.text]), [['D-U0CLEO', `Job ${job.id}: Add login, Failed`], ['D-U0CLEO', `Job ${job.id} failed:\n\`\`\`\n${job.reason}\n\`\`\``]]);
 });
 
 // Protects: criterion 5's relogin. Fails when: animus github login does not replace the stored tokens, drops the Claude token, or takes another GitHub account's sign-in.

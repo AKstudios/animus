@@ -649,7 +649,8 @@ async function runJobWith(opts: RunOptions, deps: Deps, live: { run?: Run; start
         open = blockers(said.findings);
         const mine = said.findings.map((f): FindingLog => ({ round, severity: f.severity, ...(f.file ? { file: f.file } : {}), ...(f.line !== undefined ? { line: f.line } : {}), fate: open.includes(f) ? 'open' : 'not-acted-on' }));
         findingLog.push(...mine);
-        if (said.status === 'not-ready') throw new Stop('failed', `the reviewer says the work is not ready: ${said.summary}`, 'review', { blockers_left: open.length });
+        // The blockers decide, not the status: a reviewer that says not-ready with none has nothing a fix round could act on.
+        if (said.status === 'not-ready' && !open.length) throw new Stop('failed', `the reviewer says the work is not ready: ${said.summary}`, 'review', { blockers_left: open.length });
         log(`review ${round}: ${said.findings.length} finding(s), ${open.length} to fix`);
         if (!open.length) break;
         if (round > factory.limits.review_rounds) throw new Stop('failed', `the review still found ${open.length} blocker(s) after its fix round`, 'review', { blockers_left: open.length });
