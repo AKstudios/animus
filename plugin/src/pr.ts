@@ -9,7 +9,8 @@ import type { CheckResult } from './gates.ts';
 import type { Plan } from './profiles.ts';
 import { maskSecrets } from './profile.ts';
 import { ANSI, git, AnimusError } from './proc.ts';
-import type { Finding, Review } from './review.ts';
+import type { ShouldFixIssue } from './issues.ts';
+import { shouldFix, type Finding, type Review } from './review.ts';
 import type { Spec } from './spec.ts';
 
 export type PrInput = {
@@ -26,6 +27,10 @@ export type PrInput = {
   gateAttempts: number;
   fixRounds: number;
   review?: Review;
+  /** The should-fix issues opened for the review's should-fix findings, in their order; a finding past the end of this list is written out instead. */
+  issues?: readonly ShouldFixIssue[];
+  /** Why the should-fix findings written out are not issues, said in one line. */
+  noIssues?: string;
   reviewRounds: number;
   /** Blockers still open when the job stopped. */
   open: readonly Finding[];
@@ -75,7 +80,9 @@ export function prBody(p: PrInput): string {
   for (const f of p.open) here.push(`- ${p.open.length === 1 ? '1 blocker' : 'Blocker'} still open: ${finding(f)}`);
   for (const f of p.review?.findings.filter((x) => x.for_person) ?? []) here.push(`- The reviewer asks: ${finding(f)}`);
   p.spec.criteria.forEach((c, i) => { if (!c.commands.length) here.push(`- Criterion ${i + 1} has no check: ${p.review ? 'only the reviewer judged it' : 'nothing checked it'}`); });
-  for (const f of p.review?.findings.filter((x) => x.severity === 'should-fix' && !x.for_person) ?? []) here.push(`- Should fix: ${finding(f)}`);
+  const toFix = shouldFix(p.review?.findings ?? []);
+  toFix.forEach((f, i) => { const issue = p.issues?.[i]; here.push(`- Should fix: ${issue ? `#${issue.number} ${issue.title}` : finding(f)}`); });
+  if (p.noIssues && toFix.length > (p.issues?.length ?? 0)) here.push(`- ${p.issues?.length ? 'The other should-fix findings are not issues' : 'No should-fix issues were opened'}: ${cell(p.noIssues.split('\n')[0]!)}`);
   if (p.protectedTouched.length) here.push(`- Changes under protected paths: ${p.protectedTouched.map((f) => `\`${f}\``).join(', ')}`);
   if (here.length) out.push('## Needs you', '', ...here, '');
 
@@ -167,7 +174,8 @@ export const publish: Publish = ({ cwd, branch, baseBranch, title, body, draft }
   return gh(cwd, ['pr', 'create', '--base', baseBranch, '--head', branch, '--title', title, '--body-file', '-', ...(draft ? ['--draft'] : [])], body)!;
 };
 
-function gh(cwd: string, args: string[], input?: string, quiet = false): string | undefined {
+/** Runs gh as the job's person and returns the last line it printed; quiet, a refusal returns undefined instead of throwing. */
+export function gh(cwd: string, args: string[], input?: string, quiet = false): string | undefined {
   // On Helix with its GitHub App, the token is read as it is now: it may have been renewed since the job started.
   const live = process.env.ANIMUS_GH_TOKEN_FILE;
   const env = live && existsSync(live) ? { ...process.env, GH_TOKEN: readFileSync(live, 'utf8').trim() } : undefined;

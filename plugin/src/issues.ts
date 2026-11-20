@@ -1,0 +1,47 @@
+// Should-fix issues (GLOSSARY.md, docs/adr/0012): the GitHub issue opened for
+// each should-fix finding when a job's pull request opens, as the job's person.
+// The pull request's "Needs you" lists them, and that list is the only record.
+import { gh } from './pr.ts';
+import { AnimusError } from './proc.ts';
+import type { Finding } from './review.ts';
+
+export const SHOULD_FIX_LABEL = 'should-fix';
+
+export type ShouldFixIssue = { number: number; title: string };
+
+/** Opens one should-fix issue per finding, in order, linked to the pull request, and stops at the first GitHub refuses: the issues opened before it, and why. */
+export type OpenIssues = (p: { cwd: string; pr: string; findings: readonly Finding[] }) => { issues: ShouldFixIssue[]; error?: string };
+
+/** GitHub takes at most 256 characters in an issue's title. */
+const issueTitle = (f: Finding) => { const t = f.problem.replace(/\s+/g, ' ').trim(); return t.length > 256 ? `${t.slice(0, 255)}…` : t; };
+
+const issueBody = (f: Finding, pr: string) => [
+  f.file ? `In \`${f.file}${f.line ? `:${f.line}` : ''}\`:` : '', f.problem, f.fix ? `Suggested fix: ${f.fix}` : '',
+  `Raised by the review of ${pr}. Settle it by hand, or ask a fix for it on that pull request.`,
+].filter(Boolean).join('\n\n');
+
+export const openIssues: OpenIssues = ({ cwd, pr, findings }) => {
+  const issues: ShouldFixIssue[] = [];
+  try {
+    // Made when the repository lacks it; where it is already there gh refuses, and the label is left as its owner set it.
+    gh(cwd, ['label', 'create', SHOULD_FIX_LABEL, '--color', 'fbca04', '--description', 'A should-fix finding of an Animus review'], undefined, true);
+    for (const f of findings) {
+      const title = issueTitle(f);
+      const url = gh(cwd, ['issue', 'create', '--title', title, '--label', SHOULD_FIX_LABEL, '--body-file', '-'], issueBody(f, pr)) ?? '';
+      const number = Number(/\/issues\/(\d+)$/.exec(url)?.[1]);
+      if (!number) throw new AnimusError(`gh issue create printed no issue's address: ${url}`);
+      issues.push({ number, title });
+    }
+    return { issues };
+  } catch (err) {
+    if (!(err instanceof AnimusError)) throw err;
+    return { issues, error: err.message };
+  }
+};
+
+/** The should-fix issues a pull request's description lists under "Needs you" (pr.ts writes them). */
+export function issuesInBody(body: string): ShouldFixIssue[] {
+  // The acceptance criteria always follow it; the spec further down may hold lines of the same shape.
+  const needs = /^## Needs you\n([^]*?)^## /m.exec(body)?.[1] ?? '';
+  return [...needs.matchAll(/^- Should fix: #(\d+) (.+)$/gm)].map((m) => ({ number: Number(m[1]), title: m[2]! }));
+}

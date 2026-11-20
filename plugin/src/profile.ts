@@ -64,6 +64,8 @@ export type Profile = {
   base: string;
   /** How a PR says which issue it is for: `Closes #N` (default) or `Refs #N`, for a project whose issues stay open until a person closes them. A spec cannot override it. */
   issue_link: 'closes' | 'refs';
+  /** Whether a job's should-fix findings become GitHub issues when its pull request opens (issues.ts); false keeps them as text in the pull request. */
+  should_fix_issues: boolean;
   /** Where job worktrees go; default ../.worktrees/<repo name>. */
   worktrees?: string;
   ui: UiProfile;
@@ -94,6 +96,7 @@ const DEFAULTS: Profile = {
   protected: ['.github/**', '.animus/**', '.claude/**', 'infrastructure/**'],
   base: 'main',
   issue_link: 'closes',
+  should_fix_issues: true,
   ui: { targets: [], human_review: true },
   env: {},
   secrets: [],
@@ -158,6 +161,10 @@ export function parseProfile(text: string, file = PROFILE_PATH): Profile {
   if (raw.issue_link !== undefined) {
     if (raw.issue_link !== 'closes' && raw.issue_link !== 'refs') throw bad('issue_link must be closes or refs');
     profile.issue_link = raw.issue_link;
+  }
+  if (raw.should_fix_issues !== undefined) {
+    if (typeof raw.should_fix_issues !== 'boolean') throw bad('should_fix_issues must be true or false');
+    profile.should_fix_issues = raw.should_fix_issues;
   }
   if (raw.installs !== undefined) {
     if (!Array.isArray(raw.installs)) throw bad('installs must be a list of { path, key, run, version }');

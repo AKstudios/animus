@@ -21,7 +21,8 @@ import { describePlan, escalate, modelFor, PLUGIN_ROOT, raise, readPrompt, resol
 import { animusCommand, git, AnimusError, tryGit } from './proc.ts';
 import { factoryVersion } from './version.ts';
 import { handoffFixPrompt, resumeFixPrompt, reviewAsk, syncBranch, type FromPr } from './fix.ts';
-import { asReport, asReview, blockers, criteriaList, listFindings, REPORT_SCHEMA, REVIEW_SCHEMA, type Finding, type Report, type Review } from './review.ts';
+import { asReport, asReview, blockers, criteriaList, listFindings, REPORT_SCHEMA, REVIEW_SCHEMA, shouldFix, type Finding, type Report, type Review } from './review.ts';
+import type { OpenIssues, ShouldFixIssue } from './issues.ts';
 import { countUses, GIVEN_FILE, lessonsForPrompt, lessonsSection, type Lesson } from './lessons.ts';
 import { loadJobSkills, saveJobSkills, type PersonalSkill } from './personal.ts';
 import { roleSkills } from './skills.ts';
@@ -37,6 +38,8 @@ export type Deps = {
   log: (line: string) => void;
   /** Pushes a job's screenshots where its pull request can show them; left out, the PR lists their paths. */
   evidence?: Evidence;
+  /** Opens a job's should-fix issues with its pull request; left out, the PR lists the findings as text. */
+  issues?: OpenIssues;
   /** Takes a UI job's screenshots; replaced in tests. */
   shots?: typeof takeShots;
   /** How a spec with `after:` learns the earlier pull request merged, and how it waits between looks; replaced in tests. */
@@ -732,15 +735,20 @@ async function runJobWith(opts: RunOptions, deps: Deps, live: { run?: Run; start
     const issue = /^\d+$/.test(process.env.ANIMUS_CLOSES ?? '') ? Number(process.env.ANIMUS_CLOSES) : state.closes;
     if (issue) state.closes = issue;
     if (fix) state.fixes = [...(state.fixes ?? []).filter((f) => f.job !== job), { ask: fix.ask, job, cost_usd: run.cost_usd }];
-    const body = prBody({
-      job, spec, plan, summary, ...(sliced ? { slices: sliced } : {}), gates: lastGates, gateAttempts: run.gates.length, fixRounds: run.fix_rounds, reviewRounds, open: failed ? open : [],
-      protectedTouched: run.protected_touched, escalations: run.escalations, models, cost_usd: run.cost_usd,
-      ...(notes ? { notes } : {}), ...(breaking ? { breaking } : {}), ...(review ? { review } : {}), ...(shots ? { shots } : {}), ...(caughtUp ? { caughtUp: { branch: ws.baseBranch, commit: caughtUp, resolved } } : {}), ...(failed && reason ? { failure: reason } : {}),
-      // A failure report is a draft, which should not close the issue when merged.
-      ...(!failed && issue ? { closes: issue, issueLink: repoProfile.issue_link } : {}),
-      ...(state.fixes ? { fixes: state.fixes } : {}),
-    });
-    writeFileSync(join(dir, 'pr-body.md'), `${body}\n`);
+    const toFix = shouldFix(review?.findings ?? []);
+    const writeBody = (issues: { issues?: ShouldFixIssue[]; noIssues?: string }) => {
+      const text = prBody({
+        job, spec, plan, summary, ...(sliced ? { slices: sliced } : {}), gates: lastGates, gateAttempts: run.gates.length, fixRounds: run.fix_rounds, reviewRounds, open: failed ? open : [],
+        protectedTouched: run.protected_touched, escalations: run.escalations, models, cost_usd: run.cost_usd,
+        ...(notes ? { notes } : {}), ...(breaking ? { breaking } : {}), ...(review ? { review } : {}), ...(shots ? { shots } : {}), ...(caughtUp ? { caughtUp: { branch: ws.baseBranch, commit: caughtUp, resolved } } : {}), ...(failed && reason ? { failure: reason } : {}),
+        // A failure report is a draft, which should not close the issue when merged.
+        ...(!failed && issue ? { closes: issue, issueLink: repoProfile.issue_link } : {}),
+        ...(state.fixes ? { fixes: state.fixes } : {}), ...issues,
+      });
+      writeFileSync(join(dir, 'pr-body.md'), `${text}\n`);
+      return text;
+    };
+    const body = writeBody(toFix.length && !repoProfile.should_fix_issues ? { noIssues: "the project's profile sets should_fix_issues: false" } : {});
     // A fix that failed pushes nothing: the pull request stays as it was. The one failure that still pushes is the
     // reviewer's refusal on a pull request that was already a draft, which stays a draft with the reasons in its body.
     const held = failed && fix && !(stopped?.cause === 'review' && fix.pr && (deps.prDraft ?? prDraft)(fix.pr, wt) === true);
@@ -757,6 +765,19 @@ async function runJobWith(opts: RunOptions, deps: Deps, live: { run?: Run; start
         // The push is never forced: across machines it is what keeps two fixes from overwriting each other.
         reason = fix && err instanceof PushRejected ? 'the branch changed while this fix ran: fix again' : `${reason ? `${reason}\n` : ''}the pull request could not be opened: ${err.message}`;
         log(reason.split('\n').pop()!);
+      }
+      // The issues link to the pull request, so they open after it and its description is updated to list them. A fix updates a pull request it did not open.
+      if (run.pr && !fix && toFix.length && repoProfile.should_fix_issues && deps.issues) {
+        const pr = run.pr;
+        const opened = await timed('pr', () => deps.issues!({ cwd: wt, pr, findings: toFix }));
+        if (opened.issues.length) log(`should-fix issues: ${opened.issues.map((i) => `#${i.number}`).join(' ')}`);
+        if (opened.error) log(`${opened.issues.length ? 'not every should-fix finding became an issue' : 'no should-fix issues'}: ${opened.error.split('\n')[0]}`);
+        try {
+          await timed('pr', () => deps.publish({ cwd: wt, branch: ws.branch, baseBranch: ws.baseBranch, title: spec.title, body: writeBody({ issues: opened.issues, ...(opened.error ? { noIssues: opened.error } : {}) }), draft: failed || Boolean(opts.draft) }));
+        } catch (err) {
+          if (!(err instanceof AnimusError)) throw err;
+          log(`the pull request's description could not be updated to list its should-fix issues: ${err.message.split('\n')[0]}`);
+        }
       }
     } else log(`dry run: the pull request's body is in ${join(dir, 'pr-body.md')}; the work is on ${ws.branch}`);
   }

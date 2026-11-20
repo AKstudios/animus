@@ -99,6 +99,7 @@ export function asReport(output: unknown): Report | undefined {
 
 /** What goes back to the implementer: blockers it can settle by itself. */
 export const blockers = (findings: readonly Finding[]) => findings.filter((f) => f.severity === 'blocker' && !f.for_person);
+export const shouldFix = (findings: readonly Finding[]) => findings.filter((f) => f.severity === 'should-fix' && !f.for_person);
 
 const where = (f: Finding) => (f.file ? `${f.file}${f.line ? `:${f.line}` : ''}: ` : '');
 export const listFindings = (fs: readonly Finding[]) => fs.map((f) => `- [${f.severity}] ${where(f)}${f.problem}${f.fix ? ` Fix: ${f.fix}` : ''}`).join('\n');
