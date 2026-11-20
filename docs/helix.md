@@ -390,7 +390,11 @@ secret and the `animus project secret set` command, and the project can be
 added again once it is set.
 
 A value of 8 characters or more is written as `***` in the job's log, its job
-files (so the display), the add check's output and the pull request.
+files (so the display), the add check's output and the pull request. A
+person's GitHub and Claude credentials (`GH_TOKEN`, `GITHUB_TOKEN`,
+`CLAUDE_CODE_OAUTH_TOKEN`, `ANTHROPIC_API_KEY`, and every live GitHub token
+the job held, before and after each renewal) are written as `***` in the job's log, its failure reason and
+its question too.
 
 **The model can read every secret a job gets**: the agent writes the code
 the gates run, so nothing hides one from it. A project secret is never a
@@ -452,7 +456,10 @@ address and use the LAN one in a browser only.
 
 A job that was running when Helix stopped is queued again when it comes back
 and resumes from its own files; one found running three times is ended
-instead. `helix upgrade` stops starting jobs, waits for running ones, checks
+instead. An error in Helix's own handling of one job (as it starts, as it
+ends, or its output) is written to Helix's log with the job's number; that
+job ends failed with the error, its process is stopped and its slot goes to
+the next job, and Helix and its other jobs go on. `helix upgrade` stops starting jobs, waits for running ones, checks
 out the tag and runs the tests, goes back if they fail, then stops `helix
 serve` for its service manager to start again. `npm run deploy -- <ssh-host>`
 moves it to the release `stable` points at ([releases.md](releases.md)).

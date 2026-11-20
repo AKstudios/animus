@@ -238,7 +238,7 @@ export const beforeJob = (store: Store, config: Pick<Config, 'github'>, urls = G
  */
 export async function renewForRunningJobs(store: Store, config: Pick<Config, 'github'>, say: (line: string) => void, urls = GITHUB, now = Date.now): Promise<void> {
   if (!config.github) return;
-  const people = [...new Set(store.list().filter((j) => j.state === 'running').map((j) => j.person))];
+  const people = [...new Set(store.inState('running').map((j) => j.person))];
   await Promise.all(people.map((person) => freshToken(store, config, person, urls, now).catch((err: unknown) => {
     say(`${person}'s GitHub sign-in could not be renewed: ${(err as Error).message}`);
   })));

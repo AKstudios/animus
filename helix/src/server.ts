@@ -235,7 +235,7 @@ export function serve(opts: {
       if (!id) {
         if (req.method === 'GET') {
           if (url.searchParams.has('all')) requireOwner(config, person, 'see every job');
-          return send(200, { slots: config.slots, jobs: url.searchParams.has('all') ? store.list() : store.list().filter((j) => j.person === person) });
+          return send(200, { slots: config.slots, jobs: url.searchParams.has('all') ? store.list(-1) : store.list(-1).filter((j) => j.person === person) });
         }
         if (req.method === 'POST') {
           const b = await body(req);

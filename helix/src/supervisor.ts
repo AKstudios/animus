@@ -19,7 +19,7 @@ import { parseSpec } from '../../plugin/src/spec.ts';
 import { isOwner } from './owner.ts';
 import { createQueue, MAX_INTERRUPTIONS } from '../../plugin/src/queue.ts';
 import type { Reading } from '../../plugin/src/room.ts';
-import { credentialEnv, personEnv, readyRepos, type Config } from './config.ts';
+import { credentialEnv, credentialValues, personEnv, readyRepos, type Config } from './config.ts';
 import { GITHUB, githubRepo, liveTokenFile, type GitHubUrls } from './github-app.ts';
 import { readPull } from './github-comments.ts';
 import { didNotBuild, DOCKERFILE, type ImageBuild } from './project-image.ts';
@@ -80,7 +80,7 @@ export const UNTIL_RESTART = 'until restart';
  * A fix on an open pull request (GLOSSARY.md): the pull request as a number, `#number` or its URL, and what to change.
  * From a /animus fix comment: github, the pull request it reports on, and references, files fetched for it by name.
  */
-export type FixRequest = { repo: string; pr: string; ask: string; skills?: PersonalSkill[]; github?: { repo: string; issue: number }; references?: { name: string; text: string }[] };
+export type FixRequest = { repo: string; pr: string; ask: string; skills?: PersonalSkill[]; github?: { repo: string; issue: number }; references?: { name: string; text: string }[]; left_out?: number };
 
 export type Supervisor = {
   submit(person: string, s: Submission): HelixJob;
@@ -183,6 +183,30 @@ export function supervise(opts: {
   const children = new Map<number, ChildProcess>();
   const now = () => new Date().toISOString();
   const logFile = (id: number) => join(home, 'jobs', String(id), 'log.txt');
+  const message = (err: unknown) => (err instanceof Error ? err.message : String(err));
+
+  /**
+   * Helix's own handling of a job threw: it is said, the job's process is ended
+   * and the job fails with the error, so Helix and its other jobs go on. The
+   * caller frees the slot. A job that already ended keeps what it ended with.
+   */
+  function fail(id: number, when: string, err: unknown): void {
+    const why = `Helix failed ${when}: ${message(err)}`;
+    say(`job ${id}: ${why}`);
+    if (queue.stopped()) return;
+    const child = children.get(id);
+    children.delete(id);
+    if (child?.pid) kill(child.pid, child);
+    try {
+      const current = store.get(id);
+      if (current && !jobIsOver(current)) {
+        const { pid: _pid, ...kept } = current;
+        saveAndTell({ ...kept, state: 'ended', ended: now(), outcome: 'failed', reason: why });
+      }
+    } catch (again) { say(`job ${id}: could not be recorded as failed: ${message(again)}`); }
+  }
+  /** A job's slot is free; the queue is looked at again, and what that throws is said, not thrown. */
+  const release = (id: number) => { try { queue.release(id); } catch (err) { say(`job ${id}: Helix failed checking the queue after it: ${message(err)}`); } };
 
   const mine = (person: string, id: number): HelixJob => {
     const job = store.get(id);
@@ -210,13 +234,22 @@ export function supervise(opts: {
     let image: ReturnType<NonNullable<typeof opts.image>> | undefined;
     let cause: Cause | undefined;
     let secrets: Record<string, string> = {};
+    let credentials: string[] = [];
+    const live = liveTokenFile(job.person);
+    // What the job's log, reason and question show as ***: every live token the job may hold, since Helix renews it while a job runs and a renewed-away one stays valid.
+    const tokens = new Set<string>();
+    const hidden = () => {
+      try { tokens.add(readFileSync(live, 'utf8')); } catch { /* signed in without the app */ }
+      return [...Object.values(secrets), ...credentials, ...tokens];
+    };
+    hidden();
     try {
       // Taken off since the job was queued: it never runs, and never with the machine's own logins in place of theirs.
       if (!person) throw new AnimusError(`${job.person} is no longer on Helix`);
       if (!repoDir) throw new AnimusError(`Helix no longer has the project ${job.repo}`);
-      const live = liveTokenFile(job.person);
       // Signed in with the GitHub App: git and Animus's gh read the token as it is when they use it (github-app.ts liveTokenDir).
       const theirs = { ...personEnv(person), ...(existsSync(live) ? { ANIMUS_GH_TOKEN_FILE: live } : {}) };
+      credentials = credentialValues(theirs);
       const looked = opts.preflight?.(job.person, theirs, repoDir, job.repo) ?? {};
       if (looked.why) throw new AnimusError(looked.why);
       // What the person set themselves wins over what was looked up.
@@ -225,7 +258,8 @@ export function supervise(opts: {
       opts.fresh?.(repoDir, jobEnv);
       // A queued job is admitted again: the profile may have changed since it was submitted. A resumed one was admitted when it first started.
       // A fix has no spec of its own: the animus process reads the spec of the job it continues, or of its pull request.
-      const refused = job.animus_job || job.ask || job.provision ? undefined : opts.admit?.(job, repoDir, jobEnv);
+      const admitted = job.animus_job || job.ask || job.provision ? undefined : opts.admit?.(job, repoDir, jobEnv);
+      const refused = admitted && mask(admitted, hidden());
       if (refused) {
         saveAndTell({ ...job, state: 'ended', ended: now(), outcome: 'refused', reason: refused });
         say(`job ${job.id} was refused before it started: ${refused.split('\n')[0]}`);
@@ -242,11 +276,12 @@ export function supervise(opts: {
       launched = launch(job, repoDir, { ...jobEnv, ...secrets }, image?.image);
       env = { ...process.env, ...jobEnv, ...secrets, ...launched.env };
     } catch (err) {
-      saveAndTell({ ...job, state: 'ended', ended: now(), outcome: 'failed', ...(cause ? { cause } : {}), reason: (err as Error).message });
-      say(`job ${job.id} did not start: ${(err as Error).message}`);
+      const reason = mask((err as Error).message, hidden());
+      saveAndTell({ ...job, state: 'ended', ended: now(), outcome: 'failed', ...(cause ? { cause } : {}), reason });
+      say(`job ${job.id} did not start: ${reason}`);
       return false;
     }
-    const spawnJob = (started?: string) => run(job, launched, env, launched.cwd ?? repoDir, Object.values(secrets), started);
+    const spawnJob = (started?: string) => run(job, launched, env, launched.cwd ?? repoDir, hidden, started);
     if (image?.build) buildFirst(job, image.image, image.build, spawnJob);
     else spawnJob();
     return true;
@@ -267,7 +302,10 @@ export function supervise(opts: {
     saveAndTell({ ...rest, state: 'running', started, ...(child.pid ? { pid: child.pid } : {}) });
     say(`job ${job.id} started for ${job.person}, building its project image first: ${job.title}`);
     let out = '';
-    const take = (chunk: Buffer) => { out += chunk.toString(); appendFileSync(logFile(job.id), chunk); };
+    const take = (chunk: Buffer) => {
+      out += chunk.toString();
+      try { appendFileSync(logFile(job.id), chunk); } catch (err) { if (children.has(job.id)) { fail(job.id, 'writing its image build\'s output', err); release(job.id); } }
+    };
     child.stdout!.on('data', take);
     child.stderr!.on('data', take);
     child.stdin!.on('error', () => { /* a build that ended before it read the Dockerfile says why on its own output */ });
@@ -276,22 +314,24 @@ export function supervise(opts: {
     const ended = (code: number | null, why?: string) => {
       clearTimeout(timer);
       if (!children.delete(job.id) || queue.stopped()) return;
-      const current = store.get(job.id);
-      // Cancelled while it built: what the table says stands.
-      if (current?.state === 'running' && code === 0) return then(started);
-      if (current?.state === 'running') {
-        const { pid: _pid, ...kept } = current;
-        saveAndTell({ ...kept, state: 'ended', ended: now(), outcome: 'failed', cause: 'setup', reason: didNotBuild(why ?? out) });
-        say(`job ${job.id} ended: failed, its project image ${image} did not build`);
-      }
-      queue.release(job.id);
+      try {
+        const current = store.get(job.id);
+        // Cancelled while it built: what the table says stands.
+        if (current?.state === 'running' && code === 0) return then(started);
+        if (current?.state === 'running') {
+          const { pid: _pid, ...kept } = current;
+          saveAndTell({ ...kept, state: 'ended', ended: now(), outcome: 'failed', cause: 'setup', reason: didNotBuild(why ?? out) });
+          say(`job ${job.id} ended: failed, its project image ${image} did not build`);
+        }
+      } catch (err) { fail(job.id, 'as its project image build ended', err); }
+      release(job.id);
     };
     child.on('error', (err) => ended(null, err.message));
     child.on('close', (code) => ended(code));
   }
 
-  /** Spawns a job's process and follows it to its end. started: when it began building its image, and was said to have started. */
-  function run(job: HelixJob, launched: ReturnType<Launch>, env: NodeJS.ProcessEnv, cwd: string, secrets: string[], started?: string): void {
+  /** Spawns a job's process and follows it to its end. started: when it began building its image, and was said to have started. hidden: the values its output shows as *** now. */
+  function run(job: HelixJob, launched: ReturnType<Launch>, env: NodeJS.ProcessEnv, cwd: string, hidden: () => string[], started?: string): void {
     const child = spawn(launched.command, launched.args, { cwd, env, detached: process.platform !== 'win32', stdio: ['ignore', 'pipe', 'pipe'] });
     children.set(job.id, child);
     const { answer: _used, ...rest } = job;
@@ -305,65 +345,77 @@ export function supervise(opts: {
     let out = '';
     // The log is written whole lines at a time, so a secret split across two chunks is still masked.
     let pending = '';
-    const flush = () => { if (pending) appendFileSync(logFile(job.id), mask(pending, secrets)); pending = ''; };
+    const flush = () => { if (pending) appendFileSync(logFile(job.id), mask(pending, hidden())); pending = ''; };
     child.stdout!.on('data', (chunk: Buffer) => { out += chunk.toString(); });
     child.stderr!.on('data', (chunk: Buffer) => {
-      const text = chunk.toString();
-      const all = pending + text;
-      const cut = all.lastIndexOf('\n') + 1;
-      pending = all.slice(0, cut);
-      flush();
-      pending = all.slice(cut);
-      const id = /^job (\S+): /m.exec(text)?.[1];
-      if (id && !running.animus_job && !queue.stopped()) {
-        running = { ...running, animus_job: id };
-        // Saved onto what the table says now: a job cancelled before this line came stays cancelled.
-        const current = store.get(job.id);
-        if (current?.state === 'running') store.save({ ...current, animus_job: id });
-      }
-    });
-    const end = (fallback: string) => {
-      if (!children.delete(job.id) || queue.stopped()) return;
-      const current = store.get(job.id);
-      // Cancelled, or put back in the queue by stop(): what the table says stands.
-      if (current?.state === 'running') {
-        let result: { outcome?: string; pr?: string; reason?: string; question?: string; cost_usd?: number } = {};
-        try { result = JSON.parse(out) as typeof result; } catch { /* it died before it could say */ }
-        if (result.reason) result.reason = mask(result.reason, secrets);
-        if (result.question) result.question = mask(result.question, secrets);
-        const { pid: _pid, ...kept } = current;
-        saveAndTell({
-          ...kept, state: 'ended', ended: now(), outcome: result.outcome ?? 'failed',
-          ...(result.pr ? { pr: result.pr } : {}), ...(result.question ? { question: result.question } : {}), ...(result.cost_usd !== undefined ? { cost_usd: result.cost_usd } : {}),
-          ...(result.reason ?? (result.outcome ? undefined : fallback) ? { reason: result.reason ?? fallback } : {}),
-        });
-        say(`job ${job.id} ended: ${result.outcome ?? 'failed'}${result.pr ? ` ${result.pr}` : ''}`);
-        // A container job was given Helix's lessons read-only and cannot count them: its run line says which.
-        // The person's home is the job's to write, so nothing read from it may stop Helix: a failure is said and the queue goes on.
-        try {
-          const home = opts.animusHomeOf?.(current.person);
-          const given = home && current.started ? readRuns(join(home, 'runs.jsonl')).findLast((r) => r.job === current.animus_job && Date.parse(r.ended) >= Date.parse(current.started!))?.lessons : undefined;
-          const ids = Array.isArray(given) ? given.filter((n): n is number => Number.isInteger(n)) : [];
-          if (ids.length) countUses(ids);
-        } catch (err) {
-          say(`job ${job.id}: lesson uses not counted: ${err instanceof Error ? err.message : String(err)}`);
+      try {
+        const text = chunk.toString();
+        const all = pending + text;
+        const cut = all.lastIndexOf('\n') + 1;
+        pending = all.slice(0, cut);
+        flush();
+        pending = all.slice(cut);
+        const id = /^job (\S+): /m.exec(text)?.[1];
+        if (id && !running.animus_job && !queue.stopped()) {
+          running = { ...running, animus_job: id };
+          // Saved onto what the table says now: a job cancelled before this line came stays cancelled.
+          const current = store.get(job.id);
+          if (current?.state === 'running') store.save({ ...current, animus_job: id });
         }
-      }
-      queue.release(job.id);
+      } catch (err) { if (children.has(job.id)) { fail(job.id, 'handling its output', err); release(job.id); } }
+    });
+    const end = (fallback: () => string) => {
+      if (!children.delete(job.id)) return;
+      try {
+        flush();
+        if (queue.stopped()) return;
+        const current = store.get(job.id);
+        // Cancelled, or put back in the queue by stop(): what the table says stands.
+        if (current?.state === 'running') {
+          let result: { outcome?: string; pr?: string; reason?: string; question?: string; cost_usd?: number } = {};
+          try { result = JSON.parse(out) as typeof result; } catch { /* it died before it could say */ }
+          if (result.reason) result.reason = mask(result.reason, hidden());
+          if (result.question) result.question = mask(result.question, hidden());
+          const why = result.reason ?? (result.outcome ? undefined : fallback());
+          const { pid: _pid, ...kept } = current;
+          saveAndTell({
+            ...kept, state: 'ended', ended: now(), outcome: result.outcome ?? 'failed',
+            ...(result.pr ? { pr: result.pr } : {}), ...(result.question ? { question: result.question } : {}), ...(result.cost_usd !== undefined ? { cost_usd: result.cost_usd } : {}),
+            ...(why ? { reason: why } : {}),
+          });
+          say(`job ${job.id} ended: ${result.outcome ?? 'failed'}${result.pr ? ` ${result.pr}` : ''}`);
+          // A container job was given Helix's lessons read-only and cannot count them: its run line says which.
+          // The person's home is the job's to write, so nothing read from it may stop Helix: a failure is said and the queue goes on.
+          try {
+            const home = opts.animusHomeOf?.(current.person);
+            const given = home && current.started ? readRuns(join(home, 'runs.jsonl')).findLast((r) => r.job === current.animus_job && Date.parse(r.ended) >= Date.parse(current.started!))?.lessons : undefined;
+            const ids = Array.isArray(given) ? given.filter((n): n is number => Number.isInteger(n)) : [];
+            if (ids.length) countUses(ids);
+          } catch (err) {
+            say(`job ${job.id}: lesson uses not counted: ${message(err)}`);
+          }
+        }
+      } catch (err) { fail(job.id, 'as it ended', err); }
+      release(job.id);
     };
-    child.on('error', (err) => { flush(); end(`could not start: ${err.message}`); });
+    child.on('error', (err) => { end(() => `could not start: ${err.message}`); });
     child.on('close', (code, signal) => {
-      flush();
-      // Animus says why on its last line when it refuses to start a job.
-      const last = existsSync(logFile(job.id)) ? readFileSync(logFile(job.id), 'utf8').trimEnd().split('\n').pop() : undefined;
-      end(`animus ended with ${signal ?? `exit ${code}`} and no result${last ? `: ${last.replace(/^(animus|helix): /, '')}` : ''}`);
+      end(() => {
+        // Animus says why on its last line when it refuses to start a job.
+        const last = existsSync(logFile(job.id)) ? readFileSync(logFile(job.id), 'utf8').trimEnd().split('\n').pop() : undefined;
+        return `animus ended with ${signal ?? `exit ${code}`} and no result${last ? `: ${last.replace(/^(animus|helix): /, '')}` : ''}`;
+      });
     });
   }
 
   const { prepare } = opts;
   const findPull = opts.findPull ?? findOnGitHub(store, config, opts.github ?? GITHUB);
   const queue = createQueue<HelixJob>({
-    store, config, name: 'Helix', say, reap, start, end: saveAndTell,
+    store, config, name: 'Helix', say, reap, end: saveAndTell,
+    // A throw while a job starts fails that job and gives its slot back; the queue goes on to the next.
+    start(job) {
+      try { return start(job); } catch (err) { fail(job.id, 'starting it', err); return false; }
+    },
     earlier: (job) => earlierOf(findPull, job),
     jobMemory: config.container?.memory,
     ...(prepare ? { prepare: (job: HelixJob) => prepare(job.person, job.repo) } : {}),
@@ -375,7 +427,9 @@ export function supervise(opts: {
       if (pid) kill(pid, child);
     },
   });
-  const tick = queue.tick;
+  // What throws while the queue is looked at is said, not thrown: a job's own trouble already failed that job.
+  const tick = () => { try { queue.tick(); } catch (err) { say(`Helix failed checking the queue: ${message(err)}`); } };
+  const poll = () => queue.poll().catch((err: unknown) => { say(`Helix failed checking the waiting jobs: ${message(err)}`); });
   queue.begin();
 
   return {
@@ -394,7 +448,7 @@ export function supervise(opts: {
       const author = Object.entries(store.people()).find(([, p]) => p.github?.toLowerCase() === pull.author.toLowerCase())?.[0];
       if (!author) throw new Refused(403, `pull request ${f.pr} was opened by ${pull.author}, who is not a person on this Helix, so Helix cannot fix it`);
       if (person !== author && !isOwner(config, person)) throw new Refused(403, `pull request ${f.pr} was opened by ${author}: only ${author} or the owner may fix it`);
-      const onPr = store.list().filter((j) => j.repo === f.repo && j.pr?.endsWith(`/pull/${n}`));
+      const onPr = store.list(-1).filter((j) => j.repo === f.repo && j.pr?.endsWith(`/pull/${n}`));
       const active = onPr.find((j) => j.ask && (j.state === 'queued' || j.state === 'running' || (j.state === 'ended' && j.outcome === 'needs-input')));
       const page = config.url ? ` (${config.url.replace(/\/+$/, '')}/jobs/${active?.id})` : '';
       if (active) throw new Refused(409, `pull request ${f.pr} has a fix ${active.state === 'ended' ? 'waiting for an answer' : active.state}: job ${active.id}${page}`);
@@ -403,7 +457,7 @@ export function supervise(opts: {
       // It runs as the author's person: their folder holds the worktree and session it continues, and their token pushes to the branch.
       const job = store.add({
         state: 'queued', person: author, repo: f.repo, spec: '', title: `fix: ${target?.title ?? pull.title}`, ...(target?.tier ? { tier: target.tier } : {}), draft: false,
-        pr: target?.pr ?? pull.url, ...(target ? { fix_of: target.id } : {}), ask: f.ask, ...(f.github ? { github: f.github } : {}), submitted: now(),
+        pr: target?.pr ?? pull.url, ...(target ? { fix_of: target.id } : {}), ask: f.ask, ...(f.github ? { github: f.github } : {}), ...(f.left_out ? { left_out: f.left_out } : {}), submitted: now(),
       });
       // The job's folder is where a container finds what Helix keeps for the job (its skills); a fix has no spec file in it.
       job.spec = join(home, 'jobs', String(job.id), 'fix');
@@ -443,7 +497,7 @@ export function supervise(opts: {
       store.save(job);
       store.record(person, 'submitted', { job: job.id, repo: s.repo });
       tick();
-      if (after.length) void queue.poll();
+      if (after.length) void poll();
       return store.get(job.id)!;
     },
     cancel(person, id) {
@@ -464,7 +518,7 @@ export function supervise(opts: {
       return readFileSync(logFile(id), 'utf8').trimEnd().split('\n').slice(-lines).join('\n');
     },
     wake: () => tick(),
-    poll: () => queue.poll(),
+    poll,
     progress: (job) => (job.animus_job ? loadProgress(job.animus_job, opts.animusHomeOf?.(job.person)) : undefined),
     animusHome: (person) => opts.animusHomeOf?.(person) ?? animusHome(),
     stop: () => queue.stop(),
