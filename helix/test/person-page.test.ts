@@ -38,14 +38,14 @@ async function helix() {
   return { get, store, supervisor, stop: () => { supervisor.stop(); server.close(); store.close(); } };
 }
 
-// Protects: criterion 2, the people list. Fails when: a person is left off, a number is wrong, a person from before joined was kept shows a date, or Helix answers without a token.
-test('/people lists each person with their GitHub login, joined, jobs, PRs, spent and last activity, to a valid token only', async () => {
+// Protects: criterion 2, the people list, open to anyone. Fails when: a person is left off, a number is wrong, a person from before joined was kept shows a date, or a visitor with no token is refused.
+test('/people lists each person with their GitHub login, joined, jobs, PRs, spent and last activity, to a visitor with no token', async () => {
   const h = await helix();
-  const [none, wrong, ok] = await Promise.all([h.get('/people/page-data'), h.get('/people/page-data', 'not-a-token'), h.get('/people/page-data', 'cy-token')]);
-  const v = peopleView((await ok.json()) as PeoplePage);
+  const none = await h.get('/people/page-data');
+  const v = peopleView((await none.json()) as PeoplePage);
   h.stop();
 
-  assert.deepEqual([none.status, wrong.status, ok.status], [401, 401, 200]);
+  assert.equal(none.status, 200);
   assert.deepEqual(v.rows.map((r) => [r.name, r.github, r.joined, r.jobs, r.prs, r.spent]), [
     ['ana', 'ana-gh', '2026-11-10', '2', '1', '$3.50'],
     ['ben', '', '', '1', '1', '$0.00'],
@@ -92,15 +92,15 @@ test('the people list without a token, or with one Helix refused, says to sign i
   assert.equal(peopleNotice(true), undefined);
 });
 
-// Protects: criterion 3. Fails when: numbers, jobs newest first with their job page links (also one from before activity was kept, job 1 has none), or activity newest first are wrong, or a token is not needed.
-test('a person\'s page shows their numbers, their jobs newest first linking to their job pages, and their activity newest first', async () => {
+// Protects: criterion 3. Fails when: numbers, jobs newest first with their job page links (also one from before activity was kept, job 1 has none), or activity newest first are wrong, or a visitor with no token is refused.
+test('a person\'s page shows anyone their numbers, their jobs newest first linking to their job pages, and their activity newest first', async () => {
   const h = await helix();
   h.store.record('ana', 'answered', { job: 1, answer: 'Use the second one' });
-  const [none, ok] = await Promise.all([h.get('/people/ana/page-data'), h.get('/people/ana/page-data', 'ben-token')]);
-  const v = personView((await ok.json()) as PersonPage);
+  const none = await h.get('/people/ana/page-data');
+  const v = personView((await none.json()) as PersonPage);
   h.stop();
 
-  assert.deepEqual([none.status, ok.status], [401, 200]);
+  assert.equal(none.status, 200);
   assert.deepEqual(v.facts, [
     { k: 'github', v: 'ana-gh' }, { k: 'joined', v: '2026-11-10' }, { k: 'jobs', v: '2' }, { k: 'PRs opened', v: '1' }, { k: 'spent', v: '$3.50' },
     { k: 'last activity', v: v.facts.at(-1)!.v },

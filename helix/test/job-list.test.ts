@@ -76,12 +76,14 @@ test('/job-list filters by result, project and person', async () => {
   assert.deepEqual([got.failed, got.site, got.ben, got.both, got.bad], [30, ['Runs', 'Asks'], ['Runs', 'Asks'], [], 400]);
 });
 
-// Protects: criterion 3, a person's token only. Fails when: the list is given without a token or with one Helix does not know.
-test('/job-list answers only to a person\'s token', async () => {
+// Protects: the Jobs page is open to anyone. Fails when: a visitor with no token is refused, or given less than a signed-in person.
+test('/job-list gives a visitor with no token what it gives a signed-in person', async () => {
   const h = await helix();
-  const statuses = await Promise.all([h.get('/job-list'), h.get('/job-list', 'nope'), h.get('/job-list', 'ana-token')].map(async (r) => (await r).status));
+  const [none, signed] = await Promise.all([h.get('/job-list'), h.get('/job-list', 'ana-token')]);
+  const [anyone, theirs] = await Promise.all([none.json(), signed.json()]) as JobListPage[];
   h.stop();
-  assert.deepEqual(statuses, [401, 401, 200]);
+  assert.deepEqual([none.status, signed.status], [200, 200]);
+  assert.deepEqual({ ...anyone, at: '' }, { ...theirs, at: '' });
 });
 
 // Protects: criterion 4, filters in the address. Fails when: an address does not give back the filter it was made from, or /jobs is not the Jobs page.

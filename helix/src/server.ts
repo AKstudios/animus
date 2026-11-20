@@ -12,10 +12,11 @@
 // DELETE /people/<name>) and every person's queue (GET /jobs?all) are the
 // owner's alone (owner.ts).
 // It also serves the display: its pages at / and /jobs/<id> (ui.ts), what the
-// overview shows at /display, and a job page's data and screenshots, with a
-// token, at /jobs/<id>/page-data and /jobs/<id>/shots/<name>, and the people
-// list's at /people/page-data and a person's at /people/<name>/page-data, and
-// the Insights page's at /insights-data.
+// overview shows at /display, a job page's data and screenshots at
+// /jobs/<id>/page-data and /jobs/<id>/shots/<name>, the Jobs page's at
+// /job-list, the people list's at /people/page-data and a person's at
+// /people/<name>/page-data, and the Insights page's at /insights-data. Those
+// only read, and need no token.
 import { createServer, type IncomingMessage, type Server } from 'node:http';
 import { AnimusError } from '../../plugin/src/proc.ts';
 import { accept, dismiss, inScope, readLessons } from '../../plugin/src/lessons.ts';
@@ -126,23 +127,8 @@ export function serve(opts: {
       if (req.method === 'GET' && url.pathname === '/display') return send(200, { ...display(opts), prs: await prs(), closed: await prs.closed() });
       // Which release this is, for `animus doctor`; it says no more than the display does.
       if (req.method === 'GET' && url.pathname === '/version') return send(200, { version });
-      // A client from a release this one cannot work with is told how to catch up, before anything is done for it.
-      const theirs = req.headers[VERSION_HEADER];
-      const outdated = () => send(426, { error: `this Helix runs Animus ${version} and your animus is ${typeof theirs === 'string' ? theirs : 'from before versioned releases'}. Update the animus plugin in Claude Code (/plugin), or pull your clone of it, then try again` });
-      const current = typeof theirs === 'string' && compatible(theirs, version);
-      // Someone joining has a code and no token yet.
-      if (req.method === 'POST' && (url.pathname === '/invite' || url.pathname === '/join' || url.pathname === '/join/device')) {
-        if (!current) return outdated();
-        const b = await body(req);
-        const github = app();
-        // github_app: the client signs the person in with GitHub instead of asking for a token.
-        if (url.pathname === '/invite') return send(200, { ...inviteDetails(store, b.code), ...(github ? { github_app: true } : {}) });
-        if (url.pathname === '/join/device') return send(200, await startDevice(store, github, b.code));
-        return send(201, await joinHelix({ store, verify, ...(github ? { github } : {}) }, b));
-      }
-      const person = whoIs(store, req);
-      if (!person) return send(401, { error: 'a valid token is needed: Authorization: Bearer <token>' });
-      // A job page's data, for any person on this Helix. The display is served by this Helix, so it sends no client version.
+      // The display's data below is read by anyone who can reach Helix, as the overview is, and with no client version: this Helix serves the display.
+      // A job page's data.
       const pageData = req.method === 'GET' ? /^\/jobs\/(\d+)\/page-data$/.exec(url.pathname)?.[1] : undefined;
       if (pageData) {
         const page = jobPage(opts, Number(pageData), { prs: await prs(), closed: await prs.closed() });
@@ -157,7 +143,7 @@ export function serve(opts: {
       }
       // The Insights page's data for the factory or one project: ?scope=factory (the default) or a project's name.
       if (req.method === 'GET' && url.pathname === '/insights-data') return send(200, insights(opts, url.searchParams.get('scope') || 'factory'));
-      // The people list's data, for any person on this Helix.
+      // The people list's data.
       if (req.method === 'GET' && url.pathname === '/people/page-data') return send(200, peoplePage(opts));
       // One person's page, with the jobs older than ?before=<job id>: thirty at a time.
       const who = req.method === 'GET' ? /^\/people\/([^/]+)\/page-data$/.exec(url.pathname)?.[1] : undefined;
@@ -178,6 +164,23 @@ export function serve(opts: {
         res.writeHead(200, { 'content-type': image.type, 'cache-control': 'private, no-cache', 'x-content-type-options': 'nosniff', 'helix-version': version });
         return res.end(image.body);
       }
+      // A client from a release this one cannot work with is told how to catch up, before anything is done for it.
+      const theirs = req.headers[VERSION_HEADER];
+      const outdated = () => send(426, { error: `this Helix runs Animus ${version} and your animus is ${typeof theirs === 'string' ? theirs : 'from before versioned releases'}. Update the animus plugin in Claude Code (/plugin), or pull your clone of it, then try again` });
+      const current = typeof theirs === 'string' && compatible(theirs, version);
+      // Someone joining has a code and no token yet.
+      if (req.method === 'POST' && (url.pathname === '/invite' || url.pathname === '/join' || url.pathname === '/join/device')) {
+        if (!current) return outdated();
+        const b = await body(req);
+        const github = app();
+        // github_app: the client signs the person in with GitHub instead of asking for a token.
+        if (url.pathname === '/invite') return send(200, { ...inviteDetails(store, b.code), ...(github ? { github_app: true } : {}) });
+        if (url.pathname === '/join/device') return send(200, await startDevice(store, github, b.code));
+        return send(201, await joinHelix({ store, verify, ...(github ? { github } : {}) }, b));
+      }
+      // Everything from here changes something or is a person's own, so it needs their token.
+      const person = whoIs(store, req);
+      if (!person) return send(401, { error: 'a valid token is needed: Authorization: Bearer <token>' });
       if (!current) return outdated();
       if (req.method === 'POST' && url.pathname === '/people') {
         requireOwner(config, person, 'invite people');

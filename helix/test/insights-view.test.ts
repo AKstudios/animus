@@ -136,14 +136,16 @@ async function helix() {
   return { get, stop: () => { supervisor.stop(); server.close(); store.close(); } };
 }
 
-// Protects: criteria 1 and 3. Fails when: /insights-data answers without a person's token, leaves out a person's runs, keeps runs older than 60 days, or lets one project's scope show another's runs or lessons.
-test('/insights-data needs a token and gives every person\'s runs of the last 60 days, for the factory or one project', async () => {
+// Protects: criteria 1 and 3. Fails when: /insights-data refuses a visitor with no token or gives them less than a signed-in person, leaves out a person's runs, keeps runs older than 60 days, or lets one project's scope show another's runs or lessons.
+test('/insights-data gives anyone every person\'s runs of the last 60 days, for the factory or one project', async () => {
   const h = await helix();
   const anon = await h.get('/insights-data');
-  const factory = await (await h.get('/insights-data', 'ben-token')).json() as InsightsPage;
-  const site = await (await h.get('/insights-data?scope=site', 'ben-token')).json() as InsightsPage;
+  const factory = await anon.json() as InsightsPage;
+  const signed = await (await h.get('/insights-data', 'ben-token')).json() as InsightsPage;
+  const site = await (await h.get('/insights-data?scope=site')).json() as InsightsPage;
   h.stop();
-  assert.equal(anon.status, 401);
+  assert.equal(anon.status, 200);
+  assert.deepEqual({ ...factory, at: '' }, { ...signed, at: '' });
   assert.deepEqual([factory.scope, factory.projects, factory.runs.map((r) => r.job).sort(), Object.keys(factory.outcomes)], ['factory', ['app', 'site'], ['j1', 'j3'], [pr(1)]]);
   assert.deepEqual([site.scope, site.projects, site.runs.map((r) => r.job), site.lessons.map((l) => l.text)], ['site', ['app', 'site'], ['j3'], ['For site']]);
 });

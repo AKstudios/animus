@@ -124,19 +124,17 @@ test('an error while answering one request is a 500 with a one-line reason, and 
   assert.equal(after.status, 200);
 });
 
-// Protects: a job's details stay with the people on the Helix. Fails when: the job page's data answers without a valid token.
-test('Helix answers a job page\'s data only to a valid token, from any person, and without a client version', async () => {
+// Protects: a job page's data is the display's, and Helix's own business stays out of it. Fails when: it is refused without a token or a client version, or carries the spec's path or the pid.
+test('Helix answers a job page\'s data to anyone, without a client version, and keeps its own business out', async () => {
   const h = await helix();
   const data = `/jobs/${h.job.id}/page-data`;
-  assert.equal((await h.get(data)).status, 401);
-  assert.equal((await h.get(data, { authorization: 'Bearer not-a-token' })).status, 401);
-  const res = await h.get(data, { authorization: 'Bearer ben-token' });
+  const res = await h.get(data);
   assert.equal(res.status, 200);
   const { job } = (await res.json()) as { job: Record<string, unknown> };
   assert.deepEqual([job.id, job.title, job.person, job.outcome, job.pr], [h.job.id, 'Export to PDF', 'ana', 'pr', 'https://github.com/o/app/pull/4']);
   // Only Helix's business, as on the overview.
   assert.deepEqual([job.spec, job.pid], [undefined, undefined]);
-  assert.equal((await h.get('/jobs/999/page-data', { authorization: 'Bearer ben-token' })).status, 404);
+  assert.equal((await h.get('/jobs/999/page-data')).status, 404);
   h.stop();
 });
 

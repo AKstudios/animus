@@ -302,16 +302,15 @@ function shotsFolder(animus: string, job: string, build: string[]): string {
 
 const ui = { state: 'ended', person: 'ana', repo: 'app', title: 'Settings page', draft: false, submitted: '2026-11-17T10:00:00Z' } as const;
 
-// Protects: criterion 5, a job's screenshots on its page, for a valid token only. Fails when: the page leaves them off, or Helix serves them without a token.
-test('a job page lists its screenshots, and Helix serves each one to a valid token only', async () => {
+// Protects: criterion 5, a job's screenshots on its page. Fails when: the page leaves them off, or Helix does not serve one to a visitor with no token.
+test('a job page lists its screenshots, and Helix serves each one to anyone', async () => {
   const h = await helix();
   shotsFolder(h.animus, 'app-8', ['build/settings@390x844.png', 'build/settings@1280x800.png']);
   const job = h.add({ ...ui, animus_job: 'app-8' }, '# Settings\n', '');
 
   const v = jobView(await h.page(job.id), NOW);
   const src = `/jobs/${job.id}/shots/build/settings%40390x844.png`;
-  const get = (token?: string) => fetch(new URL(src, h.url), token ? { headers: { authorization: `Bearer ${token}` } } : {});
-  const [shown, none, wrong] = await Promise.all([get('ben-token'), get(), get('not-a-token')]);
+  const shown = await fetch(new URL(src, h.url));
   const body = Buffer.from(await shown.arrayBuffer());
   h.stop();
 
@@ -320,7 +319,20 @@ test('a job page lists its screenshots, and Helix serves each one to a valid tok
     { name: 'settings@1280x800', src: `/jobs/${job.id}/shots/build/settings%401280x800.png` },
   ]);
   assert.deepEqual([shown.status, shown.headers.get('content-type'), body], [200, 'image/png', PNG]);
-  assert.deepEqual([none.status, wrong.status], [401, 401]);
+});
+
+// Protects: a shared job link opens for anyone. Fails when: the job's page or its data, with its log and pull request, needs a token.
+test('a visitor with no token opens a job\'s page and reads its data, log and pull request', async () => {
+  const h = await helix();
+  const job = h.add({ ...ui, outcome: 'pr', pr: 'https://github.com/o/app/pull/8' }, '# Settings\n', 'job app-8: Settings page\n');
+
+  const html = await fetch(new URL(`/jobs/${job.id}`, h.url), { headers: { accept: 'text/html' } });
+  const data = await fetch(new URL(`/jobs/${job.id}/page-data`, h.url));
+  const page = (await data.json()) as JobPage;
+  h.stop();
+
+  assert.deepEqual([html.status, html.headers.get('content-type'), data.status], [200, 'text/html; charset=utf-8', 200]);
+  assert.deepEqual([page.job.pr, page.log], ['https://github.com/o/app/pull/8', 'job app-8: Settings page']);
 });
 
 // Protects: criterion 5, no path reaches outside a job's screenshots. Fails when: a name that climbs out, or a file of the folder that is not a screenshot, is served.
