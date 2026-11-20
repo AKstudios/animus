@@ -65,6 +65,13 @@ test('breakingOf ignores an empty section', () => {
   assert.equal(breakingOf('## Breaking\n\n## Review here\n'), undefined);
 });
 
+// Fails when: a Breaking section saying only "None." (as PR 56's did) marks the pull request breaking.
+test('breakingOf ignores a section that says only None', () => {
+  assert.equal(breakingOf('## Breaking\n\nNone.\n\n## Review here\n'), undefined);
+  assert.equal(breakingOf('## Breaking\n\nnone\n'), undefined);
+  assert.equal(breakingOf('## Breaking\n\nNone of the old flags work.\n'), 'None of the old flags work.');
+});
+
 // Protects: criterion 3. Fails when: a `$` in a title is expanded as a replacement pattern, or an empty release is cut because older releases have bullets.
 test('inserts titles literally, and refuses a release with nothing in it', () => {
   const changelog = '## Unreleased\n\n## 0.1.0 (2026-01-01)\n\n- Old.\n';
