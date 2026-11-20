@@ -159,6 +159,7 @@ test('what the display shows needs no token, and everything else still does', as
   assert.equal((await bare('/jobs', { method: 'POST', body: JSON.stringify({ repo: 'app', spec: SPEC('No'), name: 'spec.md' }) })).status, 401);
   assert.equal((await bare(`/jobs/${job.id}/answer`, { method: 'POST', body: JSON.stringify({ answer: 'yes' }) })).status, 401);
   assert.equal((await bare(`/jobs/${job.id}/cancel`, { method: 'POST', body: '{}' })).status, 401);
+  assert.equal((await bare('/jobs/fix', { method: 'POST', body: JSON.stringify({ repo: 'app', pr: '1', ask: 'x' }) })).status, 401);
   assert.equal((await bare('/display', { method: 'POST', body: '{}' })).status, 401);
   // Every person's queue is the owner's alone: no token, or another person's, is refused.
   assert.equal((await bare('/jobs?all')).status, 401);

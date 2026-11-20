@@ -18,14 +18,14 @@ function animus(args: string[], env: NodeJS.ProcessEnv) {
   return spawnSync(process.execPath, ['--disable-warning=ExperimentalWarning', cli, ...args], { encoding: 'utf8', env: { ...rest, ...env } });
 }
 
-// Protects: animus ui --helix signs the browser in. Fails when: it opens Helix without the token, or with one the page cannot decode.
-test('animus ui --helix opens the joined Helix with its token in the address', async () => {
+// Protects: animus ui --helix opens the joined Helix, whose display needs no sign-in. Fails when: the token goes into the address or is printed.
+test('animus ui --helix opens the joined Helix with no token in the address', async () => {
   const home = mkdtempSync(join(tmpdir(), 'animus-home-'));
   saveHelixLogin({ url: 'http://helix.test:7420/', token: 'a b/+c', name: 'ajmal' }, join(home, 'helix.json'));
   const opener = fakeOpener();
   const r = animus(['ui', '--helix'], { ANIMUS_HOME: home, PATH: opener.path });
   assert.equal(r.status, 0, r.stderr);
-  assert.equal(await opener.opened(), 'http://helix.test:7420/#token=a%20b%2F%2Bc');
+  assert.equal(await opener.opened(), 'http://helix.test:7420/');
   assert.doesNotMatch(r.stdout + r.stderr, /a b\/\+c|a%20b/, 'the token is not printed');
 });
 

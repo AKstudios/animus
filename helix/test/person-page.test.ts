@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
 import { jobView } from '../../plugin/display/job-view.ts';
-import { peopleNotice, personNotice, personPage } from '../../plugin/display/pages.ts';
+import { personNotice, personPage } from '../../plugin/display/pages.ts';
 import { keepOlder, peopleView, personView } from '../../plugin/display/people-view.ts';
 import type { Display, DisplayJob, JobPage, PeoplePage, PersonPage } from '../../plugin/display/shape.ts';
 import { view } from '../../plugin/display/view.ts';
@@ -85,13 +85,6 @@ test('each row of the people list links to that person\'s page', () => {
   assert.equal(v.rows[0]!.page, '/people/ana%20lee');
 });
 
-// Protects: the people list is for signed-in people. Fails when: a signed-out or refused person is not told to sign in.
-test('the people list without a token, or with one Helix refused, says to sign in', () => {
-  assert.match(peopleNotice(false)!, /^Sign in to see who is on this Helix/);
-  assert.match(peopleNotice(false, 401)!, /^Helix did not take that token/);
-  assert.equal(peopleNotice(true), undefined);
-});
-
 // Protects: criterion 3. Fails when: numbers, jobs newest first with their job page links (also one from before activity was kept, job 1 has none), or activity newest first are wrong, or a visitor with no token is refused.
 test('a person\'s page shows anyone their numbers, their jobs newest first linking to their job pages, and their activity newest first', async () => {
   const h = await helix();
@@ -156,12 +149,12 @@ test('a person who left still has a page that says when they left; a name Helix 
   assert.deepEqual([ghost.status, odd.status], [404, 404]);
 });
 
-// Protects: the person page says why it shows nothing. Fails when: a signed-out or refused person, or an unknown name, gets no explanation.
-test('a person\'s page without a token says to sign in, and for a name Helix does not know says so', () => {
-  assert.match(personNotice('ana', false)!, /^Sign in to see ana/);
-  assert.match(personNotice('ana', false, 401)!, /^Helix did not take that token/);
-  assert.equal(personNotice('ana', true, 404), 'Helix has never heard of ana.');
-  assert.equal(personNotice('ana', true, 200), undefined);
+// Protects: the person page says why it shows nothing. Fails when: an unknown name gets no explanation, or a sign-in is asked for.
+test('a person\'s page says so for a name Helix does not know, and never asks for a sign-in', () => {
+  assert.equal(personNotice('ana', 404), 'Helix has never heard of ana.');
+  assert.equal(personNotice('ana', 200), undefined);
+  assert.equal(personNotice('ana', 401), undefined);
+  assert.equal(personNotice('ana'), undefined);
 });
 
 // Protects: criterion 2 on Helix. Fails when: a person's page leaves out what their own run log shows, or the totals and model table are wrong.

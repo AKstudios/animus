@@ -4,7 +4,7 @@ import type { AddressInfo } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
-import { jobNotice, originOf, readToken, route, takeToken, forgetToken, keepToken } from '../../plugin/display/pages.ts';
+import { jobNotice, originOf, route } from '../../plugin/display/pages.ts';
 import type { Display, DisplayJob } from '../../plugin/display/shape.ts';
 import { view } from '../../plugin/display/view.ts';
 import { hashToken, type Config } from '../src/config.ts';
@@ -30,13 +30,6 @@ async function helix() {
   const url = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
   const get = (path: string, headers: Record<string, string> = {}) => fetch(new URL(path, url), { headers });
   return { job, home, get, stop: () => { supervisor.stop(); server.close(); store.close(); } };
-}
-
-/** Storage as a browser keeps it, or one that refuses every read and write (a locked-down browser). */
-function storage(refuses = false) {
-  const kept = new Map<string, string>();
-  const no = () => { throw new Error('storage is off'); };
-  return () => refuses ? no() : { getItem: (k: string) => kept.get(k) ?? null, setItem: (k: string, v: string) => { kept.set(k, v); }, removeItem: (k: string) => { kept.delete(k); } };
 }
 
 // Protects: shareable addresses. Fails when: a job or people address opened cold is a 401 or 404 instead of the page.
@@ -77,34 +70,13 @@ test('every job on the overview links to its job page', () => {
   ]);
 });
 
-// Protects: signing in from a link. Fails when: the token is left in the address bar, or not kept.
-test('a token in the address is kept by the browser and taken out of the address; signing out forgets it', () => {
-  const store = storage();
-  assert.equal(takeToken('#app', store), false);
-  assert.equal(readToken(store), null);
-  assert.equal(takeToken('#token=abc%2B1', store), true);
-  assert.equal(readToken(store), 'abc+1');
-  forgetToken(store);
-  assert.equal(readToken(store), null);
-  assert.equal(keepToken(store, ' pasted '), true);
-  assert.equal(readToken(store), 'pasted');
-});
-
-// Protects: a browser that refuses storage still shows the display. Fails when: a storage error escapes and the page never draws.
-test('a browser that refuses storage is signed out, and the token still leaves the address', () => {
-  const store = storage(true);
-  assert.equal(takeToken('#token=abc', store), true);
-  assert.equal(readToken(store), null);
-  assert.equal(keepToken(store, 'abc'), false);
-  assert.doesNotThrow(() => { forgetToken(store); });
-});
-
-// Protects: what a job page says when it cannot show the job. Fails when: a signed-out or refused person is not told to sign in.
-test('a job page without a token, or with one Helix refused, says to sign in', () => {
-  assert.deepEqual(jobNotice(7, false), { signIn: true, text: 'Sign in to see job #7. Paste your Helix token: animus join kept it in ~/.animus/helix.json.' });
-  assert.deepEqual(jobNotice(7, false, 401), { signIn: true, text: 'Helix did not take that token, so this browser forgot it. Sign in again to see job #7.' });
-  assert.deepEqual(jobNotice(7, true, 404), { signIn: false, text: 'Helix has no job #7.' });
-  assert.equal(jobNotice(7, true, 200), undefined);
+// Protects: what a job page says when it cannot show the job. Fails when: a job Helix does not have is not named, or a page with its job says anything, or a sign-in is asked for.
+test('a job page says only when Helix has no such job, and never asks for a sign-in', () => {
+  assert.equal(jobNotice(7, 404), 'Helix has no job #7.');
+  assert.equal(jobNotice(7, 200), undefined);
+  assert.equal(jobNotice(7, 401), undefined);
+  assert.equal(jobNotice(7), undefined);
+  assert.equal(jobNotice('a-9', 404, true), 'This machine has no job a-9.');
 });
 
 // Protects: one bad request does not stop Helix's display. Fails when: an unreadable run log gives anything but a 500 with a one-line reason, or the next request is not served.
