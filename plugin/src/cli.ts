@@ -248,15 +248,40 @@ function keepLoop(): void {
   try { ensureLoop(queue); } catch (err) { say(`warning: the queue's loop could not be started: ${(err as Error).message}`); } finally { queue.close(); }
 }
 
+/** The USAGE entries of one command, each its `  animus <command>` line and the description lines under it; the full usage when it has none. */
+function usageFor(command: string | undefined): string {
+  const out: string[] = [];
+  let inEntry = false;
+  for (const line of USAGE.split('\n')) {
+    if (/^ {2}animus \S/.test(line)) inEntry = line === `  animus ${command}` || line.startsWith(`  animus ${command} `);
+    else if (!line.startsWith(' ')) inEntry = false;
+    if (inEntry) out.push(line);
+  }
+  return out.length ? out.join('\n') : USAGE;
+}
+
 async function main(argv: string[]): Promise<number> {
   const [command, ...rest] = argv;
-  const { values, positionals } = parseArgs({
+  let parsed;
+  try {
+    parsed = parseArgs({
     args: rest, allowPositionals: true,
     options: {
+      help: { type: 'boolean', short: 'h' },
       repo: { type: 'string' }, project: { type: 'string' }, 'dry-run': { type: 'boolean' }, keep: { type: 'boolean' }, draft: { type: 'boolean' }, answer: { type: 'string' }, 'after-merged': { type: 'boolean' },
       json: { type: 'boolean' }, skills: { type: 'string' }, local: { type: 'boolean' }, helix: { type: 'boolean' }, n: { type: 'string', short: 'n' }, again: { type: 'boolean' }, days: { type: 'string' }, force: { type: 'boolean' }, slices: { type: 'boolean' }, yes: { type: 'boolean' }, github: { type: 'string' }, slack: { type: 'string' }, all: { type: 'boolean' }, references: { type: 'string' }, mine: { type: 'boolean' },
     },
-  });
+    });
+  } catch (err) {
+    const option = (err as { code?: string }).code === 'ERR_PARSE_ARGS_UNKNOWN_OPTION' && /'([^']+)'/.exec((err as Error).message)?.[1];
+    if (!option) throw err;
+    throw new AnimusError(`unknown option ${option}\n\n${usageFor(command)}`);
+  }
+  const { values, positionals } = parsed;
+  if (values.help) {
+    console.log(usageFor(command));
+    return 0;
+  }
   const cwd = process.cwd();
   if (command !== 'loop' && command !== 'session-start') keepLoop();
   /** Whether a command about one job goes to Helix: --helix says so, --local says here, and otherwise Helix when this machine has joined one (a job here is then named with --local). */
