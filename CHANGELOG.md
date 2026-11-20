@@ -9,6 +9,18 @@ clients with how to update.
 
 ## Unreleased
 
+## 0.6.3 (2026-11-20)
+
+- Should-fix findings become GitHub issues ([#62](https://github.com/AKstudios/animus/pull/62))
+- Help and unknown options print usage, not a stack trace ([#61](https://github.com/AKstudios/animus/pull/61))
+- A pull request description that is quick to read ([#60](https://github.com/AKstudios/animus/pull/60))
+- Helix keeps running, hides tokens and reads only its people ([#59](https://github.com/AKstudios/animus/pull/59))
+- A job's Slack thread reads at a glance and says each thing once ([#58](https://github.com/AKstudios/animus/pull/58))
+- A review's blockers and unmet criteria always reach the fix round ([#57](https://github.com/AKstudios/animus/pull/57))
+- The Queued count includes jobs waiting for an earlier pull request ([#56](https://github.com/AKstudios/animus/pull/56))
+- Tests and jobs keep out of a person's own files ([#55](https://github.com/AKstudios/animus/pull/55))
+- Glossary: Finding and Should-fix issue; ADRs 0012 and 0013 ([#54](https://github.com/AKstudios/animus/pull/54))
+
 ## 0.6.2 (2026-11-19)
 
 - A job page shows what is happening now and every stage the job went through ([#53](https://github.com/AKstudios/animus/pull/53))
