@@ -118,7 +118,11 @@ export function describeProjects(list: readonly RemoteProject[]): string {
   if (!list.length) return 'no projects yet: animus project add, from a checkout of one';
   const rows = list.map((p) => [p.name, p.state, p.url, p.added_by ? `added by ${p.added_by}` : 'added on the machine', p.state === 'failed' ? [p.provision && describeProvision(p.provision), (p.reason ?? '').split('\n')[0]!.slice(0, 80)].filter(Boolean).join(': ') : '']);
   const widths = rows[0]!.map((_, i) => Math.max(...rows.map((row) => row[i]!.length)));
-  return rows.map((row) => row.map((cell, i) => cell.padEnd(widths[i]!)).join('  ').trimEnd()).join('\n');
+  const table = rows.map((row) => row.map((cell, i) => cell.padEnd(widths[i]!)).join('  ').trimEnd()).join('\n');
+  // A row has room for 80 characters of a reason's first line, and the cause is often below it.
+  const why = list.filter((p) => p.state === 'failed' && p.reason && (p.reason.includes('\n') || p.reason.length > 80))
+    .map((p) => `\n${p.name} failed:\n${p.reason!.split('\n').map((l) => `  ${l}`).join('\n')}`);
+  return [table, ...why].join('\n');
 }
 
 /** Helix's lessons, with those a project's retro told about when one is named: its own and the factory's. */

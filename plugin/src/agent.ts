@@ -7,7 +7,7 @@ import { existsSync, readFileSync, realpathSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { basename, dirname, join, parse, resolve } from 'node:path';
 import { modelFor, type Factory, type Tier } from './profiles.ts';
-import { AnimusError } from './proc.ts';
+import { AnimusError, exitExcerpt } from './proc.ts';
 
 export type AgentRequest = {
   /** implementer, reviewer or ui-reviewer: for the log. */
@@ -98,7 +98,8 @@ function instructionFilesAbove(cwd: string): string[] {
 export function claudeAgent(factory: Factory, command = process.env.ANIMUS_CLAUDE ?? 'claude'): Agent {
   return (req) => {
     const model = modelFor(factory, req.tier);
-    const args = ['-p', req.prompt, '--model', model, '--effort', req.effort, '--output-format', 'json', '--permission-mode', 'dontAsk', '--setting-sources', 'project', '--disable-slash-commands', '--strict-mcp-config'];
+    // The prompt goes on stdin: as an argument, one that starts with '-' (a spec's front matter) is read as an option, and Linux caps one argument at 128 KiB.
+    const args = ['-p', '--model', model, '--effort', req.effort, '--output-format', 'json', '--permission-mode', 'dontAsk', '--setting-sources', 'project', '--disable-slash-commands', '--strict-mcp-config'];
     args.push('--settings', JSON.stringify({ claudeMdExcludes: instructionFilesAbove(req.cwd) }));
     for (const dir of req.addDirs ?? []) args.push('--add-dir', dir);
     if (req.resume) args.push('--resume', req.resume);
@@ -112,7 +113,7 @@ export function claudeAgent(factory: Factory, command = process.env.ANIMUS_CLAUD
     else args.push('--allowedTools', 'Bash', 'Read', 'Write', 'Edit', 'Glob', 'Grep', '--disallowedTools', ...noGit);
 
     const started = Date.now();
-    const r = spawnSync(command, args, { cwd: req.cwd, encoding: 'utf8', timeout: req.timeoutMs ?? DEFAULT_TIMEOUT_MS, maxBuffer: 256 * 1024 * 1024, ...(req.env ? { env: { ...process.env, ...req.env } } : {}) });
+    const r = spawnSync(command, args, { cwd: req.cwd, input: req.prompt, encoding: 'utf8', timeout: req.timeoutMs ?? DEFAULT_TIMEOUT_MS, maxBuffer: 256 * 1024 * 1024, ...(req.env ? { env: { ...process.env, ...req.env } } : {}) });
     const ms = Date.now() - started;
     if (r.error && (r.error as NodeJS.ErrnoException).code === 'ENOENT') throw new AnimusError(`${command} is not installed or not on PATH`);
     const base = { provider: 'claude', model, cost_usd: 0, turns: 0, tokens: { input: 0, output: 0, cache_read: 0, cache_write: 0 }, ms };
@@ -120,7 +121,7 @@ export function claudeAgent(factory: Factory, command = process.env.ANIMUS_CLAUD
     try {
       out = JSON.parse(r.stdout) as ClaudeJson;
     } catch {
-      const why = r.error ? (r.signal ? 'timeout' : r.error.message) : `exit ${r.status}: ${(r.stderr || r.stdout || '').trim().slice(-400)}`;
+      const why = r.error ? (r.signal ? 'timeout' : r.error.message) : `exit ${r.status}: ${exitExcerpt(r.stderr || r.stdout || '')}`;
       return { ...base, ok: false, status: why, text: '' };
     }
     // The session's main model is the one that cost the most; a small one may run beside it.
