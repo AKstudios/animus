@@ -85,7 +85,7 @@ export function prBody(p: PrInput): string {
 
   out.push('## Acceptance criteria', '', '| # | Criterion | Check | Review |', '| --- | --- | --- | --- |');
   p.spec.criteria.forEach((c, i) => {
-    const ran = p.gates.filter((g) => g.criterion === i + 1);
+    const ran = p.gates.filter((g) => g.criterion === i + 1 && !g.skipped);
     const check = !c.commands.length || !ran.length ? 'none' : ran.every((g) => g.ok) ? 'passed' : '**failed**';
     const v = p.review?.criteria.find((x) => x.criterion === i + 1);
     out.push(`| ${i + 1} | ${oneLine(c.text)} | ${check} | ${v ? (v.met ? 'met' : '**not met**') : 'no verdict'} |`);
@@ -111,7 +111,7 @@ export function prBody(p: PrInput): string {
   const evidence: string[] = [];
   p.spec.criteria.forEach((c, i) => {
     const v = p.review?.criteria.find((x) => x.criterion === i + 1);
-    const cmds = p.gates.filter((g) => g.criterion === i + 1).map((g) => `${g.ok ? 'passed' : '**failed**'}: \`${cell(g.command)}\``);
+    const cmds = p.gates.filter((g) => g.criterion === i + 1 && !g.skipped).map((g) => `${g.ok ? 'passed' : '**failed**'}: \`${cell(g.command)}\``);
     evidence.push(`${i + 1}. ${oneLine(c.text)}`, `   - Check: ${cmds.length ? cmds.join('<br>') : c.commands.length ? 'not run' : 'no command'}`, `   - Review: ${v ? `${v.met ? 'met' : '**not met**'}: ${cell(v.proof)}` : p.review ? 'no verdict' : 'not reviewed'}`);
   });
   evidence.push('');

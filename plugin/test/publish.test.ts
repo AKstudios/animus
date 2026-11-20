@@ -115,6 +115,15 @@ test('there is no Needs you section when nothing needs the person', () => {
   assert.doesNotMatch(prBody({ ...base(), spec: parseSpec('# T\n\n## Acceptance criteria\n\n1. A.\n   $ true\n'), gates: [gate(1, true, 'true')] }), /Needs you/);
 });
 
+// Protects: criterion 2. Fails when: a skipped gate (ok: true, never run) makes its criterion read as passed.
+test('a criterion whose only check was skipped has no check mark', () => {
+  const body = prBody({ ...base(), gates: [{ ...gate(2, true, 'npm run skipped-one'), skipped: true }] });
+
+  assert.match(body, /\| 2 \| It is long\..{0,90}… \| none \|/);
+  assert.match(body, /2\. It is long[^]*Check: not run/);
+  assert.doesNotMatch(body, /passed/);
+});
+
 // Protects: criterion 3. Fails when: a screenshot is shown outside its fold, or the heading lacks the count.
 test('screenshots are inside a folded block that counts them', () => {
   const body = prBody({ ...base(), shots: { dir: '/d', files: ['a@390x844.png', 'b@1280x800.png'], urls: { 'a@390x844.png': 'https://x/a.png', 'b@1280x800.png': 'https://x/b.png' }, branch: 'ev' } });
