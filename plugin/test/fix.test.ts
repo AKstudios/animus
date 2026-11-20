@@ -56,7 +56,7 @@ test('a fix carries on from the job it continues, on the same branch and pull re
   assert.match(a.calls[1]!.prompt, /Say it twice/);
   const body = one.d.published[0]!.body;
   assert.match(body, /^Closes #7$/m);
-  assert.match(body, /\| 1 \| The feature says done\. \| passed: `grep -q done src\/feature\.txt` \| met: src\/feature\.txt \|/);
+  assert.match(body, /\| 1 \| The feature says done\. \| passed \| met \|[^]*Check: passed: `grep -q done src\/feature\.txt`[^]*Review: met: src\/feature\.txt/);
   assert.match(body, new RegExp(`\\| 1 \\| Say it twice \\| \`${one.run.job}\` \\| \\$0\\.0\\d \\|`));
 
   const b = fakeAgent([say('done, thrice'), () => clean()]);
@@ -184,8 +184,25 @@ test('the pull request body holds the spec in a collapsed block, and leaves it o
 
   const long = body('x'.repeat(BODY_LIMIT));
   assert.ok(long.length <= BODY_LIMIT);
-  assert.doesNotMatch(long, /<details>/);
+  assert.doesNotMatch(long, new RegExp(SPEC_SUMMARY));
   assert.match(long, /The spec is not in this description: .* 65,536 characters\.$/);
+});
+
+// Protects: criterion 5 of the quick-to-read spec. Fails when: a fix cannot read the spec, job, Closes line or Fixes list from the folded layout, or from the layout before it.
+test('a fix from the pull request alone reads a description in the new layout and one in the old', () => {
+  const spec = '# Say done\n\n## Acceptance criteria\n\n1. It says done.\n   $ true\n';
+  const parsed = parseSpec(spec);
+  const fixes = [{ ask: 'Say it twice', job: 'fix-job', cost_usd: 0.5 }];
+  const fresh = prBody({ job: 'opener', spec: parsed, plan: resolvePlan(loadFactory(), parsed), summary: 's', gates: [], gateAttempts: 1, fixRounds: 0, reviewRounds: 0, open: [], protectedTouched: [], escalations: [], models: 'fake', cost_usd: 0, closes: 7, fixes });
+  const old = `s\n\nCloses #7\n\n## Review here\n\nx\n\n## Fixes\n\n| # | Ask | Job | Cost |\n| --- | --- | --- | --- |\n| 1 | Say it twice | \`fix-job\` | $0.50 |\n\n## Run\n\nBuilt by Animus, job \`opener\`.\n\n<details><summary>${SPEC_SUMMARY}</summary>\n\n\`\`\`md\n${spec.trim()}\n\`\`\`\n\n</details>`;
+
+  for (const body of [fresh, old]) {
+    const found = fixFromPr(makeRepo(), '5', () => ({ body, head: 'b', base: 'main', url: 'https://example.test/pr/5', state: 'OPEN' }));
+    assert.equal(found.of, 'opener');
+    assert.equal(found.alone.spec, spec.trim());
+    assert.equal(found.alone.closes, 7);
+    assert.deepEqual(found.alone.fixes, fixes);
+  }
 });
 
 // Protects: criterion 5 of the any-pull-request spec. Fails when: a fix overwrites a push made to the branch while it ran, or ends without saying to fix again.
