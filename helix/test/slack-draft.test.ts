@@ -171,6 +171,22 @@ test('with no linked issue and no channel default, the person picks the project 
   assert.deepEqual(h.ran, ['web']);
 });
 
+// Fails when: a project list Slack refuses leaves the person with no word and the draft picking forever.
+test('a project list Slack refuses tells the person why, and drops the draft', async () => {
+  const h = await helix();
+  const post = h.slack.transport.post;
+  h.slack.transport.post = async (channel, text, thread, blocks) => {
+    if (blocks) throw new Error('invalid_blocks');
+    return post(channel, text, thread, blocks);
+  };
+
+  await h.slack.deliver({ kind: 'message', user: 'U0ANA', channel: 'D0ANA', text: '<@U0HELIX> Fix the footer', mentioned: true });
+
+  const told = h.slack.sent.find((s) => s.method === 'ephemeral');
+  assert.match(told && 'text' in told ? told.text : '', /could not be posted \(invalid_blocks\).*\/animus project <name>/);
+  assert.deepEqual(h.store.draft(1)?.state, 'discarded');
+});
+
 // Protects: criterion 2's Helix half. Fails when: Helix does not fetch the message's links before the session starts, or fetches them without the person's GitHub sign-in or the bot's Slack token.
 test('the links in a message are fetched as references before the draft session starts, with the person\'s GitHub token and the bot\'s Slack token', async () => {
   const github = await fakeGitHub();

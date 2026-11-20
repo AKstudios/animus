@@ -113,18 +113,26 @@ export type Sent =
   | { method: 'update'; channel: string; ts: string; text: string; blocks?: unknown[] }
   | { method: 'deleteFile'; file: string };
 
+/** Refuses blocks as Slack does when two elements of one block share an action_id. */
+function checkBlocks(blocks: unknown[] | undefined): void {
+  for (const block of (blocks ?? []) as { elements?: { action_id?: string }[] }[]) {
+    const ids = (block.elements ?? []).map((e) => e.action_id).filter((id) => id !== undefined);
+    if (new Set(ids).size !== ids.length) throw new Error(`invalid_blocks: action_ids repeat in one block: ${ids.join(', ')}`);
+  }
+}
+
 /** A transport for the bot's core that records what it sends; deliver hands it an event as Slack would. */
 export function fakeTransport() {
   let handle: ((event: SlackEvent) => Promise<void>) | undefined;
   const sent: Sent[] = [];
   const transport: Transport = {
     onEvent: (h) => { handle = h; },
-    post: async (channel, text, thread, blocks) => { sent.push({ method: 'post', channel, text, ...(thread ? { thread } : {}), ...(blocks ? { blocks } : {}) }); return `ts-${sent.length}`; },
+    post: async (channel, text, thread, blocks) => { checkBlocks(blocks); sent.push({ method: 'post', channel, text, ...(thread ? { thread } : {}), ...(blocks ? { blocks } : {}) }); return `ts-${sent.length}`; },
     dm: async (user) => { sent.push({ method: 'dm', user }); return `D-${user}`; },
     ephemeral: async (channel, user, text) => { sent.push({ method: 'ephemeral', channel, user, text }); },
     respond: async (url, text) => { sent.push({ method: 'respond', url, text }); },
     upload: async (channel, thread, filename, content) => { sent.push({ method: 'upload', channel, thread, filename, content }); return `F-${sent.length}`; },
-    update: async (channel, ts, text, blocks) => { sent.push({ method: 'update', channel, ts, text, ...(blocks ? { blocks } : {}) }); },
+    update: async (channel, ts, text, blocks) => { checkBlocks(blocks); sent.push({ method: 'update', channel, ts, text, ...(blocks ? { blocks } : {}) }); },
     deleteFile: async (file) => { sent.push({ method: 'deleteFile', file }); },
   };
   return { transport, sent, deliver: (event: SlackEvent) => handle!(event) };
