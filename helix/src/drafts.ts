@@ -16,8 +16,9 @@ import type { Transport } from './slack-api.ts';
 import type { Draft, Store } from './store.ts';
 import { PLUGIN, type Supervisor } from './supervisor.ts';
 
-/** The buttons a draft's thread carries: the project picked, and what to do with the draft. */
+/** The buttons a draft's thread carries: the project picked (PICK, then `:` and the button's place), and what to do with the draft. */
 export const PICK = 'draft_project';
+export const isPick = (action: string) => action === PICK || action.startsWith(`${PICK}:`);
 export const SUBMIT = 'submit_draft';
 export const DISCARD = 'discard_draft';
 
@@ -343,10 +344,17 @@ export function draftRunner(slack: Pick<Transport, 'post' | 'upload' | 'update' 
       store.record(person, 'drafted', { draft: draft.id, ...(project ? { project } : {}) });
       if (project) { await enqueue(draft); return undefined; }
       // shortcut: Slack takes 25 buttons in a row; a picker menu when a person has more projects than that.
-      await transport.post(channel, 'Which project is this for?', ts, [
-        { type: 'section', text: { type: 'mrkdwn', text: 'Which project is this for?' } },
-        { type: 'actions', elements: names.slice(0, 25).map((name) => button(PICK, `${draft.id} ${name}`, name)) },
-      ]);
+      // Slack refuses a row whose buttons share an action_id, so each carries its place after PICK.
+      try {
+        await transport.post(channel, 'Which project is this for?', ts, [
+          { type: 'section', text: { type: 'mrkdwn', text: 'Which project is this for?' } },
+          { type: 'actions', elements: names.slice(0, 25).map((name, i) => button(`${PICK}:${i}`, `${draft.id} ${name}`, name)) },
+        ]);
+      } catch (err) {
+        // Left picking, the draft would wait for a press no one can make and count toward MAX_OPEN.
+        close(draft, 'discarded');
+        return `The list of projects could not be posted (${(err as Error).message}), so the draft was dropped: run /animus project <name> here, or link an issue of the project, and send it again.`;
+      }
       return undefined;
     },
     async pick(person, value) {

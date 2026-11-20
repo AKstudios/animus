@@ -7,7 +7,7 @@
 import { AnimusError } from '../../plugin/src/proc.ts';
 import { SOURCE } from '../../plugin/src/setup.ts';
 import type { Config } from './config.ts';
-import { DISCARD, OPEN, PICK, SUBMIT, type Drafts } from './drafts.ts';
+import { DISCARD, isPick, OPEN, SUBMIT, type Drafts } from './drafts.ts';
 import { INVITE_HOURS, invite } from './join.ts';
 import { isOwner } from './owner.ts';
 import { SLACK_USER, type SlackEvent, type Transport } from './slack-api.ts';
@@ -138,7 +138,7 @@ export function slackBot(transport: Transport, opts: Core & { supervisor?: Jobs;
       return supervisor && answer(transport, store, supervisor, event, person);
     }
     if (event.kind === 'action') {
-      if (event.action === PICK && drafts) {
+      if (isPick(event.action) && drafts) {
         const said = await drafts.pick(person, event.value);
         return said ? reply(said) : undefined;
       }
