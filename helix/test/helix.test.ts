@@ -360,6 +360,50 @@ test('past 50 jobs a fix still resumes the job that opened its pull request, and
   }
 });
 
+// Protects: criterion 5. Fails when: a throw while Helix starts or ends one job escapes, so Helix dies, the job stays running and its slot stays taken.
+for (const [when, failing] of [['ends', 'ended'], ['is started by the queue', 'running']] as const) {
+  test(`an error thrown while a job ${when} is logged, fails that job and frees its slot, and the other jobs carry on`, async () => {
+    const h = await helix();
+    h.supervisor.stop();
+    const said: string[] = [];
+    let thrown = false;
+    // The table refuses once to save the job titled boom as it goes to this state, as a full disk would.
+    const store: Store = {
+      ...h.store,
+      save(job) {
+        if (job.title === 'boom' && job.state === failing && !thrown) { thrown = true; throw new Error('disk I/O error'); }
+        h.store.save(job);
+      },
+    };
+    const release = h.release;
+    const supervisor = supervise({ store, config: { ...h.config, slots: 2 }, home: h.home, say: (line) => said.push(line), machine: () => ({ freeBytes: 64e9, load: 0, cores: 8 }),
+      launch: (job) => ({ command: process.execPath, args: ['-e', FAKE, job.title, '', release] }) });
+    const add = (title: string) => {
+      const job = store.add({ state: 'queued', person: 'ana', repo: 'app', spec: '', title, draft: false, submitted: '' });
+      supervisor.wake();
+      return job.id;
+    };
+    try {
+      const other = add('hold other');
+      await until(() => store.get(other)!, (j) => j.state === 'running');
+      const boom = add('boom');
+      const failed = await until(() => store.get(boom)!, (j) => j.state === 'ended');
+      const next = add('next');
+      await until(() => store.get(next)!, (j) => j.state === 'ended');
+      writeFileSync(release, '');
+      await until(() => store.get(other)!, (j) => j.state === 'ended');
+
+      assert.deepEqual([failed.outcome, failed.pid], ['failed', undefined]);
+      assert.match(failed.reason!, /disk I\/O error/);
+      assert.ok(said.some((line) => line.startsWith(`job ${boom}`) && line.includes('disk I/O error')), said.join('\n'));
+      assert.deepEqual([store.get(next)!.outcome, store.get(other)!.outcome], ['pr', 'pr']);
+    } finally {
+      supervisor.stop();
+      h.stop();
+    }
+  });
+}
+
 test('skills sent with a spec are kept beside it and passed to animus run; bad ones are refused', async () => {
   const h = await helix();
   const skills = [{ name: 'sql-style', roles: ['implementer'], text: 'Name tables in the singular.\n' }];

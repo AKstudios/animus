@@ -445,7 +445,10 @@ address and use the LAN one in a browser only.
 
 A job that was running when Helix stopped is queued again when it comes back
 and resumes from its own files; one found running three times is ended
-instead. `helix upgrade` stops starting jobs, waits for running ones, checks
+instead. An error in Helix's own handling of one job (as it starts, as it
+ends, or its output) is written to Helix's log with the job's number; that
+job ends failed with the error, its process is stopped and its slot goes to
+the next job, and Helix and its other jobs go on. `helix upgrade` stops starting jobs, waits for running ones, checks
 out the tag and runs the tests, goes back if they fail, then stops `helix
 serve` for its service manager to start again. `npm run deploy -- <ssh-host>`
 moves it to the release `stable` points at ([releases.md](releases.md)).
