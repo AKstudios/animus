@@ -8,7 +8,7 @@ import { admit, type Facts } from '../src/admit.ts';
 import { runJob } from '../src/pipeline.ts';
 import { parseProfile } from '../src/profile.ts';
 import { loadFactory } from '../src/profiles.ts';
-import { git } from '../src/proc.ts';
+import { git, sh } from '../src/proc.ts';
 import { parseSpec } from '../src/spec.ts';
 import { takeShots } from '../src/ui.ts';
 import { cli, deps, fakeAgent, makeRepo, write, writeSpec } from './helpers.ts';
@@ -122,6 +122,27 @@ test('a spec whose every command is a gate, or all one command, is admitted with
 test('a spec where no criterion has a command is refused', () => {
   const a = admit(factory, spec('type: feature', '1. It works.'), facts(PROFILE));
   assert.match(a.problems.map((p) => p.what).join(), /no acceptance criterion has a `\$ command`/);
+});
+
+// Protects: a check command the shell cannot parse is refused at admit, not found at the gate. Fails when: a `$` line with notes in parentheses is admitted, or a valid pipeline is refused.
+test('a criterion whose command is not valid shell is refused, naming the criterion', () => {
+  const bad = admit(factory, spec('type: feature', '1. A.\n   $ node a.js\n2. B.\n   $ npm run test  (helix/test/x.test.ts: add a case for `/jobs/<id>`)'), facts(PROFILE));
+  const what = bad.problems.map((p) => p.what);
+  assert.equal(what.length, 1, what.join('\n'));
+  assert.match(what[0]!, /^criterion 2's command is not valid shell/);
+  assert.match(what[0]!, /syntax error|Syntax error/);
+  const fine = admit(factory, spec('type: feature', '1. A.\n   $ node a.js && echo "(ok)" | grep -q ok'), facts(PROFILE));
+  assert.deepEqual(fine.problems, []);
+});
+
+// Protects: a failed check shows why, even when the shell could not read it. Fails when: the shell's own error is lost and the output is empty.
+test('a command the shell cannot parse fails with the shell\'s error in its output', () => {
+  const r = sh('npm run test  (x)', tmpdir());
+  assert.notEqual(r.code, 0);
+  assert.match(r.output, /syntax error|Syntax error/);
+  const both = sh('echo out; echo err >&2; exit 3', tmpdir());
+  assert.equal(both.code, 3);
+  assert.equal(both.output, 'out\nerr\n');
 });
 
 // Protects: a literal page is shot like a named one. Fails when: the path is not opened on the target, or its shot is not named from the path.

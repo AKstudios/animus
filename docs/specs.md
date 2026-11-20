@@ -98,6 +98,9 @@ from. It refuses:
   not exist;
 - a type that is not built yet;
 - a `bug` spec with no command, or a spec where no criterion has one.
+- a `$ command` the shell cannot parse, such as one followed by notes in
+  parentheses: the shell only reads it, nothing runs. Notes go in the
+  criterion's text.
 
 It only warns, and still admits, when every criterion's command is one of the
 profile's gates, or all criteria run the same one, since the check then proves
