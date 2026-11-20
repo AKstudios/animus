@@ -18,7 +18,8 @@ export type Finding = {
 
 export type Verdict = { criterion: number; met: boolean; proof: string };
 
-export type Review = { status: 'reviewed' | 'not-ready'; summary: string; criteria: Verdict[]; findings: Finding[] };
+/** `settled`: on a fix handed issues, the numbers of those the work settles. */
+export type Review = { status: 'reviewed' | 'not-ready'; summary: string; criteria: Verdict[]; findings: Finding[]; settled?: number[] };
 
 export const REVIEW_SCHEMA = {
   type: 'object',
@@ -50,6 +51,7 @@ export const REVIEW_SCHEMA = {
         },
       },
     },
+    settled: { type: 'array', items: { type: 'integer' } },
   },
 };
 
@@ -88,7 +90,8 @@ export function asReview(output: unknown): Review | undefined {
   const unmet = criteria
     .filter((v) => v.met === false && !o.findings!.some((f) => f.criterion === v.criterion))
     .map((v): Finding => ({ severity: 'blocker', criterion: v.criterion, problem: `Criterion ${v.criterion} is not met: ${v.proof}`, cause: 'implementation' }));
-  return { status: o.status === 'not-ready' ? 'not-ready' : 'reviewed', summary: o.summary ?? '', criteria, findings: [...o.findings, ...unmet] };
+  const settled = Array.isArray(o.settled) ? o.settled.filter((n) => Number.isInteger(n)) : [];
+  return { status: o.status === 'not-ready' ? 'not-ready' : 'reviewed', summary: o.summary ?? '', criteria, findings: [...o.findings, ...unmet], ...(settled.length ? { settled } : {}) };
 }
 
 export function asReport(output: unknown): Report | undefined {
@@ -99,6 +102,7 @@ export function asReport(output: unknown): Report | undefined {
 
 /** What goes back to the implementer: blockers it can settle by itself. */
 export const blockers = (findings: readonly Finding[]) => findings.filter((f) => f.severity === 'blocker' && !f.for_person);
+export const shouldFix = (findings: readonly Finding[]) => findings.filter((f) => f.severity === 'should-fix' && !f.for_person);
 
 const where = (f: Finding) => (f.file ? `${f.file}${f.line ? `:${f.line}` : ''}: ` : '');
 export const listFindings = (fs: readonly Finding[]) => fs.map((f) => `- [${f.severity}] ${where(f)}${f.problem}${f.fix ? ` Fix: ${f.fix}` : ''}`).join('\n');

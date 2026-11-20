@@ -20,8 +20,9 @@ import { loadProfile, maskSecrets, useJobEnv } from './profile.ts';
 import { describePlan, escalate, modelFor, PLUGIN_ROOT, raise, readPrompt, resolvePlan, type Factory, type Plan, type Tier } from './profiles.ts';
 import { animusCommand, git, AnimusError, tryGit } from './proc.ts';
 import { factoryVersion } from './version.ts';
-import { handoffFixPrompt, resumeFixPrompt, reviewAsk, syncBranch, type FromPr } from './fix.ts';
-import { asReport, asReview, blockers, criteriaList, listFindings, REPORT_SCHEMA, REVIEW_SCHEMA, type Finding, type Report, type Review } from './review.ts';
+import { handoffFixPrompt, resumeFixPrompt, reviewAsk, syncBranch, type FromPr, type Kept } from './fix.ts';
+import { asReport, asReview, blockers, criteriaList, listFindings, REPORT_SCHEMA, REVIEW_SCHEMA, shouldFix, type Finding, type Report, type Review } from './review.ts';
+import { issuesAsked, sameFinding, type IssueText, type OpenIssues, type ReadIssue, type ShouldFixIssue } from './issues.ts';
 import { countUses, GIVEN_FILE, lessonsForPrompt, lessonsSection, type Lesson } from './lessons.ts';
 import { loadJobSkills, saveJobSkills, type PersonalSkill } from './personal.ts';
 import { roleSkills } from './skills.ts';
@@ -37,6 +38,10 @@ export type Deps = {
   log: (line: string) => void;
   /** Pushes a job's screenshots where its pull request can show them; left out, the PR lists their paths. */
   evidence?: Evidence;
+  /** Opens a job's should-fix issues with its pull request; left out, the PR lists the findings as text. */
+  issues?: OpenIssues;
+  /** Reads the issues a fix's ask hands it; left out, the fix is handed none. */
+  readIssue?: ReadIssue;
   /** Takes a UI job's screenshots; replaced in tests. */
   shots?: typeof takeShots;
   /** How a spec with `after:` learns the earlier pull request merged, and how it waits between looks; replaced in tests. */
@@ -69,7 +74,7 @@ export type RunOptions = {
   /** Pick a job up again, with the person's answer if it asked a question. */
   resume?: { state: JobState; answer?: string };
   /** Start a fix (fix.ts): a new job on the pull request's branch, in the worktree of `from`, the job it continues. */
-  fix?: { of: string; from?: JobState; alone?: FromPr; ask: string; pr: string; /** A folder of what a script fetched for it (Helix: the pull request's reviews since its last push). */ references?: string; /** What the pull request's description keeps (fix.ts, keptFromBody); it wins over the earlier job's state, which may predate it. */ kept?: { closes?: number; fixes: FromPr['fixes'] } };
+  fix?: { of: string; from?: JobState; alone?: FromPr; ask: string; pr: string; /** A folder of what a script fetched for it (Helix: the pull request's reviews since its last push). */ references?: string; /** What the pull request's description keeps (fix.ts, keptFromBody); it wins over the earlier job's state, which may predate it. */ kept?: Kept };
 };
 
 /** Ends the job where it is thrown, with an outcome that is not a pull request. */
@@ -276,15 +281,29 @@ async function runJobWith(opts: RunOptions, deps: Deps, live: { run?: Run; start
   run.branch = ws.branch;
   run.base = ws.base;
   const kept = opts.fix?.kept;
-  const inherited: { fixes?: FromPr['fixes']; closes?: number } | undefined = { fixes: kept?.fixes ?? (before ?? alone)?.fixes, closes: kept?.closes ?? (before ?? alone)?.closes };
+  const inherited: { fixes?: FromPr['fixes']; closes?: number; issues?: ShouldFixIssue[]; settled?: number[] } | undefined = {
+    fixes: kept?.fixes ?? (before ?? alone)?.fixes, closes: kept?.closes ?? (before ?? alone)?.closes,
+    issues: kept?.issues ?? (before ?? alone)?.issues, settled: kept?.settled ?? (before ?? alone)?.settled,
+  };
+  // The pull request's should-fix issues, and those the ask hands this fix: read once, as the review and the description both want them.
+  const listed = inherited.issues ?? [];
+  const issueTexts = new Map<number, IssueText | undefined>();
+  const readIssue = (n: number) => {
+    if (!issueTexts.has(n)) issueTexts.set(n, deps.readIssue?.({ cwd: wt, number: n }));
+    return issueTexts.get(n);
+  };
+  const asked = fix ? issuesAsked(fix.ask, listed) : undefined;
+  const handed = (asked?.numbers ?? []).map(readIssue).filter((i): i is IssueText => Boolean(i && (!asked!.open || i.open)));
   const answers = [...(before?.answers ?? []), ...(prior?.question && opts.resume?.answer ? [{ question: prior.question, answer: opts.resume.answer }] : [])];
   // A fix carries on from the session of the job it continues, and from that job's list of fixes.
   const state: JobState = {
     job, repo, spec: specCopy, submitter: run.submitter, ...(run.submitter_name ? { submitter_name: run.submitter_name } : {}), ...(source ? { source } : {}), workspace: ws, plan, ...(before?.session ? { session: before.session } : {}), ...(before?.context !== undefined ? { context: before.context } : {}), ...(answers.length ? { answers } : {}),
     ...(prior?.slicing ? { slicing: prior.slicing, sliced_by: prior.sliced_by ?? 'script', slices_done: prior.slices_done ?? [] } : {}),
     ...(fix ? { fix_of: fix.of, ask: fix.ask, ...(fix.pr ? { pr: fix.pr } : {}), ...(fixStart ? { fix_start: fixStart } : {}) } : {}), ...(inherited?.fixes ? { fixes: inherited.fixes } : {}), ...(inherited?.closes ? { closes: inherited.closes } : {}),
+    ...(inherited.issues?.length ? { issues: inherited.issues } : {}), ...(inherited.settled?.length ? { settled: inherited.settled } : {}),
   };
   saveState(state);
+  if (handed.length) log(`the ask hands the fix issues: ${handed.map((i) => `#${i.number}`).join(' ')}`);
 
   let summary = '';
   let notes: string | undefined;
@@ -586,7 +605,7 @@ async function runJobWith(opts: RunOptions, deps: Deps, live: { run?: Run; start
     } else if (slices.length === 1) {
       brief = whole;
       // A fix picked up again (after a question or an interruption) still has its ask, and the commit it started from.
-      if (fix) await implementer(prior ? 'resume' : 'fix', `${prior ? `${resumePrompt(prior, opts.resume?.answer)}\n\n` : ''}${resumeFixPrompt({ ask: fix.ask, foreign, references: fix.references })}`, plan.implement.tier, false, () => handoffFixPrompt({ brief, base: ws.base, cwd: wt, answers, ask: fix.ask, foreign, references: fix.references }));
+      if (fix) await implementer(prior ? 'resume' : 'fix', `${prior ? `${resumePrompt(prior, opts.resume?.answer)}\n\n` : ''}${resumeFixPrompt({ ask: fix.ask, foreign, references: fix.references, issues: handed })}`, plan.implement.tier, false, () => handoffFixPrompt({ brief, base: ws.base, cwd: wt, answers, ask: fix.ask, foreign, references: fix.references, issues: handed }));
       else await implementer(prior ? 'resume' : 'implement', prior ? resumePrompt(prior, opts.resume?.answer) : brief, plan.implement.tier, !prior);
     } else {
       if (!prior) log(`${slices.length} slices: ${slices.map((s) => s.title).join('; ')}`);
@@ -631,7 +650,7 @@ async function runJobWith(opts: RunOptions, deps: Deps, live: { run?: Run; start
         const seen = ui ? await shoot(ui, 'review') : undefined;
         log(`review ${round}: ${role}, ${modelFor(factory, tier)}, ${effort} effort`);
         at('review', `${role} · ${tier} tier${round > 1 ? ` · round ${round}` : ''}`, tier, effort);
-        const prompt = reviewPrompt({ spec, ws, round, earlier: open, shots: seen, answers, ...(fix ? { ask: fix.ask } : {}) });
+        const prompt = reviewPrompt({ spec, ws, round, earlier: open, shots: seen, answers, ...(fix ? { ask: fix.ask, issues: handed } : {}) });
         let said: Review | undefined;
         let ended = 'success';
         for (let tries = 0; tries < 2 && !said; tries++) {
@@ -732,15 +751,28 @@ async function runJobWith(opts: RunOptions, deps: Deps, live: { run?: Run; start
     const issue = /^\d+$/.test(process.env.ANIMUS_CLOSES ?? '') ? Number(process.env.ANIMUS_CLOSES) : state.closes;
     if (issue) state.closes = issue;
     if (fix) state.fixes = [...(state.fixes ?? []).filter((f) => f.job !== job), { ask: fix.ask, job, cost_usd: run.cost_usd }];
-    const body = prBody({
-      job, spec, plan, summary, ...(sliced ? { slices: sliced } : {}), gates: lastGates, gateAttempts: run.gates.length, fixRounds: run.fix_rounds, reviewRounds, open: failed ? open : [],
-      protectedTouched: run.protected_touched, escalations: run.escalations, models, cost_usd: run.cost_usd,
-      ...(notes ? { notes } : {}), ...(breaking ? { breaking } : {}), ...(review ? { review } : {}), ...(shots ? { shots } : {}), ...(caughtUp ? { caughtUp: { branch: ws.baseBranch, commit: caughtUp, resolved } } : {}), ...(failed && reason ? { failure: reason } : {}),
-      // A failure report is a draft, which should not close the issue when merged.
-      ...(!failed && issue ? { closes: issue, issueLink: repoProfile.issue_link } : {}),
-      ...(state.fixes ? { fixes: state.fixes } : {}),
-    });
-    writeFileSync(join(dir, 'pr-body.md'), `${body}\n`);
+    // A fix settles only issues it was handed; the pull request keeps listing the rest, and those earlier fixes settled stay settled.
+    const settledNow = failed ? [] : (review?.settled ?? []).filter((n) => handed.some((i) => i.number === n));
+    const settles = [...new Set([...(inherited.settled ?? []), ...settledNow])];
+    const carried = listed.filter((i) => !settles.includes(i.number));
+    // A finding that already has an issue gets no second one.
+    const toFix = shouldFix(review?.findings ?? []).filter((f) => ![...listed, ...handed].some((i) => sameFinding(f, { title: i.title, body: readIssue(i.number)?.body })));
+    if (settles.length) state.settled = settles;
+    if (carried.length) state.issues = carried;
+    else delete state.issues;
+    const writeBody = (issues: { issues?: ShouldFixIssue[]; unissued?: Finding[]; noIssues?: string }) => {
+      const text = prBody({
+        job, spec, plan, summary, ...(sliced ? { slices: sliced } : {}), gates: lastGates, gateAttempts: run.gates.length, fixRounds: run.fix_rounds, reviewRounds, open: failed ? open : [],
+        protectedTouched: run.protected_touched, escalations: run.escalations, models, cost_usd: run.cost_usd,
+        ...(notes ? { notes } : {}), ...(breaking ? { breaking } : {}), ...(review ? { review } : {}), ...(shots ? { shots } : {}), ...(caughtUp ? { caughtUp: { branch: ws.baseBranch, commit: caughtUp, resolved } } : {}), ...(failed && reason ? { failure: reason } : {}),
+        // A failure report is a draft, which should not close the issue when merged.
+        ...(!failed && issue ? { closes: issue, issueLink: repoProfile.issue_link } : {}),
+        ...(state.fixes ? { fixes: state.fixes } : {}), ...(settles.length ? { settles, issueLink: repoProfile.issue_link } : {}), ...issues,
+      });
+      writeFileSync(join(dir, 'pr-body.md'), `${text}\n`);
+      return text;
+    };
+    const body = writeBody({ issues: carried, unissued: toFix, ...(toFix.length && !repoProfile.should_fix_issues ? { noIssues: "the project's profile sets should_fix_issues: false" } : {}) });
     // A fix that failed pushes nothing: the pull request stays as it was. The one failure that still pushes is the
     // reviewer's refusal on a pull request that was already a draft, which stays a draft with the reasons in its body.
     const held = failed && fix && !(stopped?.cause === 'review' && fix.pr && (deps.prDraft ?? prDraft)(fix.pr, wt) === true);
@@ -757,6 +789,20 @@ async function runJobWith(opts: RunOptions, deps: Deps, live: { run?: Run; start
         // The push is never forced: across machines it is what keeps two fixes from overwriting each other.
         reason = fix && err instanceof PushRejected ? 'the branch changed while this fix ran: fix again' : `${reason ? `${reason}\n` : ''}the pull request could not be opened: ${err.message}`;
         log(reason.split('\n').pop()!);
+      }
+      // The issues link to the pull request, so they open after it and its description is updated to list them.
+      if (run.pr && toFix.length && repoProfile.should_fix_issues && deps.issues) {
+        const pr = run.pr;
+        const opened = await timed('pr', () => deps.issues!({ cwd: wt, pr, findings: toFix }));
+        if (opened.issues.length) log(`should-fix issues: ${opened.issues.map((i) => `#${i.number}`).join(' ')}`);
+        if (opened.error) log(`${opened.issues.length ? 'not every should-fix finding became an issue' : 'no should-fix issues'}: ${opened.error.split('\n')[0]}`);
+        if (carried.length || opened.issues.length) state.issues = [...carried, ...opened.issues];
+        try {
+          await timed('pr', () => deps.publish({ cwd: wt, branch: ws.branch, baseBranch: ws.baseBranch, title: spec.title, body: writeBody({ issues: [...carried, ...opened.issues], unissued: toFix.slice(opened.issues.length), ...(opened.error ? { noIssues: opened.error } : {}) }), draft: failed || Boolean(opts.draft) }));
+        } catch (err) {
+          if (!(err instanceof AnimusError)) throw err;
+          log(`the pull request's description could not be updated to list its should-fix issues: ${err.message.split('\n')[0]}`);
+        }
       }
     } else log(`dry run: the pull request's body is in ${join(dir, 'pr-body.md')}; the work is on ${ws.branch}`);
   }
@@ -858,7 +904,7 @@ function resumePrompt(prior: JobState, answer?: string): string {
   return `This job was interrupted and is being picked up again. Your earlier commits are on the branch. ${answer ? `From the person: ${answer}\n\n` : ''}Check what is done against the spec, finish the rest, and finish as before.`;
 }
 
-function reviewPrompt(p: { spec: Spec; ws: Workspace; round: number; earlier: readonly Finding[]; shots?: string | undefined; answers?: readonly { question: string; answer: string }[]; ask?: string }): string {
+function reviewPrompt(p: { spec: Spec; ws: Workspace; round: number; earlier: readonly Finding[]; shots?: string | undefined; answers?: readonly { question: string; answer: string }[]; ask?: string; issues?: readonly IssueText[] }): string {
   return [
     `You are in the worktree of the finished change. Read the diff with: git diff ${p.ws.base}...HEAD`,
     p.round > 1 ? `This is review ${p.round}, after a fix round. The earlier blockers were:\n${listFindings(p.earlier)}` : '',
@@ -866,7 +912,7 @@ function reviewPrompt(p: { spec: Spec; ws: Workspace; round: number; earlier: re
     `The acceptance criteria, numbered as your answer must number them:\n${criteriaList(p.spec)}`,
     `The spec:\n\n${p.spec.text.trim()}`,
     p.answers?.length ? `While it ran, the job stopped to ask the person who submitted it, and they answered. Their answers decide what the spec left open; judge the work against them as you do the spec:\n${p.answers.map((a) => `- Asked: ${a.question}\n  Answered: ${a.answer}`).join('\n')}` : '',
-    p.ask ? reviewAsk(p.ask) : '',
+    p.ask ? reviewAsk(p.ask, p.issues) : '',
   ].filter(Boolean).join('\n\n');
 }
 

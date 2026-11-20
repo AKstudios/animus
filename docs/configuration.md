@@ -39,6 +39,7 @@ ui:
 | `worktrees` | Where job worktrees go. Default `../.worktrees/<repo name>`. |
 | `notes` | What every agent is told about the project, beyond its own CLAUDE.md. |
 | `issue_link` | `closes` (default) or `refs`. A job started from a GitHub issue opens its PR with `Closes #N`, or with `Refs #N` for a project whose issues a person closes. A spec cannot override it. |
+| `should_fix_issues` | `true` (default) or `false`. When a job's pull request opens, each should-fix finding of its review becomes a GitHub issue labelled `should-fix`, listed under "Needs you" ([ADR 0012](adr/0012-should-fix-findings-become-github-issues.md)); `false` keeps the findings as text in the pull request, with one line saying why no issues were opened. |
 | `ui.targets` | What a UI job can show. A web target has `serve` and `url` (with `$PORT`) and is screenshot by agent-browser at each viewport; an app target has a `capture` command that writes PNGs into `$ANIMUS_SHOTS`. Each has `pages`, and optionally `paths`, `ready`, `viewports` and design `references`. |
 | `ui.human_review` | Read but not used yet. Default true. |
 | `env` | Plain settings, name to value, that every step of a job runs with: setup, installs, gates, a UI target's commands and the agent sessions. See [below](#env-and-secrets). |

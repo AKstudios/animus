@@ -223,6 +223,21 @@ test('a plain /animus <text> on an Animus pull request queues a fix with the tex
   assert.deepEqual(fixes(h).map((j) => [j.fix_of, j.person, j.ask]), [[1, 'ana', 'make the button blue']]);
 });
 
+for (const c of [{ who: 'its person', login: 'ana-gh', owner: 'ana' }, { who: 'the owner', login: 'bob-gh', owner: 'bob' }]) {
+  // Protects: should-fix criterion 7. Fails when: /animus fix #61 from the PR's person or the owner is not queued as ana's fix whose `animus fix` ask names the issue.
+  test(`/animus fix #61 from ${c.who} queues a fix of the pull request handed issue 61`, async () => {
+    const h = await helix({ owner: c.owner });
+    opened8(h);
+    h.github.addComment('o/app', 8, c.login, '/animus fix #61', at(30));
+
+    await h.poll();
+
+    const [fix] = fixes(h);
+    assert.deepEqual([fix!.fix_of, fix!.person, fix!.ask], [1, 'ana', '#61']);
+    assert.deepEqual(animusArgs(fix!, 'repo').slice(-3), ['--', PULL_8, '#61']);
+  });
+}
+
 const REFUSED = [
   { why: 'a /animus on a pull request that says nothing', login: 'ana-gh', body: '/animus', reply: /^Comment `\/animus <what to change>`/ },
   { why: 'fix from someone not the job\'s person or the owner', login: 'bob-gh', body: '/animus fix make it blue', reply: /^Not queued: pull request 8 was opened by ana: only ana or the owner may fix it\.$/ },

@@ -1,16 +1,21 @@
 import assert from 'node:assert/strict';
-import { chmodSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { delimiter, join } from 'node:path';
 import { test } from 'node:test';
+import { issuesInBody, openIssues } from '../src/issues.ts';
+import { runJob } from '../src/pipeline.ts';
 import { prBody, publish } from '../src/pr.ts';
 import { loadFactory, resolvePlan } from '../src/profiles.ts';
 import { parseSpec } from '../src/spec.ts';
 import { git } from '../src/proc.ts';
-import { makeRepo } from './helpers.ts';
+import { deps, fakeAgent, makeRepo, write, done, type Step } from './helpers.ts';
 
-/** A repo with an origin to push to, and a `gh` on PATH that says whether the branch's PR is a draft and records every call. */
-function setup(open: 'draft' | 'ready' | 'none') {
+/**
+ * A repo with an origin to push to, and a `gh` on PATH that says whether the branch's PR is a draft and records every call
+ * and what is piped in. It opens issues 61, 62… unless `issues` is refused, and has no `should-fix` label until one is made.
+ */
+function setup(open: 'draft' | 'ready' | 'none', issues: 'open' | 'refused' = 'open') {
   const repo = makeRepo();
   const origin = mkdtempSync(join(tmpdir(), 'animus-origin-'));
   git(origin, ['init', '-q', '--bare']);
@@ -21,17 +26,21 @@ function setup(open: 'draft' | 'ready' | 'none') {
 echo "$*" >> "${log}"
 echo "$GH_TOKEN" >> "${log}.tokens"
 # Read what Animus pipes in, as gh does: exiting with it unread breaks the pipe under load.
-case " $* " in *" - "*) cat >/dev/null ;; esac
+case " $* " in *" - "*) cat >> "${log}.in" ;; esac
 case "$1 $2" in
   "pr view") ${open === 'none' ? 'exit 1' : `echo "https://example.test/pr/7 ${open === 'draft'}"`} ;;
   "pr create") echo https://example.test/pr/8 ;;
+  "label create") test -f "${log}.label" && exit 1; touch "${log}.label" ;;
+  "issue create") ${issues === 'refused' ? 'echo "the o/r repository has disabled issues" >&2; exit 1' : `test -f "${log}.label" || exit 1; echo "https://github.com/o/r/issues/$((60 + $(grep -c '^issue create' "${log}")))"`} ;;
 esac
 `);
   chmodSync(join(bin, 'gh'), 0o755);
   process.env.PATH = `${bin}${delimiter}${process.env.PATH}`;
-  const calls = () => readFileSync(log, 'utf8').trim().split('\n').slice(1);
+  const all = () => (existsSync(log) ? readFileSync(log, 'utf8').trim().split('\n') : []);
+  const calls = () => all().slice(1);
   const tokens = () => readFileSync(`${log}.tokens`, 'utf8').trim().split('\n');
-  return { repo, calls, tokens };
+  const piped = () => readFileSync(`${log}.in`, 'utf8');
+  return { repo, all, calls, tokens, piped };
 }
 
 const input = (repo: string, draft: boolean) => ({ cwd: repo, branch: 'main', baseBranch: 'main', title: 't', body: 'b', draft });
@@ -162,3 +171,62 @@ test('a pull request names its issue as Refs when the profile says refs, as Clos
   assert.doesNotMatch(body('refs'), /Closes #7/);
   assert.match(body(), /^Closes #7$/m);
 });
+
+const SMALL_SPEC = `---\nsize: small\ndifficulty: routine\ntype: feature\n---\n# Say done\n\n## Acceptance criteria\n\n1. The feature says done.\n   $ grep -q done src/feature.txt\n`;
+const say: Step = (req) => {
+  write(req.cwd, 'src/feature.txt', 'done\n');
+  git(req.cwd, ['add', '-A']);
+  git(req.cwd, ['commit', '-qm', 'say done']);
+  return done();
+};
+const SHOULD_FIX = [
+  { severity: 'should-fix', file: 'src/feature.txt', line: 1, problem: 'Name it\nbetter.', fix: 'Call it greeting.' },
+  { severity: 'should-fix', problem: 'Say why.' },
+];
+/** A review with two should-fix findings: reviewed, the job opens a ready pull request; not ready, a draft. */
+const reviewed = (status: 'reviewed' | 'not-ready'): Step => () => ({ output: { status, summary: 'Two things to do better.', criteria: [{ criterion: 1, met: true, proof: 'src/feature.txt' }], findings: SHOULD_FIX } });
+const specFile = () => { const dir = mkdtempSync(join(tmpdir(), 'animus-spec-')); write(dir, 'spec.md', SMALL_SPEC); return join(dir, 'spec.md'); };
+const needsYou = (body: string) => body.slice(body.indexOf('## Needs you'), body.indexOf('## Acceptance criteria')).split('\n').filter((l) => l.startsWith('- '));
+
+// Protects: criterion 1 of the should-fix issues spec. Fails when: a should-fix finding of a ready or draft pull request is not opened as a labelled issue
+// holding its place, fix and the pull request's link, the label is not made, or Needs you does not list the issues by number and title.
+for (const [status, outcome, draft] of [['reviewed', 'pr', false], ['not-ready', 'draft-pr', true]] as const) {
+  test(`each should-fix finding of a job whose pull request opens ${draft ? 'as a draft' : 'ready'} becomes a labelled issue listed in Needs you`, async () => {
+    const { repo, all, piped } = setup('none');
+    const d = deps(fakeAgent([say, reviewed(status)]).agent, { issues: openIssues });
+
+    const run = await runJob({ repo, specFile: specFile() }, d);
+
+    assert.equal(run.outcome, outcome);
+    assert.equal(d.published.at(-1)!.draft, draft);
+    assert.deepEqual(all().filter((c) => !c.startsWith('issue create')).map((c) => c.split(' ').slice(0, 3).join(' ')), ['label create should-fix']);
+    assert.deepEqual(all().filter((c) => c.startsWith('issue create')), [
+      'issue create --title Name it better. --label should-fix --body-file -',
+      'issue create --title Say why. --label should-fix --body-file -',
+    ]);
+    assert.match(piped(), /`src\/feature\.txt:1`[^]*Call it greeting\.[^]*https:\/\/example\.test\/pr\/1/);
+    assert.deepEqual(needsYou(d.published.at(-1)!.body).filter((l) => /should/i.test(l)), ['- Should fix: #61 Name it better.', '- Should fix: #62 Say why.']);
+    assert.deepEqual(issuesInBody(d.published.at(-1)!.body), [{ number: 61, title: 'Name it better.' }, { number: 62, title: 'Say why.' }]);
+  });
+}
+
+// Protects: criterion 2 of the should-fix issues spec. Fails when: a refused issue fails the job or loses the findings, or the person is not told why no issues were opened.
+for (const [why, profile, line] of [
+  ['GitHub refuses the issue', '', '- No should-fix issues were opened: gh issue create: the o/r repository has disabled issues'],
+  ['the profile turns issues off', 'should_fix_issues: false\n', "- No should-fix issues were opened: the project's profile sets should_fix_issues: false"],
+] as const) {
+  test(`when ${why}, the job still opens its pull request with the should-fix findings as text and one line saying why`, async () => {
+    const { repo, all } = setup('none', 'refused');
+    write(repo, '.animus/animus.yaml', `commands:\n  test: grep -q done src/feature.txt\n${profile}`);
+    git(repo, ['commit', '-qam', 'profile', '--allow-empty']);
+    const d = deps(fakeAgent([say, reviewed('reviewed')]).agent, { issues: openIssues });
+
+    const run = await runJob({ repo, specFile: specFile() }, d);
+
+    assert.equal(run.outcome, 'pr');
+    assert.deepEqual(needsYou(d.published.at(-1)!.body).filter((l) => /should/i.test(l)), [
+      '- Should fix: `src/feature.txt:1` Name it better. (fix: Call it greeting.)', '- Should fix: Say why.', line,
+    ]);
+    assert.equal(all().filter((c) => c.startsWith('issue create')).length, profile ? 0 : 1);
+  });
+}

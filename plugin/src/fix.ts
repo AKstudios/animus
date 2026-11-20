@@ -9,6 +9,7 @@ import { prSource, prState, SPEC_SUMMARY, type PrLookup, type PrSource, type PrS
 import { git, AnimusError, GitError, tryGit } from './proc.ts';
 import { revParse } from './git.ts';
 import { loadJobSkills, whereToRun, type PersonalSkill, type Where } from './personal.ts';
+import { issuesInBody, settledInBody, type IssueText, type ShouldFixIssue } from './issues.ts';
 
 /** One fix as the pull request lists it. */
 export type FixEntry = { ask: string; job: string; cost_usd: number };
@@ -67,8 +68,11 @@ export async function whereToFix(opts: Omit<Parameters<typeof whereToRun>[0], 'c
   return choice.where === 'local' ? { ...choice, why: `no job on this machine opened it and ${choice.why}: the fix runs here from the pull request alone` } : choice;
 }
 
+/** What a pull request's description says a fix must keep: the issue it closes, its list of fixes, its should-fix issues and those fixes settled. */
+export type Kept = { closes?: number; fixes: FixEntry[]; issues: ShouldFixIssue[]; settled: number[] };
+
 /** What a fix that runs from the pull request alone takes from it; author is the GitHub login that opened it. */
-export type FromPr = { spec: string; branch: string; baseBranch: string; closes?: number; fixes?: FixEntry[]; author?: string };
+export type FromPr = { spec: string; branch: string; baseBranch: string; closes?: number; fixes?: FixEntry[]; issues?: ShouldFixIssue[]; settled?: number[]; author?: string };
 
 /** The spec in the collapsed block an Animus job writes in its pull request's description (pr.ts prBody); undefined when it has none. */
 export const specInBody = (body: string): string | undefined =>
@@ -78,8 +82,11 @@ export const specInBody = (body: string): string | undefined =>
 function fromDescription(found: PrSource, what: string): FromPr {
   const spec = specInBody(found.body);
   if (!spec) throw new AnimusError(`${what} holds no spec (one too long for GitHub's limit is left out), so the fix cannot run`);
-  const { closes, fixes } = readBody(found.body);
-  return { spec, branch: found.head, baseBranch: found.base, ...(closes ? { closes } : {}), ...(fixes.length ? { fixes } : {}), ...(found.author ? { author: found.author } : {}) };
+  const { closes, fixes, issues, settled } = readBody(found.body);
+  return {
+    spec, branch: found.head, baseBranch: found.base, ...(closes ? { closes } : {}), ...(fixes.length ? { fixes } : {}),
+    ...(issues.length ? { issues } : {}), ...(settled.length ? { settled } : {}), ...(found.author ? { author: found.author } : {}),
+  };
 }
 
 /**
@@ -121,15 +128,15 @@ export function fixAlone(repo: string, run: Run, state: JobState | undefined, lo
   return fromDescription(found, `the earlier job's ${state ? 'worktree' : 'folder'} is gone and the description of ${run.pr}`);
 }
 
-/** What a pull request's description says a fix must keep: the issue it closes and its list of fixes. */
-export function readBody(body: string): { closes?: number; fixes: FixEntry[] } {
+/** What a pull request's description says a fix must keep (Kept). */
+export function readBody(body: string): Kept {
   const closes = /^(?:Closes|Refs) #(\d+)$/m.exec(body)?.[1];
   const fixes = [...body.matchAll(/^\| \d+ \| (.*) \| `([^`]+)` \| \$([\d.]+) \|$/gm)].map((m) => ({ ask: m[1]!.replaceAll('\\|', '|'), job: m[2]!, cost_usd: Number(m[3]) }));
-  return { ...(closes ? { closes: Number(closes) } : {}), fixes };
+  return { ...(closes ? { closes: Number(closes) } : {}), fixes, issues: issuesInBody(body), settled: settledInBody(body) };
 }
 
 /** The same, from the pull request's current description: a job from before the state held them has only the pull request to say; none when GitHub will not. */
-export function keptFromBody(pr: string, repo: string, lookup: PrSourceLookup = prSource): { closes?: number; fixes: FixEntry[] } | undefined {
+export function keptFromBody(pr: string, repo: string, lookup: PrSourceLookup = prSource): Kept | undefined {
   const found = lookup(pr, repo);
   return found && readBody(found.body);
 }
@@ -163,10 +170,14 @@ const referencesNote = (dir?: string) => {
   return files.length ? `What reviewers said on the pull request since its last push, which may explain the ask:\n\n${files.map((f) => readFileSync(join(dir!, f), 'utf8').trim()).join('\n\n---\n\n')}` : '';
 };
 
-/** The part of a fix every prompt to the implementer carries: what was asked, and what the branch is. */
-function ask(p: { ask: string; foreign: string; references?: string | undefined }): string {
+/** The issues a fix's ask hands it, each with its text as GitHub has it. */
+const issuesText = (issues: readonly IssueText[]) => issues.map((i) => `#${i.number} ${i.title}\n\n${i.body.trim()}`).join('\n\n---\n\n');
+
+/** The part of a fix every prompt to the implementer carries: what was asked, the issues it hands over, and what the branch is. */
+function ask(p: { ask: string; foreign: string; references?: string | undefined; issues?: readonly IssueText[] }): string {
   return [
     `A person asked for this change to the open pull request, which this branch is:\n\n${p.ask.trim()}`,
+    p.issues?.length ? `The ask hands you these GitHub issues of the repository. Settle each:\n\n${issuesText(p.issues)}` : '',
     referencesNote(p.references),
     foreignNote(p.foreign),
     'Make the change, commit, run `animus check` as before and finish as before. Animus runs the gates again for every acceptance criterion in the spec, and a fresh reviewer judges the work against the spec and against this ask.',
@@ -179,7 +190,7 @@ export const resumeFixPrompt = ask;
 const DIFF_MAX = 60_000;
 
 /** What a fresh session is told when there is no session to carry on: the spec, the pull request's diff, earlier answers, then the ask. */
-export function handoffFixPrompt(p: { brief: string; base: string; cwd: string; answers: readonly { question: string; answer: string }[]; ask: string; foreign: string; references?: string | undefined }): string {
+export function handoffFixPrompt(p: { brief: string; base: string; cwd: string; answers: readonly { question: string; answer: string }[]; ask: string; foreign: string; references?: string | undefined; issues?: readonly IssueText[] }): string {
   const diff = tryGit(p.cwd, ['diff', `${p.base}...HEAD`]) ?? '';
   return [
     p.brief,
@@ -190,5 +201,8 @@ export function handoffFixPrompt(p: { brief: string; base: string; cwd: string; 
   ].filter(Boolean).join('\n\n');
 }
 
-/** What the reviewer is told besides the spec. */
-export const reviewAsk = (text: string) => `A person asked for this change to the open pull request, and this work is the answer to it. Judge it against the ask as you do against the spec's criteria; the spec's criteria must all still hold:\n\n${text.trim()}`;
+/** What the reviewer is told besides the spec: the ask, and the issues it handed the implementer, of which the review names those settled. */
+export const reviewAsk = (text: string, issues: readonly IssueText[] = []) => [
+  `A person asked for this change to the open pull request, and this work is the answer to it. Judge it against the ask as you do against the spec's criteria; the spec's criteria must all still hold:\n\n${text.trim()}`,
+  issues.length ? `The ask handed the implementer these GitHub issues. In \`settled\`, give the number of each one this work settles, and leave out any it does not:\n\n${issuesText(issues)}` : '',
+].filter(Boolean).join('\n\n');

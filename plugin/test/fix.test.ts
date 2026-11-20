@@ -4,7 +4,9 @@ import { chmodSync, existsSync, mkdtempSync, readFileSync, rmSync } from 'node:f
 import { tmpdir } from 'node:os';
 import { delimiter, join } from 'node:path';
 import { test } from 'node:test';
-import { fixAlone, fixFromPr, fixSkills, fixTarget, whereToFix } from '../src/fix.ts';
+import { fixAlone, fixFromPr, fixSkills, fixTarget, readBody, whereToFix } from '../src/fix.ts';
+import type { IssueText, OpenIssues, ReadIssue } from '../src/issues.ts';
+import type { Finding } from '../src/review.ts';
 import { jobDir, loadState, saveProgress, saveState } from '../src/log.ts';
 import { runJob, type Deps } from '../src/pipeline.ts';
 import { BODY_LIMIT, prBody, publish, SPEC_SUMMARY } from '../src/pr.ts';
@@ -414,6 +416,105 @@ test('a resumed fix is told its ask, and stops when the implementer changes noth
   assert.match(again.reason ?? '', /changed nothing/);
 });
 
+const SHOULD_FIX: Finding[] = [
+  { severity: 'should-fix', file: 'src/a.txt', line: 1, problem: 'Name it better.' },
+  { severity: 'should-fix', file: 'src/b.txt', problem: 'Say why.' },
+  { severity: 'should-fix', problem: 'Test the edge.' },
+];
+/** Opens issues `start`, `start + 1`… for the findings it is given, and records them. */
+const fakeIssues = (start = 61) => {
+  const opened: Finding[] = [];
+  const issues: OpenIssues = ({ findings }) => {
+    const made = findings.map((f, i) => ({ number: start + opened.length + i, title: f.problem }));
+    opened.push(...findings);
+    return { issues: made };
+  };
+  return { issues, opened };
+};
+/** GitHub's text of issues 61 to 63 as openIssues writes them; #63 was closed by hand. */
+const ISSUES: Record<number, IssueText> = {
+  61: { number: 61, title: 'Name it better.', body: 'In `src/a.txt:1`:\n\nName it better.\n\nISSUE-61-TEXT', open: true },
+  62: { number: 62, title: 'Say why.', body: 'In `src/b.txt`:\n\nSay why.\n\nISSUE-62-TEXT', open: true },
+  63: { number: 63, title: 'Test the edge.', body: 'Test the edge.\n\nISSUE-63-TEXT', open: false },
+};
+const readIssue: ReadIssue = ({ number }) => ISSUES[number];
+const reviewWith = (findings: Finding[], settled?: number[]): Step => () => ({ output: { ...clean().output, findings, ...(settled ? { settled } : {}) } });
+
+/** A job whose pull request lists should-fix issues #61 to #63; returns the description GitHub has. */
+async function withIssues(repo: string): Promise<string> {
+  const d = deps(fakeAgent([say('done'), reviewWith(SHOULD_FIX)]).agent, { issues: fakeIssues().issues });
+  await runJob({ repo, specFile: writeSpec(SMALL) }, d);
+  return d.published.at(-1)!.body;
+}
+
+/** A fix as `animus start <pr>` runs it here: what the description keeps is read from the body GitHub has. */
+const fixFromBody = (repo: string, body: string, ask: string, agent: ReturnType<typeof fakeAgent>['agent'], over: Partial<Deps> = {}) => {
+  const d = deps(agent, { readIssue, ...over });
+  const { run, state } = fixTarget(repo, '1', () => 'OPEN');
+  return runJob({ repo, fix: { of: run.job, from: state!, ask, pr: run.pr!, kept: readBody(body) } }, d).then((fixed) => ({ run: fixed, d }));
+};
+const needsYou = (body: string) => body.slice(body.indexOf('## Needs you'), body.indexOf('## Acceptance criteria')).split('\n').filter((l) => l.startsWith('- Should fix'));
+
+// Protects: criterion 3 of the should-fix issues spec. Fails when: a fix is not handed the text of the issues its ask names, or of every open should-fix
+// issue on "should-fix", the reviewer is not told them, or a settled issue gets no Closes/Refs line or stays in Needs you.
+for (const [ask, link, line] of [
+  ['Settle #61 #62', '', 'Closes #61 (should-fix)'],
+  ['Settle the should-fix issues', 'issue_link: refs\n', 'Refs #61 (should-fix)'],
+] as const) {
+  test(`a fix asked "${ask}" is handed those issues, and the pull request says ${line.split(' ')[0]} for each its review settles`, async () => {
+    const repo = makeRepo();
+    write(repo, '.animus/animus.yaml', `commands:\n  test: grep -q done src/feature.txt\n${link}`);
+    git(repo, ['commit', '-qam', 'profile', '--allow-empty']);
+    const body = await withIssues(repo);
+    const a = fakeAgent([say('done, again'), reviewWith([], [61, 99])]);
+
+    const { run, d } = await fixFromBody(repo, body, ask, a.agent);
+
+    assert.equal(run.outcome, 'pr');
+    for (const call of a.calls) {
+      assert.match(call.prompt, /#61 Name it better\.[^]*ISSUE-61-TEXT[^]*#62 Say why\.[^]*ISSUE-62-TEXT/);
+      assert.doesNotMatch(call.prompt, /ISSUE-63-TEXT/);
+    }
+    const fixed = d.published.at(-1)!.body;
+    assert.deepEqual(fixed.split('\n').filter((l) => /^(Closes|Refs) #/.test(l)), [line]);
+    assert.deepEqual(needsYou(fixed), ['- Should fix: #62 Say why.', '- Should fix: #63 Test the edge.']);
+  });
+}
+
+// Protects: criterion 3 across fixes. Fails when: a later fix rebuilds the description without the Closes line of an issue an earlier fix settled.
+test('a later fix keeps the Closes line of an issue an earlier fix settled', async () => {
+  const repo = makeRepo();
+  const body = await withIssues(repo);
+  const one = await fixFromBody(repo, body, 'Settle #61', fakeAgent([say('done, again'), reviewWith([], [61])]).agent);
+
+  const two = await fixFromBody(repo, one.d.published.at(-1)!.body, 'Once more', fakeAgent([say('done, thrice'), () => clean()]).agent);
+
+  const fixed = two.d.published.at(-1)!.body;
+  assert.match(fixed, /^Closes #61 \(should-fix\)$/m);
+  assert.deepEqual(needsYou(fixed), ['- Should fix: #62 Say why.', '- Should fix: #63 Test the edge.']);
+});
+
+// Protects: criterion 4 of the should-fix issues spec. Fails when: a fix opens no issue for a new should-fix finding of its own review, opens one again
+// for a finding the pull request's issues already hold (same file and problem), or lists a finding twice.
+test('a fix opens issues only for its own review\'s new should-fix findings, never again for one that has an issue', async () => {
+  const repo = makeRepo();
+  const body = await withIssues(repo);
+  const opener = fakeIssues(64);
+  const again: Finding[] = [
+    { severity: 'should-fix', file: 'src/a.txt', line: 3, problem: 'Name it better.' },
+    { severity: 'should-fix', file: 'src/c.txt', problem: 'Name it better.' },
+    { severity: 'should-fix', problem: 'Log the failure.' },
+  ];
+
+  const { run, d } = await fixFromBody(repo, body, 'Say it twice', fakeAgent([say('done, again'), reviewWith(again)]).agent, { issues: opener.issues });
+
+  assert.equal(run.outcome, 'pr');
+  assert.deepEqual(opener.opened.map((f) => `${f.file ?? ''} ${f.problem}`), ['src/c.txt Name it better.', ' Log the failure.']);
+  assert.deepEqual(needsYou(d.published.at(-1)!.body), [
+    '- Should fix: #61 Name it better.', '- Should fix: #62 Say why.', '- Should fix: #63 Test the edge.', '- Should fix: #64 Name it better.', '- Should fix: #65 Log the failure.',
+  ]);
+});
+
 // Protects: criterion 1 for a pull request opened before the job state held the issue. Fails when: a fix rebuilds the body without Closes #N, or drops the Fixes list the pull request already shows.
 test('a fix keeps the Closes line and the Fixes list from the pull request body when the earlier job state lacks them', async () => {
   const repo = makeRepo();
@@ -422,7 +523,7 @@ test('a fix keeps the Closes line and the Fixes list from the pull request body 
   assert.equal(state!.closes, undefined);
 
   const d = deps(fakeAgent([say('done, again'), () => clean()]).agent);
-  const kept = { closes: 7, fixes: [{ ask: 'An earlier ask', job: 'earlier-job', cost_usd: 0.5 }] };
+  const kept = { closes: 7, fixes: [{ ask: 'An earlier ask', job: 'earlier-job', cost_usd: 0.5 }], issues: [], settled: [] };
   await runJob({ repo, fix: { of: first.job, from: state!, ask: 'Say it twice', pr: first.pr!, kept } }, d);
 
   assert.match(d.published[0]!.body, /^Closes #7$/m);

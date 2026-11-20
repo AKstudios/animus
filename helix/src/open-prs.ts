@@ -3,12 +3,15 @@
 // person whose job opened one; the PRs are matched to the jobs' PR URLs.
 // Nothing is kept but the last answer per project, for a minute.
 import type { DisplayClosed, DisplayPr } from '../../plugin/display/shape.ts';
+import { issuesInBody } from '../../plugin/src/issues.ts';
 import { personEnv } from './config.ts';
+import { GITHUB, githubRepo } from './github-app.ts';
+import { gh } from './github-comments.ts';
 import { provisionOf } from './provision.ts';
 import type { Project, Store } from './store.ts';
 
 /** The part of a GitHub pull request this needs. */
-export type GithubPr = { html_url: string; number: number; title: string; draft?: boolean; created_at: string; closed_at?: string | null; merged_at?: string | null };
+export type GithubPr = { html_url: string; number: number; title: string; draft?: boolean; created_at: string; closed_at?: string | null; merged_at?: string | null; body?: string | null };
 
 /** Lists a repository's open PRs, newest first, with a GitHub token. */
 export type ListPrs = (repoUrl: string, token: string) => Promise<GithubPr[]>;
@@ -32,6 +35,19 @@ const github = (state: 'open' | 'closed'): ListPrs => async (repoUrl, token) => 
 export const listOpenPrs = github('open');
 export const listClosedPrs = github('closed');
 
+/** Closes a repository's issues as not planned with a GitHub token, leaving any already closed as they are. */
+export type CloseIssues = (repoUrl: string, numbers: number[], token: string) => Promise<void>;
+
+export const closeAsNotPlanned: CloseIssues = async (repoUrl, numbers, token) => {
+  const repo = githubRepo(repoUrl);
+  if (!repo) return;
+  for (const n of numbers) {
+    // One a person closed keeps the reason they gave.
+    const issue = await gh('GET', `/repos/${repo}/issues/${n}`, token, GITHUB) as { state?: string };
+    if (issue.state === 'open') await gh('PATCH', `/repos/${repo}/issues/${n}`, token, GITHUB, { state: 'closed', state_reason: 'not_planned' });
+  }
+};
+
 /** What reads the open PRs also reads, with `.closed()`, the latest closed ones of the same projects. */
 export type OpenPrs = { (): Promise<DisplayPr[]>; closed(): Promise<DisplayClosed[]> };
 
@@ -45,12 +61,17 @@ export function openPrs(opts: {
   store: Store; list?: ListPrs; listClosed?: ListPrs; now?: () => number; fresh?: (person: string) => Promise<unknown>;
   /** Told of each closed PR that a job of Helix's opened, by the job's id: merged, or closed without. */
   ended?: (job: number, merged: boolean) => void;
+  /** Closes the should-fix issues of a job's PR closed without merging (docs/adr/0012). */
+  closeIssues?: CloseIssues;
 }): OpenPrs {
   const { store } = opts;
   const list = opts.list ?? listOpenPrs;
   // A fake `list` without a fake `listClosed` must not send the closed call to GitHub itself.
   const listClosed = opts.listClosed ?? (opts.list ? async () => [] : listClosedPrs);
+  const closeIssues = opts.closeIssues ?? (opts.list || opts.listClosed ? async () => {} : closeAsNotPlanned);
   const now = opts.now ?? Date.now;
+  // The closed PRs whose should-fix issues were seen to: once each while Helix runs, as GitHub lists them every minute.
+  const issuesClosed = new Set<string>();
 
   /** Each project's last answer for a minute, one cache per kind of call. */
   const cached = <T>(fetch: (name: string, url: string) => Promise<T[]>) => {
@@ -70,7 +91,7 @@ export function openPrs(opts: {
     };
   };
 
-  const ask = async <T>(name: string, url: string, call: ListPrs, make: (pr: GithubPr, job: { id: number; person: string }) => T | undefined): Promise<T[]> => {
+  const ask = async <T>(name: string, url: string, call: ListPrs, make: (pr: GithubPr, job: { id: number; person: string }, token: string) => T | undefined): Promise<T[]> => {
     // Newest job first, so the person asked is whoever opened the latest PR.
     const opened = store.inState('ended').filter((j) => j.repo === name && j.pr && (j.outcome === 'pr' || j.outcome === 'draft-pr')).reverse();
     const tokens = new Map<string, string | undefined>();
@@ -89,14 +110,18 @@ export function openPrs(opts: {
     const got = await call(url, (await tokenOf(mine[0]!.person))!);
     return got.flatMap((pr): T[] => {
       const job = mine.find((j) => j.pr === pr.html_url);
-      const made = job && make(pr, job);
+      const made = job && make(pr, job, tokens.get(job.person)!);
       return made ? [made] : [];
     });
   };
 
   const open = cached((name, url) => ask(name, url, list, (pr, job): DisplayPr => ({ job: job.id, repo: name, person: job.person, number: pr.number, title: pr.title, url: pr.html_url, draft: pr.draft === true, created: pr.created_at })));
-  const closed = cached((name, url) => ask(name, url, listClosed, (pr, job): DisplayClosed => {
+  const closed = cached((name, url) => ask(name, url, listClosed, (pr, job, token): DisplayClosed => {
     opts.ended?.(job.id, !!pr.merged_at);
+    // A merged PR leaves its unsettled should-fix issues open; a closed one's are closed as its person.
+    const issues = pr.merged_at || issuesClosed.has(pr.html_url) ? [] : issuesInBody(pr.body ?? '');
+    issuesClosed.add(pr.html_url);
+    if (issues.length) closeIssues(url, issues.map((i) => i.number), token).catch(() => { /* issues GitHub will not close stay open, like a project without the Issues permission */ });
     return { job: job.id, number: pr.number, merged: !!pr.merged_at, at: pr.merged_at ?? pr.closed_at ?? pr.created_at };
   }));
   return Object.assign(open, { closed });

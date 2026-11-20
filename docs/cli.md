@@ -211,6 +211,8 @@ What became of each PR, read from GitHub with `gh`: merged or closed, time
 to merge, commits by people, reverted or reworked within 30 days. Then the
 five numbers split by task class, with how many jobs of each class stopped
 for each `cause` (the run log's, set by script). Without `gh`, it shows what it last read.
+A PR it first finds closed unmerged has the open should-fix issues its "Needs
+you" lists closed as not planned.
 
 #### `animus retro [--project <name>] [--days <n>] [--json]`
 
