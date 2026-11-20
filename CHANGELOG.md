@@ -9,6 +9,11 @@ clients with how to update.
 
 ## Unreleased
 
+## 0.6.4 (2026-11-20)
+
+- Slack drafts post their project list again when Helix has several projects ([#64](https://github.com/AKstudios/animus/pull/64))
+- A Breaking section that says only "None." is not breaking ([#63](https://github.com/AKstudios/animus/pull/63))
+
 ## 0.6.3 (2026-11-20)
 
 - Should-fix findings become GitHub issues ([#62](https://github.com/AKstudios/animus/pull/62))
