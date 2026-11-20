@@ -39,9 +39,42 @@ export const openIssues: OpenIssues = ({ cwd, pr, findings }) => {
   }
 };
 
+/** An issue as GitHub has it now, for a fix whose ask hands it the issue. */
+export type IssueText = { number: number; title: string; body: string; open: boolean };
+
+/** Reads one issue as the job's person; undefined when GitHub will not give it. */
+export type ReadIssue = (p: { cwd: string; number: number }) => IssueText | undefined;
+
+export const readIssue: ReadIssue = ({ cwd, number }) => {
+  try {
+    // The body has newlines, which gh's output is cut at: ask for JSON on one line.
+    const out = gh(cwd, ['issue', 'view', String(number), '--json', 'title,body,state', '--jq', '[.title,.body,.state]|@json'], undefined, true);
+    if (!out) return undefined;
+    const [title, body, state] = JSON.parse(out) as [string, string, string];
+    return { number, title, body, open: state === 'OPEN' };
+  } catch (err) {
+    if (!(err instanceof AnimusError)) throw err;
+    return undefined;
+  }
+};
+
+/** The issues a fix's ask hands it: the numbers it names; else, on the word should-fix, every open should-fix issue the pull request lists (`open` says to leave out closed ones). */
+export function issuesAsked(ask: string, listed: readonly ShouldFixIssue[]): { numbers: number[]; open: boolean } {
+  const named = [...new Set([...ask.matchAll(/#(\d+)\b/g)].map((m) => Number(m[1])))];
+  if (named.length) return { numbers: named, open: false };
+  return { numbers: /\bshould-fix\b/i.test(ask) ? listed.map((i) => i.number) : [], open: true };
+}
+
+/** Whether an issue holds this finding: the same problem (its title) and file (named first in its body, as openIssues writes it). An issue whose body is unread is judged by its title. */
+export const sameFinding = (f: Finding, issue: { title: string; body?: string | undefined }) =>
+  issue.title === issueTitle(f) && (issue.body === undefined || /^In `([^`]+?)(?::\d+)?`:/.exec(issue.body)?.[1] === f.file);
+
 /** The should-fix issues a pull request's description lists under "Needs you" (pr.ts writes them). */
 export function issuesInBody(body: string): ShouldFixIssue[] {
   // The acceptance criteria always follow it; the spec further down may hold lines of the same shape.
   const needs = /^## Needs you\n([^]*?)^## /m.exec(body)?.[1] ?? '';
   return [...needs.matchAll(/^- Should fix: #(\d+) (.+)$/gm)].map((m) => ({ number: Number(m[1]), title: m[2]! }));
 }
+
+/** The should-fix issues fixes of a pull request settled, from its description's `Closes #N (should-fix)` lines (pr.ts writes them). */
+export const settledInBody = (body: string): number[] => [...body.matchAll(/^(?:Closes|Refs) #(\d+) \(should-fix\)$/gm)].map((m) => Number(m[1]));

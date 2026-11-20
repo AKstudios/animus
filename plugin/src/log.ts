@@ -9,6 +9,7 @@ import type { ToolCall, Tokens } from './agent.ts';
 import { maskSecrets } from './profile.ts';
 import type { Plan } from './profiles.ts';
 import type { Finding, Review } from './review.ts';
+import type { ShouldFixIssue } from './issues.ts';
 import type { Slicing } from './slices.ts';
 import type { Workspace } from './workspace.ts';
 
@@ -167,6 +168,9 @@ export type JobState = {
   fix_start?: string;
   /** The issue the pull request closes, so a fix keeps the line. */
   closes?: number;
+  /** The should-fix issues the pull request lists, and those its fixes settled (issues.ts), as the description had them: a fix picked up again has only its state. */
+  issues?: ShouldFixIssue[];
+  settled?: number[];
   /** The questions this job stopped to ask, each with the person's answer: the reviewer reads them beside the spec. */
   answers?: { question: string; answer: string }[];
   findings?: Finding[];

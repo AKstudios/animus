@@ -18,7 +18,7 @@ import { describeRuns, describeTools, jobDir, loadState, masked, readRuns, readT
 import { jobOf, onPath, runJob, uiJobOf } from './pipeline.ts';
 import { describeNumbers, numbers, refreshOutcomes } from './outcomes.ts';
 import { ghLogin, prFacts, publish, pushEvidence } from './pr.ts';
-import { openIssues } from './issues.ts';
+import { openIssues, readIssue } from './issues.ts';
 import { resolveAfter } from './after.ts';
 import { loopConfig, personalFor, readSkillsFile, skillsForRole, snapshotSkills, whereToRun, type PersonalSkill, type Where } from './personal.ts';
 import { accept, describeLessons, dismiss, readLessons } from './lessons.ts';
@@ -270,7 +270,7 @@ async function main(argv: string[]): Promise<number> {
   const flags ={ ...(values.draft ? { draft: true } : {}), ...(values['dry-run'] ? { dryRun: true } : {}), ...(values.keep ? { keep: true } : {}) };
   const deps = () => {
     const factory = loadFactory();
-    return { factory, agent: claudeAgent(factory), publish, evidence: pushEvidence, issues: openIssues, log: say };
+    return { factory, agent: claudeAgent(factory), publish, evidence: pushEvidence, issues: openIssues, readIssue, log: say };
   };
 
   /** Runs a fix of `pr` on this machine: from the job here that opened it, else from the pull request alone. */

@@ -27,8 +27,12 @@ export type PrInput = {
   gateAttempts: number;
   fixRounds: number;
   review?: Review;
-  /** The should-fix issues opened for the review's should-fix findings, in their order; a finding past the end of this list is written out instead. */
+  /** The should-fix issues "Needs you" lists: on a job, those opened for the review's should-fix findings, in their order. */
   issues?: readonly ShouldFixIssue[];
+  /** The should-fix findings written out as text; when absent, the review's past the end of `issues`. */
+  unissued?: readonly Finding[];
+  /** The should-fix issues fixes settled: merging the pull request closes them (or refers to them, as `issueLink` says). */
+  settles?: readonly number[];
   /** Why the should-fix findings written out are not issues, said in one line. */
   noIssues?: string;
   reviewRounds: number;
@@ -72,7 +76,10 @@ export function prBody(p: PrInput): string {
   const out: string[] = [];
   if (p.failure) out.push(`**This job failed and needs you.** ${p.failure.split('\n')[0]}`, '');
   if (p.summary) out.push(p.summary, '');
-  if (p.closes) out.push(`${p.issueLink === 'refs' ? 'Refs' : 'Closes'} #${p.closes}`, '');
+  const link = p.issueLink === 'refs' ? 'Refs' : 'Closes';
+  if (p.closes) out.push(`${link} #${p.closes}`, '');
+  // Marked, so a later fix tells them from the job's own issue (issues.ts, settledInBody).
+  if (p.settles?.length) out.push(...p.settles.map((n) => `${link} #${n} (should-fix)`), '');
 
   if (p.breaking) out.push('## Breaking', '', p.breaking.trim(), '');
 
@@ -80,9 +87,11 @@ export function prBody(p: PrInput): string {
   for (const f of p.open) here.push(`- ${p.open.length === 1 ? '1 blocker' : 'Blocker'} still open: ${finding(f)}`);
   for (const f of p.review?.findings.filter((x) => x.for_person) ?? []) here.push(`- The reviewer asks: ${finding(f)}`);
   p.spec.criteria.forEach((c, i) => { if (!c.commands.length) here.push(`- Criterion ${i + 1} has no check: ${p.review ? 'only the reviewer judged it' : 'nothing checked it'}`); });
-  const toFix = shouldFix(p.review?.findings ?? []);
-  toFix.forEach((f, i) => { const issue = p.issues?.[i]; here.push(`- Should fix: ${issue ? `#${issue.number} ${issue.title}` : finding(f)}`); });
-  if (p.noIssues && toFix.length > (p.issues?.length ?? 0)) here.push(`- ${p.issues?.length ? 'The other should-fix findings are not issues' : 'No should-fix issues were opened'}: ${cell(p.noIssues.split('\n')[0]!)}`);
+  const issues = p.issues ?? [];
+  const text = p.unissued ?? shouldFix(p.review?.findings ?? []).slice(issues.length);
+  for (const i of issues) here.push(`- Should fix: #${i.number} ${i.title}`);
+  for (const f of text) here.push(`- Should fix: ${finding(f)}`);
+  if (p.noIssues && text.length) here.push(`- ${issues.length ? 'The other should-fix findings are not issues' : 'No should-fix issues were opened'}: ${cell(p.noIssues.split('\n')[0]!)}`);
   if (p.protectedTouched.length) here.push(`- Changes under protected paths: ${p.protectedTouched.map((f) => `\`${f}\``).join(', ')}`);
   if (here.length) out.push('## Needs you', '', ...here, '');
 
