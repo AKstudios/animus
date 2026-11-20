@@ -9,6 +9,12 @@ clients with how to update.
 
 ## Unreleased
 
+## 0.6.5 (2026-11-20)
+
+- Send an agent's prompt on stdin, and say why a project or session failed ([#67](https://github.com/AKstudios/animus/pull/67))
+- Refuse a check command the shell cannot parse, and show the shell's own errors ([#66](https://github.com/AKstudios/animus/pull/66))
+- Let anyone read the display without a password ([#65](https://github.com/AKstudios/animus/pull/65))
+
 ## 0.6.4 (2026-11-20)
 
 - Slack drafts post their project list again when Helix has several projects ([#64](https://github.com/AKstudios/animus/pull/64))
