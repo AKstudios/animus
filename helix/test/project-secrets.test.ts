@@ -180,9 +180,9 @@ test('a job gets only the names its base branch lists, its person\'s own value b
 test('a person\'s GitHub and Claude credentials show as *** in their job\'s log, reason and question', async (t) => {
   const launch: Launch = () => ({ command: process.execPath, args: ['-e', [
     'const fs = require("node:fs"); const file = process.env.ANIMUS_GH_TOKEN_FILE;',
-    'process.stderr.write("gh " + process.env.GITHUB_TOKEN + " claude " + process.env.CLAUDE_CODE_OAUTH_TOKEN + " live " + fs.readFileSync(file, "utf8") + "\\n");',
-    // Helix renews the live token while the job runs.
-    'fs.writeFileSync(file, "ghu_renewed_token_456"); process.stderr.write("renewed " + fs.readFileSync(file, "utf8") + "\\n");',
+    // The job reads its starting token, Helix renews the file, and only then does the job print both: the old one is still valid.
+    'const old = fs.readFileSync(file, "utf8"); fs.writeFileSync(file, "ghu_renewed_token_456");',
+    'process.stderr.write("gh " + process.env.GITHUB_TOKEN + " claude " + process.env.CLAUDE_CODE_OAUTH_TOKEN + " live " + old + "\\nrenewed " + fs.readFileSync(file, "utf8") + "\\n");',
     'console.log(JSON.stringify({ outcome: "needs-input", reason: "push refused for " + process.env.GITHUB_TOKEN, question: "is " + process.env.CLAUDE_CODE_OAUTH_TOKEN + " right?" }))',
   ].join('\n')] });
   const h = await helix(undefined, launch);

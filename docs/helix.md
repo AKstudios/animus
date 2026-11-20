@@ -381,8 +381,8 @@ added again once it is set.
 A value of 8 characters or more is written as `***` in the job's log, its job
 files (so the display), the add check's output and the pull request. A
 person's GitHub and Claude credentials (`GH_TOKEN`, `GITHUB_TOKEN`,
-`CLAUDE_CODE_OAUTH_TOKEN`, `ANTHROPIC_API_KEY`, and their live GitHub token as
-it is renewed) are written as `***` in the job's log, its failure reason and
+`CLAUDE_CODE_OAUTH_TOKEN`, `ANTHROPIC_API_KEY`, and every live GitHub token
+the job held, before and after each renewal) are written as `***` in the job's log, its failure reason and
 its question too.
 
 **The model can read every secret a job gets**: the agent writes the code

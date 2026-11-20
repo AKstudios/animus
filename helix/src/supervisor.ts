@@ -236,12 +236,13 @@ export function supervise(opts: {
     let secrets: Record<string, string> = {};
     let credentials: string[] = [];
     const live = liveTokenFile(job.person);
-    // What the job's log, reason and question show as ***: the live token as it is now, since Helix renews it while a job runs.
+    // What the job's log, reason and question show as ***: every live token the job may hold, since Helix renews it while a job runs and a renewed-away one stays valid.
+    const tokens = new Set<string>();
     const hidden = () => {
-      let token: string[] = [];
-      try { token = [readFileSync(live, 'utf8')]; } catch { /* signed in without the app */ }
-      return [...Object.values(secrets), ...credentials, ...token];
+      try { tokens.add(readFileSync(live, 'utf8')); } catch { /* signed in without the app */ }
+      return [...Object.values(secrets), ...credentials, ...tokens];
     };
+    hidden();
     try {
       // Taken off since the job was queued: it never runs, and never with the machine's own logins in place of theirs.
       if (!person) throw new AnimusError(`${job.person} is no longer on Helix`);
