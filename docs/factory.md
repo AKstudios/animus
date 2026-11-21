@@ -294,10 +294,14 @@ Every run writes one JSON line, in both modes, from the first day. Outcome field
 **Five numbers to watch, split by task class**
 
 1. Merge rate.
-2. Share merged with no human commit.
+2. Share merged with no human commit. A person's commit is one no job
+   made (a run's head, or an ancestor of one) that does not merge the base
+   branch.
 3. Share that passed the gates first time.
 4. Cost and wall time per merged PR, not per attempt.
-5. Revert and rework rate within 30 days.
+5. Revert and rework rate within 30 days. Rework is a later change to the
+   lines the PR added by a bug job's PR or a commit no job made; another
+   job's feature work is not. The outcome lists what reworked it.
 
 ## How to improve it
 

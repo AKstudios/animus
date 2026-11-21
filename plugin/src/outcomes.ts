@@ -8,7 +8,7 @@ import { join } from 'node:path';
 import { revParse } from './git.ts';
 import { closeIssues, issuesInBody, type CloseIssues } from './issues.ts';
 import { animusHome, readRuns, writeJson, type Run } from './log.ts';
-import type { PrFacts, PrState } from './pr.ts';
+import type { PrCommit, PrFacts, PrState } from './pr.ts';
 import { tryGit } from './proc.ts';
 
 export const outcomesFile = () => join(animusHome(), 'outcomes.json');
@@ -23,16 +23,22 @@ export type PrOutcome = {
   /** When it merged or closed. */
   closed?: string;
   ms_to_merge?: number;
-  /** Commits on the pull request made after the job's last run ended. */
+  /** Commits a person made on the pull request: none that a job made, none that merge the base branch. */
   human_commits: number;
-  /** Lines those commits added and removed; absent when the clone cannot read the pull request's head. */
+  /** Lines those commits added and removed, each against its first parent; absent when the clone cannot read a commit. */
   human_lines?: { added: number; removed: number };
   /** Within 30 days of the merge; absent while not merged, or when the repository is not here to read. */
   reverted?: boolean;
-  /** Lines the pull request added were changed or removed within 30 days of the merge. */
+  /** Lines the pull request added were changed again within 30 days of the merge by a bug job or a person. */
   reworked?: boolean;
+  /** What reworked it: the urls of the pull requests of bug jobs, and the short ids of commits no job made. */
+  reworked_by?: string[];
+  /** How the numbers were counted; an outcome counted another way is computed again when next read. */
+  version?: number;
   checked: string;
 };
+
+const VERSION = 2;
 
 export type Outcomes = Record<string, PrOutcome>;
 
@@ -43,6 +49,7 @@ export function readOutcomes(file = outcomesFile()): Outcomes {
 
 /** Nothing more can change: closed, or merged with its 30 days watched to the end. */
 function settled(o: PrOutcome): boolean {
+  if (o.version !== VERSION) return false;
   if (o.state === 'CLOSED') return true;
   return o.state === 'MERGED' && o.closed !== undefined && o.reverted !== undefined && Date.parse(o.checked) >= Date.parse(o.closed) + WATCH_MS;
 }
@@ -62,22 +69,61 @@ function linesBetween(repo: string, from: string, to: string): { added: number; 
   return total;
 }
 
+/** The commits of a pull request that a person made: not a job's (a run's head, or an ancestor of one on the pull request), and not a merge of the base branch. Without the clone no merge of the base is known. */
+function personsCommits(repo: string | undefined, f: PrFacts, runs: readonly Run[]): PrCommit[] {
+  const byId = new Map(f.commits.map((c) => [c.id, c]));
+  const jobs = new Set<string>();
+  const walk = runs.flatMap((r) => (r.head ? [r.head] : []));
+  for (const id of walk) {
+    const c = byId.get(id);
+    if (!c || jobs.has(id)) continue;
+    jobs.add(id);
+    walk.push(...c.parents);
+  }
+  // A run with no head recorded cannot name its commits: the older rule, by date, stands for it.
+  const ended = runs.some((r) => r.head) ? undefined : Math.max(...runs.map((r) => Date.parse(r.ended)));
+  const ref = repo ? baseBefore(repo, f.baseRefName, f.mergedAt ? f.mergeCommit : undefined) : undefined;
+  const onBase = (sha: string) => Boolean(repo && ref && tryGit(repo, ['merge-base', '--is-ancestor', sha, ref]) !== undefined);
+  return f.commits.filter((c) => !jobs.has(c.id) && !(ended !== undefined && Date.parse(c.date) <= ended) && !onBase(c.id) && !(c.parents.length > 1 && c.parents.some(onBase)));
+}
+
+/** The base branch as it was before the pull request: the merge commit's first parent, else the branch, fetched. */
+function baseBefore(repo: string, base: string, merge?: string): string | undefined {
+  if (merge && revParse(repo, `${merge}^1`)) return `${merge}^1`;
+  const remote = Boolean(tryGit(repo, ['remote', 'get-url', 'origin']));
+  if (remote) tryGit(repo, ['fetch', '--quiet', 'origin', base]);
+  return remote && revParse(repo, `origin/${base}`) ? `origin/${base}` : revParse(repo, base) ? base : undefined;
+}
+
+/** The lines these commits added and removed, each against its first parent; undefined when the clone cannot read one. */
+function linesOf(repo: string | undefined, commits: readonly PrCommit[]): { added: number; removed: number } | undefined {
+  const total = { added: 0, removed: 0 };
+  for (const c of commits) {
+    const l = repo ? linesBetween(repo, c.parents[0] ?? `${c.id}^`, c.id) : undefined;
+    if (!l) return undefined;
+    total.added += l.added;
+    total.removed += l.removed;
+  }
+  return total;
+}
+
 /** Asks GitHub about every pull request in the run log whose outcome can still change, and saves what it says; one it finds closed unmerged has its should-fix issues closed as not planned. */
 export function refreshOutcomes(facts: (url: string, cwd: string) => PrFacts | undefined, now = Date.now(), close: CloseIssues = closeIssues): Outcomes {
   const outcomes = readOutcomes();
+  const runs = readRuns();
   const last = new Map<string, Run>();
-  for (const run of readRuns()) if (run.pr) last.set(run.pr, run);
+  for (const run of runs) if (run.pr) last.set(run.pr, run);
   for (const [pr, run] of last) {
     if (outcomes[pr] && settled(outcomes[pr])) continue;
     const hasRepo = existsSync(join(run.repo, '.git'));
     const f = facts(pr, hasRepo ? run.repo : animusHome());
     if (!f) continue;
-    const human_commits = f.commits.filter((date) => Date.parse(date) > Date.parse(run.ended)).length;
+    const people = personsCommits(hasRepo ? run.repo : undefined, f, runs.filter((r) => r.pr === pr));
     const o: PrOutcome = {
-      pr, job: run.job, state: f.state, opened: f.createdAt, human_commits,
+      pr, job: run.job, state: f.state, opened: f.createdAt, human_commits: people.length, version: VERSION,
       checked: new Date(now).toISOString(),
     };
-    const lines = human_commits ? (hasRepo && f.head && run.head ? linesBetween(run.repo, run.head, f.head) : undefined) : { added: 0, removed: 0 };
+    const lines = linesOf(hasRepo ? run.repo : undefined, people);
     if (lines) o.human_lines = lines;
     const closed = f.state === 'MERGED' ? f.mergedAt : f.state === 'CLOSED' ? f.closedAt : undefined;
     if (closed) o.closed = closed;
@@ -86,7 +132,7 @@ export function refreshOutcomes(facts: (url: string, cwd: string) => PrFacts | u
     if (issues.length) close({ cwd: hasRepo ? run.repo : animusHome(), pr, numbers: issues.map((i) => i.number) });
     if (f.state === 'MERGED' && f.mergedAt) {
       o.ms_to_merge = Date.parse(f.mergedAt) - Date.parse(f.createdAt);
-      if (hasRepo && f.mergeCommit) Object.assign(o, afterMerge(run.repo, f.baseRefName, f.mergeCommit, f.mergedAt, pr));
+      if (hasRepo && f.mergeCommit) Object.assign(o, afterMerge(run.repo, f.baseRefName, f.mergeCommit, f.mergedAt, pr, runs));
     }
     outcomes[pr] = o;
   }
@@ -99,9 +145,10 @@ export function refreshOutcomes(facts: (url: string, cwd: string) => PrFacts | u
  * on its base branch within 30 days. Read from the clone, which is fetched
  * first. The change is taken to be the merge commit against its first parent,
  * which holds for a merge and a squash; a rebase merge is judged by its last
- * commit alone.
+ * commit alone. Rework is a later change to those lines by a bug job's pull
+ * request or by a commit no job made; another job's feature work is not.
  */
-export function afterMerge(repo: string, base: string, merge: string, mergedAt: string, pr: string): { reverted?: boolean; reworked?: boolean } {
+export function afterMerge(repo: string, base: string, merge: string, mergedAt: string, pr: string, runs: readonly Run[] = []): { reverted?: boolean; reworked?: boolean; reworked_by?: string[] } {
   const remote = Boolean(tryGit(repo, ['remote', 'get-url', 'origin']));
   if (remote) tryGit(repo, ['fetch', '--quiet', 'origin', base]);
   const ref = remote && revParse(repo, `origin/${base}`) ? `origin/${base}` : base;
@@ -115,9 +162,28 @@ export function afterMerge(repo: string, base: string, merge: string, mergedAt: 
   const reverted = messages.split('\0').some((m) => m.includes(`This reverts commit ${merge}`) || (github ? new RegExp(`Reverts ${github[1]}#${github[2]}\\b`).test(m) : false));
 
   const added = ranges(tryGit(repo, ['diff', '-U0', '--no-renames', `${merge}^`, merge]) ?? '', 'new');
-  const changed = ranges(tryGit(repo, ['diff', '-U0', '--no-renames', merge, tip]) ?? '', 'old');
-  const reworked = [...changed].some(([file, later]) => (added.get(file) ?? []).some(([a, b]) => later.some(([c, d]) => c <= b && a <= d)));
-  return { reverted, reworked };
+  // Which of the added ranges the changes up to a commit have touched; the commit that touches a new one is what reworked them.
+  const touched = (to: string) => new Set([...ranges(tryGit(repo, ['diff', '-U0', '--no-renames', merge, to]) ?? '', 'old')].flatMap(([file, later]) => (added.get(file) ?? []).filter(([a, b]) => later.some(([c, d]) => c <= b && a <= d)).map(([a]) => `${file}:${a}`)));
+  const by: string[] = [];
+  const seen = new Set<string>();
+  // Commits on the base itself, in order: a squash or rebase commit, or the merge of a pull request.
+  for (const c of (tryGit(repo, ['rev-list', '--first-parent', '--reverse', `${merge}..${tip}`]) ?? '').split('\n').filter(Boolean)) {
+    const now = touched(c);
+    const fresh = [...now].some((k) => !seen.has(k));
+    now.forEach((k) => seen.add(k));
+    const who = fresh ? reworkedBy(repo, c, pr, runs) : undefined;
+    if (who && !by.includes(who)) by.push(who);
+  }
+  return { reverted, reworked: by.length > 0, reworked_by: by };
+}
+
+/** Who a later change on the base came from: the url of its pull request when a bug job opened it, nothing when another job did (feature work), else the commit's short id, as a person's. */
+function reworkedBy(repo: string, commit: string, pr: string, runs: readonly Run[]): string | undefined {
+  const number = /#(\d+)/.exec(tryGit(repo, ['log', '-1', '--format=%s', commit]) ?? '')?.[1];
+  const url = number ? pr.replace(/\d+$/, number) : undefined;
+  const ofJob = url ? runs.filter((r) => r.pr === url) : [];
+  if (ofJob.length) return ofJob.at(-1)!.type === 'bug' ? url : undefined;
+  return commit.slice(0, 7);
 }
 
 /** The line ranges each hunk of a -U0 diff covers on one side, by file. A side with no lines covers nothing. */

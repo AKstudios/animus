@@ -2,7 +2,8 @@
 // needs it, the way `animus cleanup` does it on a laptop. `helix serve` runs
 // it once a day. Each person's Animus home gets `animus cleanup`, run as an
 // animus process with that person's credentials (their pull requests and
-// branches are theirs), and the job images of other releases go, with the
+// branches are theirs), then `animus outcomes` as them, so a merged pull
+// request gets its outcome a day later, and the job images of other releases go, with the
 // project images no project's current Dockerfile and job image give. Every
 // job's record stays for analysis: Helix's own folder of it (its spec and
 // log.txt), and the person's job folders and transcripts.
@@ -21,7 +22,13 @@ const CLI = join(dirname(fileURLToPath(import.meta.url)), '..', '..', 'plugin', 
 export const CLEANUP_EVERY_MS = 24 * 60 * 60 * 1000;
 export const CLEANUP_FIRST_MS = 10 * 60 * 1000;
 
-export type CleanupOptions = { home: string; contained: boolean; days: number; dryRun: boolean; docker?: Docker; fresh?: (person: string) => Promise<unknown> };
+type Outcomes = (env?: Record<string, string>) => { status: number | null; stdout?: string; stderr?: string; error?: Error };
+
+export type CleanupOptions = { home: string; contained: boolean; days: number; dryRun: boolean; docker?: Docker; fresh?: (person: string) => Promise<unknown>; outcomes?: Outcomes };
+
+const animusOutcomes: Outcomes = (env) => spawnSync(process.execPath, ['--disable-warning=ExperimentalWarning', CLI, 'outcomes'], {
+  encoding: 'utf8', env: { ...process.env, ...env }, timeout: 10 * 60 * 1000,
+});
 
 /** Each `animus cleanup` to run: one per person's Animus home with containers, else the machine's own once. */
 export type AnimusCleanup = { who: string; env?: Record<string, string>; why?: string };
@@ -62,6 +69,11 @@ export async function helixCleanup(store: Store, opts: CleanupOptions & { versio
     if (r.status !== 0) ok = false;
     say(`${run.who}: animus cleanup${r.status === 0 ? '' : ` failed (${r.error?.message ?? `exit ${r.status}`})`}`);
     for (const line of out.split('\n').filter(Boolean)) say(`  ${line}`);
+    // Their merged pull requests get an outcome a day later. Not reaching GitHub is said and skipped: it must not stop the others.
+    if (opts.dryRun) continue;
+    const o = (opts.outcomes ?? animusOutcomes)(run.env);
+    if (o.status !== 0) say(`${run.who}: animus outcomes failed (${o.error?.message ?? `exit ${o.status}`}); skipped`);
+    for (const line of `${o.stdout ?? ''}${o.stderr ?? ''}`.trimEnd().split('\n').filter(Boolean)) if (o.status !== 0) say(`  ${line}`);
   }
   const run = opts.docker ?? docker;
   const tags = (repository: string) => {

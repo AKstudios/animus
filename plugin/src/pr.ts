@@ -230,16 +230,23 @@ export const prSource: PrSourceLookup = (url, cwd) => {
 /** The GitHub login gh is signed in as here; undefined when it cannot say. */
 export const ghLogin = (cwd: string) => gh(cwd, ['api', 'user', '--jq', '.login'], undefined, true) || undefined;
 
-/** What GitHub records about a pull request. commits holds each commit's committer date. */
-export type PrFacts = { state: PrState; createdAt: string; closedAt?: string; mergedAt?: string; mergeCommit?: string; baseRefName: string; commits: string[]; /** The pull request's last commit. */ head?: string; /** Its description. */ body?: string };
+/** One commit of a pull request: its id, its parents' ids and its committer date. */
+export type PrCommit = { id: string; parents: string[]; date: string };
+
+/** What GitHub records about a pull request. */
+export type PrFacts = { state: PrState; createdAt: string; closedAt?: string; mergedAt?: string; mergeCommit?: string; baseRefName: string; commits: PrCommit[]; /** Its description. */ body?: string };
 
 export const prFacts = (url: string, cwd: string): PrFacts | undefined => {
-  const out = gh(cwd, ['pr', 'view', url, '--json', 'state,createdAt,closedAt,mergedAt,mergeCommit,baseRefName,commits,headRefOid,body'], undefined, true);
+  const out = gh(cwd, ['pr', 'view', url, '--json', 'state,createdAt,closedAt,mergedAt,mergeCommit,baseRefName,commits,body'], undefined, true);
   if (!out) return undefined;
-  const j = JSON.parse(out) as { state: PrState; createdAt: string; closedAt: string | null; mergedAt: string | null; mergeCommit: { oid: string } | null; baseRefName: string; headRefOid?: string; body?: string; commits: { committedDate: string }[] };
+  const j = JSON.parse(out) as { state: PrState; createdAt: string; closedAt: string | null; mergedAt: string | null; mergeCommit: { oid: string } | null; baseRefName: string; body?: string; commits: { oid: string; committedDate: string }[] };
+  // gh pr view does not give parents; the REST list does. shortcut: its first 100 commits, when a pull request has more the rest have no parents.
+  const github = /github\.com\/([^/]+\/[^/]+)\/pull\/(\d+)/.exec(url);
+  const listed = github ? gh(cwd, ['api', `repos/${github[1]}/pulls/${github[2]}/commits?per_page=100`, '--jq', '[.[]|{id:.sha,parents:[.parents[].sha]}]|@json'], undefined, true) : undefined;
+  const parents = new Map((listed ? (JSON.parse(listed) as { id: string; parents: string[] }[]) : []).map((c) => [c.id, c.parents]));
   return {
-    state: j.state, createdAt: j.createdAt, baseRefName: j.baseRefName, commits: j.commits.map((c) => c.committedDate),
-    ...(j.headRefOid ? { head: j.headRefOid } : {}), ...(j.body ? { body: j.body } : {}),
+    state: j.state, createdAt: j.createdAt, baseRefName: j.baseRefName, commits: j.commits.map((c) => ({ id: c.oid, parents: parents.get(c.oid) ?? [], date: c.committedDate })),
+    ...(j.body ? { body: j.body } : {}),
     ...(j.closedAt ? { closedAt: j.closedAt } : {}), ...(j.mergedAt ? { mergedAt: j.mergedAt } : {}), ...(j.mergeCommit ? { mergeCommit: j.mergeCommit.oid } : {}),
   };
 };
