@@ -2,14 +2,14 @@
 // the slots, and each repository's base branch and gates. Read fresh on every
 // request from the table, Animus's job files and each clone's profile, so
 // Helix keeps nothing for it.
-import { statSync } from 'node:fs';
+import { readFileSync, statSync } from 'node:fs';
 import { hostname } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { listJobs, type JobFilter } from '../../plugin/display/job-list.ts';
-import { PERSON_JOBS, type InsightsPage, type Display, type DisplayClosed, type DisplayPr, type JobListPage, type ListJob, type DisplayJob, type DisplayRepo, type JobPage, type PeoplePage, type PersonPage, type PersonRow } from '../../plugin/display/shape.ts';
+import { PERSON_JOBS, type InsightsPage, type Display, type DisplayClosed, type DisplayPr, type JobListPage, type ListJob, type DisplayJob, type DisplayRepo, type JobPage, type PeoplePage, type ProvisionAttempts, type PersonPage, type PersonRow } from '../../plugin/display/shape.ts';
 import { folderParts, forgetTools, liveSessions, read, shotFile } from '../../plugin/src/job-folder.ts';
 import { afterOf, fixRounds, insightsData, lessonsCiting } from '../../plugin/src/insights-data.ts';
-import { animusHome, readRuns, STAGES } from '../../plugin/src/log.ts';
+import { animusHome, PROVISION_STAGES, readRuns, STAGES } from '../../plugin/src/log.ts';
 import { readOutcomes } from '../../plugin/src/outcomes.ts';
 import { loadFactory } from '../../plugin/src/profiles.ts';
 import { profilesInfo, tokensByJob, usageOf } from '../../plugin/src/usage.ts';
@@ -64,7 +64,7 @@ function profilesOf(): { profiles?: ReturnType<typeof profilesInfo> } {
 
 function jobOf(job: HelixJob, supervisor: Supervisor, fix: (j: HelixJob) => { fix_rounds?: number; fix_of_title?: string; tokens?: number } = () => ({})): DisplayJob {
   const { spec: _spec, pid: _pid, answer, draft: _draft, interrupted: _interrupted, ...rest } = job;
-  const shown = { ...rest, ...fix(job) };
+  const shown = { ...rest, ...fix(job), ...(job.provision ? { stages: PROVISION_STAGES } : {}) };
   if (job.state === 'queued' && job.animus_job) return { ...shown, resumed: answer ? 'answer' : 'restart' };
   if (job.state !== 'running') return shown;
   const progress = supervisor.progress(job);
@@ -138,7 +138,11 @@ export function jobPage(opts: { store: Store; supervisor: Supervisor }, id: numb
   const open = github.prs.find((p) => p.job === id);
   const closed = github.closed.find((c) => c.job === id);
   const pr: Partial<JobPage> = open ? { pr_state: 'open', pr_opened: open.created } : closed ? { pr_state: closed.merged ? 'merged' : 'closed', ...(closed.merged ? { pr_merged: closed.at } : {}) } : {};
-  const page: JobPage = { at: new Date().toISOString(), stages: STAGES, job: jobOf(job, opts.supervisor, fixOf(opts)), ...pr, ...profilesOf(), ...(spec !== undefined ? { spec } : {}), log: opts.supervisor.log(id, Infinity) };
+  const provision = job.provision ? attemptsOf(job) : undefined;
+  const page: JobPage = {
+    at: new Date().toISOString(), stages: job.provision ? PROVISION_STAGES : STAGES, job: jobOf(job, opts.supervisor, fixOf(opts)), ...pr, ...profilesOf(),
+    ...(provision ? { provision } : {}), ...(spec !== undefined ? { spec } : {}), log: opts.supervisor.log(id, Infinity),
+  };
   const dir = folderOf(opts.supervisor, job);
   if (!job.animus_job || !dir) return page;
   const home = opts.supervisor.animusHome(job.person);
@@ -152,6 +156,11 @@ export function jobPage(opts: { store: Store; supervisor: Supervisor }, id: numb
   const sessions = job.state === 'running' && progress && !runs.length ? liveSessions(tools, progress, Date.now()) : [];
   if (job.state !== 'running') forgetTools(tools);
   return Object.assign(page, sessions.length ? { sessions } : {}, folderParts(dir, runs, job.answer), o ? { after: afterOf(o) } : {}, lessons.length ? { lessons } : {});
+}
+
+/** A provision job's attempts, kept beside its spec in the job's folder; none before its first attempt. */
+function attemptsOf(job: HelixJob): ProvisionAttempts | undefined {
+  try { return JSON.parse(readFileSync(join(dirname(job.spec), 'attempts.json'), 'utf8')) as ProvisionAttempts; } catch { return undefined; }
 }
 
 /** The job's Animus folder. Its Animus id comes from what the job printed: only a plain name is taken as a folder. */

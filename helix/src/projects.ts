@@ -13,7 +13,7 @@ import { fileURLToPath } from 'node:url';
 import { describe, runGates, type CheckResult } from '../../plugin/src/gates.ts';
 import { githubUrl } from '../../plugin/src/git.ts';
 import { loadProfile, mask, PROFILE_PATH, useJobEnv } from '../../plugin/src/profile.ts';
-import { failureExcerpt } from '../../plugin/src/proc.ts';
+import { failureExcerpt, firstError } from '../../plugin/src/proc.ts';
 import { ensureSetup } from '../../plugin/src/workspace.ts';
 import { ImageFailed, readDockerfile } from './project-image.ts';
 import { describeExisting, provisionOf, provisionView, queueProvision } from './provision.ts';
@@ -162,12 +162,13 @@ export function runEnvironment(opts: { setup: SetupRun; worktree: string; clone:
   const { say } = opts;
   say(`running the profile's installs and setup, then every gate, as a job would${opts.profile.setup ? `: ${opts.profile.setup}` : ''}`);
   const r = opts.setup(opts.worktree, opts.clone, opts.env, opts.image);
-  if (!r.gates) return `setup did not pass, so every job would fail at it:\n${failureExcerpt(r.output, 30)}`;
+  // The first line is what a list shows, so it names the cause; the excerpt follows.
+  if (!r.gates) return `setup did not pass, so every job would fail at it: ${firstError(r.output)}\n${failureExcerpt(r.output, 30)}`;
   say('setup passed');
   for (const line of describe(r.gates).split('\n').slice(0, r.gates.length)) say(`  ${line}`);
   for (const g of r.gates.filter((g) => g.flaky)) say(`flaky: ${g.name} failed, then passed when run again`);
   const failed = r.gates.filter((g) => !g.ok);
-  if (failed.length) return `its gates fail on ${opts.on}, so every job would fail at them:\n${describe(failed)}`;
+  if (failed.length) return `its gates fail on ${opts.on} (${failed.map((g) => g.name).join(', ')}), so every job would fail at them:\n${describe(failed)}`;
   return undefined;
 }
 

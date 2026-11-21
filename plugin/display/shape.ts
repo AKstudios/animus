@@ -5,9 +5,18 @@ import type { Progress } from '../src/log.ts';
 import type { Review } from '../src/review.ts';
 
 /** A job as the display sees it: Helix's row without what is only Helix's business (the spec's path, the pid, the answer's text). */
+/** One attempt of a provision job, as its attempts.json keeps it (helix/src/provision-loop.ts): what the agent changed, and how the add check went. */
+export type ProvisionAttempt = { n: number; started: string; ms?: number; summary?: string; changed: string[]; discarded?: string[]; result: 'running' | 'passed' | 'failed'; why?: string };
+/** A provision job's attempts, and how many it may make. */
+export type ProvisionAttempts = { max: number; attempts: ProvisionAttempt[] };
+
 export type DisplayJob = {
   /** Helix's number, or a local job's own id. */
   id: number | string;
+  /** The stages this job goes through, when not the display's: a provision job's. */
+  stages?: readonly string[];
+  /** A provision job: it fixes a project's environment in attempts, and its page shows those. */
+  provision?: boolean;
   state: 'queued' | 'waiting' | 'running' | 'ended' | 'cancelled' | 'stopped';
   person: string;
   /** The repository's name in Helix's config. */
@@ -58,6 +67,8 @@ export type JobPage = {
   at: string;
   stages: readonly string[];
   job: DisplayJob;
+  /** A provision job's attempts, in place of a run's stages. */
+  provision?: ProvisionAttempts;
   /** The spec as it was submitted. */
   spec?: string;
   /** Wall time per stage in ms, added up over the job's runs that have ended. */

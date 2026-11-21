@@ -289,6 +289,7 @@ a.tag:hover { opacity: 1; background: color-mix(in srgb, currentColor 22%, trans
 .timekey .on { font-weight: 600; }
 /* A colour per stage, the same in both themes, as the design's canvas draws them. */
 .st-setup, .st-pr { --c: #3a4450; } .st-plan { --c: #7fa7b3; } .st-implement { --c: #22c3ee; } .st-gates { --c: #f5a524; }
+.st-agent, .st-attempt { --c: #22c3ee; } .st-image { --c: #7fa7b3; } .st-check { --c: #f5a524; }
 .st-review { --c: #b79cff; } .st-evidence { --c: #4ade80; } .st-labels { --c: #0b0d10; }
 [class^='st-'] { background: var(--c); fill: var(--c); }
 .criterion { display: grid; grid-template-columns: 24px minmax(0, 1fr); align-items: start; gap: 4px 14px; padding: 12px 4px; border-bottom: 1px solid var(--soft); font-size: 14px; }

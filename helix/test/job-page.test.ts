@@ -536,3 +536,23 @@ test('the page keeps what a person folded per job in the browser\'s storage, and
   assert.match(app, /addEventListener\('toggle'/);
   assert.match(app, /try \{ storage\(\)\.setItem\(foldKey/);
 });
+
+// Protects: a provision job's page. Fails when: it lists a run's stages, all "not reached", in place of its attempts, or an attempt does not say what it changed and why it failed.
+test('a provision job page lists its attempts: what each changed, how its check went, and what the one under way is doing', () => {
+  const v = jobView(page({ provision: true, stages: ['agent', 'image', 'check', 'pr'], started: '2026-11-17T11:50:00Z', progress: { stage: 'image', who: 'docker builds the project image', at: '2026-11-17T11:59:00Z', attempt: { n: 2, of: 5 } } }, {
+    stages: ['agent', 'image', 'check', 'pr'],
+    provision: { max: 5, attempts: [
+      { n: 1, started: '2026-11-17T11:50:00Z', ms: 300_000, summary: 'Installed libsystemd-dev.', changed: ['.animus/Dockerfile'], result: 'failed', why: 'its gates fail on animus/provision-9 (test), so every job would fail at them:\nFAIL test: pytest' },
+      { n: 2, started: '2026-11-17T11:56:00Z', summary: 'Added jq.', changed: ['.animus/Dockerfile'], result: 'running' },
+    ] },
+  }), NOW);
+  assert.deepEqual(v.stageSections.map((s) => [s.title, s.state, s.stateText, s.took]), [
+    ['Attempt 1', 'done', 'its gates fail on animus/provision-9 (test), so every job would fail at them', '5m'],
+    ['Attempt 2', 'now', 'building the image', '4m'],
+  ]);
+  assert.deepEqual(v.stageSections[0]!.notes, ['Installed libsystemd-dev.', 'Changed .animus/Dockerfile']);
+  assert.match(v.stageSections[0]!.output!, /FAIL test: pytest/);
+  assert.deepEqual(v.numbers.map((n) => n.k), ['time taken', 'cost', 'attempts']);
+  assert.equal(v.numbers[2]!.v, '2 of 5');
+  assert.match(v.now!, /^Building the image, attempt 2 of 5/);
+});

@@ -153,7 +153,7 @@ const nav = (v: View) => `<aside class="side">${week(v)}<nav class="panel projec
   <div class="key"><span><i class="merged"></i>merged</span><span><i class="running"></i>running</span><span><i class="ask"></i>asks</span><span><i class="failed"></i>failed</span></div>
 </nav></aside>`;
 
-const track = (v: View, j: Live) => `<span class="track" aria-hidden="true">${Array.from({ length: v.stages }, (_, i) => `<span class="seg${i < j.stage ? ' done' : i === j.stage ? ' on' : ''}"></span>`).join('')}</span>`;
+const track = (_v: View, j: Live) => `<span class="track" aria-hidden="true">${Array.from({ length: j.stages }, (_, i) => `<span class="seg${i < j.stage ? ' done' : i === j.stage ? ' on' : ''}"></span>`).join('')}</span>`;
 
 /** A person named on a job, linking to their page. */
 const who = (j: { person: string; personPage?: string }) => (j.personPage ? `<a href="${esc(j.personPage)}">${esc(j.person)}</a>` : esc(j.person));
@@ -304,6 +304,8 @@ function stageBody(v: JobPageView, s: StageSection, sessions: string): string {
       return `<figure class="shot" data-key="s-${esc(x.src)}">${src ? `<button type="button" class="shot-open" data-shot="${i}" aria-label="Open ${esc(x.name)}"><img src="${esc(src)}" alt="${esc(x.name)}"></button>` : none('Loading…')}<figcaption>${esc(x.name)}</figcaption></figure>`;
     }).join('')}</div>`);
   }
+  if (s.notes?.length) parts.push(...s.notes.map((n) => `<p>${esc(n)}</p>`));
+  if (s.output) parts.push(output(s.output));
   if (s.pr) parts.push(`<p>${s.pr.href ? `<a href="${esc(s.pr.href)}" target="_blank" rel="noopener noreferrer">${esc(s.pr.text)} ↗</a>` : esc(s.pr.text)}</p>${s.pr.body ? pre(s.pr.body) : ''}`);
   return parts.join('') || none(s.state === 'next' ? 'Not reached yet.' : s.state === 'skipped' ? 'Nothing to do for this job.' : 'Nothing to show for this stage.');
 }
@@ -313,7 +315,7 @@ function jobSections(v: JobPageView): string {
   const bar = v.bar.length ? `<svg class="timebar" role="img" aria-label="Where the time went">${v.bar.map((s) => `<svg x="${s.at}%" width="${s.pct}%" height="28"><rect class="st-${esc(s.name)}" width="100%" height="28"/>${s.label ? `<text x="8" y="18">${esc(s.label)}</text>` : ''}</svg>`).join('')}</svg>
     <div class="timekey">${v.bar.map((s) => `<span class="${s.on ? 'on' : ''}"><i class="st-${esc(s.name)}"></i>${esc(s.name)} <code>${s.on ? 'now' : esc(s.took)}</code></span>`).join('')}</div>` : '';
   const stages = v.stageSections.map((s) => detailsOf(v, `stage-${s.name}`, `stage st-state-${s.state}`,
-    `<span class="stage-head"><i class="st-${esc(s.name)}"></i><h2>${esc(STAGE_TITLE[s.name] ?? s.name)}</h2><span class="stage-state ${s.state === 'now' ? 'tone-acc' : 'mute'}">${esc(s.stateText)}</span><span class="mono mute stage-took">${esc(s.took)}</span><span class="mute stage-count">${s.sessions.length ? esc(plural(s.sessions.length, 'session')) : ''}</span><span class="chev" aria-hidden="true"></span></span>`,
+    `<span class="stage-head"><i class="st-${esc(s.kind ?? s.name)}"></i><h2>${esc(s.title ?? STAGE_TITLE[s.name] ?? s.name)}</h2><span class="stage-state ${s.state === 'now' ? 'tone-acc' : 'mute'}">${esc(s.stateText)}</span><span class="mono mute stage-took">${esc(s.took)}</span><span class="mute stage-count">${s.sessions.length ? esc(plural(s.sessions.length, 'session')) : ''}</span><span class="chev" aria-hidden="true"></span></span>`,
     stageBody(v, s, s.sessions.map(sessionRow).join(''))));
   const criteria = v.criteria.map((c) => `<div class="criterion">${mark(c.tone, c.tag)}<div class="what"><p>${esc(c.text)}</p>${c.command ? `<code>${esc(c.command)}</code>` : ''}</div>${output(c.output)}</div>`).join('');
   const questions = v.questions.map((q) => `<div class="qa"><p><span class="label">Asked</span> ${esc(q.question)}</p><p${q.answered ? '' : ' class="tone-ask"'}><span class="label">Answer</span> ${esc(q.answer)}</p></div>`).join('');

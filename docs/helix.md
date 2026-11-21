@@ -346,7 +346,18 @@ thrown away and counts as failed.
   changed and how its check failed.
 - **The agent may end an attempt** with "not an environment problem" and a
   reason; the job then ends failed with that reason and uses no further
-  attempts.
+  attempts. Code written for another operating system's tools (BSD and
+  macOS `stat -f`, `sed -i ''`) is such a problem: the agent is told never
+  to shim a standard tool in the image to make it pass.
+
+The display follows it as it follows any job. The loop writes its stage
+(`agent`, `image`, `check`, then `pr`) and which attempt of five it is on to
+`progress.json` in the job's folder under Helix's home, and each attempt to
+`attempts.json` beside it: what the agent said and changed, and how the
+check went. The overview's card draws those four stages with the attempt,
+and the job's page lists the attempts where a run lists its stages. A failed
+check's or job's reason leads with its cause, as its first line is what a
+list shows.
 
 Helix sees the pull request merge in its polling of open pull requests (the
 display's, each minute), then runs the add check on the base branch by

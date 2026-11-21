@@ -519,7 +519,8 @@ export function supervise(opts: {
     },
     wake: () => tick(),
     poll,
-    progress: (job) => (job.animus_job ? loadProgress(job.animus_job, opts.animusHomeOf?.(job.person)) : undefined),
+    // A provision job runs no animus: its loop writes progress into the job's own folder under Helix's home.
+    progress: (job) => (job.provision ? loadProgress(String(job.id), home) : job.animus_job ? loadProgress(job.animus_job, opts.animusHomeOf?.(job.person)) : undefined),
     animusHome: (person) => opts.animusHomeOf?.(person) ?? animusHome(),
     stop: () => queue.stop(),
   };
