@@ -115,7 +115,7 @@ export type Run = {
   /** Rounds that began a fresh implementer session because the last one ended over the context budget. */
   handoffs?: number;
   /** How the spec was cut: by the planner or by script, into how many slices, and how many passed their gates. */
-  slices?: { by: 'planner' | 'script'; planned: number; done: number; fallback?: string };
+  slices?: { by: 'planner' | 'script' | 'person'; planned: number; done: number; fallback?: string };
   review: { rounds: number; findings: number; blockers: number; acted_on: number; open: number; log?: FindingLog[] } | null;
   outcome: Outcome;
   /** Set on every run that did not end as a pull request. */
@@ -153,7 +153,9 @@ export type JobState = {
   context?: number;
   /** How the spec is cut, decided once when the job starts, and who cut it. */
   slicing?: Slicing;
-  sliced_by?: 'planner' | 'script';
+  sliced_by?: 'planner' | 'script' | 'person';
+  /** The person asked for one session (--one-session): no planner, here or on a resume or a fix of it. */
+  one_session?: boolean;
   /** The slices whose gates passed, as the summary each one's session gave. Its length is the slice the job is on. */
   slices_done?: string[];
   outcome?: Outcome;

@@ -41,14 +41,16 @@ import { basename, join } from 'node:path';
 
 const USAGE = `animus: a spec goes in, a pull request with proof comes out
 
-  animus start <spec.md> [--local | --helix] [--repo <dir>] [--draft]
+  animus start <spec.md> [--local | --helix] [--repo <dir>] [--draft] [--one-session]
         Start one job, here or on Helix. --local or --helix decides; without
         either, run: in ANIMUS_HOME/config.yaml does (the repository's entry,
         then the top); without that, Helix when this machine has joined one
         that has the repository, and here otherwise. Here, it queues the job,
         makes sure this machine's loop is running and returns: the loop runs
         the job whether or not this session stays open. On Helix, it is
-        animus submit and returns.
+        animus submit and returns. --one-session skips the planner: the whole
+        spec goes to one implementer session, and the run record says it was
+        your choice.
   animus start <pr> "<what to change>" [--local | --helix] [--repo <dir>] [--dry-run] [--keep]
         Change an open pull request a job opened (<pr> is its number or URL):
         a new job on its branch that proves every criterion again and pushes
@@ -56,17 +58,18 @@ const USAGE = `animus: a spec goes in, a pull request with proof comes out
         carries on from that job's session; else on Helix when this machine
         has joined one that has the repository; else here, from the pull
         request alone. --local or --helix decides, and says what it leaves.
-  animus run <spec.md> [--repo <dir>] [--dry-run] [--draft] [--keep]
+  animus run <spec.md> [--repo <dir>] [--dry-run] [--draft] [--keep] [--one-session]
         Run one job: set up a worktree, implement, gates, review, open the PR.
         --dry-run stops before the push; --draft opens the PR as a draft;
-        --keep leaves the worktree.
+        --keep leaves the worktree; --one-session skips the planner.
         A spec with \`after: <spec.md>\` in its header waits until that spec's
         pull request is merged, then starts; --after-merged says a queue has
         already seen it merged, so the job starts at once.
         Your own skills in ANIMUS_HOME/config.yaml are copied into the job
         when it starts (--skills <file> gives them instead, as JSON).
-  animus plan <spec.md> [--slices] [--repo <dir>]
+  animus plan <spec.md> [--slices] [--one-session] [--repo <dir>]
         Check a spec and print what its labels would run. Starts no job.
+        --one-session prints it with the whole spec as one slice: no planner.
         --slices also asks the planner how it would cut the spec (one
         read-only session in the repo) and prints the checked plan.
   animus draft <folder> [--repo <dir>]
@@ -220,7 +223,7 @@ function announce(j: helix.RemoteJob, skills: readonly { name: string }[]): void
   console.log(`job ${j.id} is ${j.state} on Helix: ${j.title}${j.skills?.length ? `\nwith your skills: ${j.skills.join(', ')}` : ''}\nfollow it with: animus status ${j.id}${helix.describeLinks(j).map((l) => `\n${l}`).join('')}`);
 }
 
-async function submitSpec(file: string, checkout: string, draft: boolean, known?: string): Promise<helix.RemoteJob> {
+async function submitSpec(file: string, checkout: string, draft: boolean, known?: string, oneSession = false): Promise<helix.RemoteJob> {
   // Refused here, before it is sent, when its labels would not run.
   resolvePlan(loadFactory(), loadSpec(file));
   const root = mainCheckout(checkout);
@@ -228,10 +231,12 @@ async function submitSpec(file: string, checkout: string, draft: boolean, known?
   const skills = snapshotSkills(personalFor(root).skills);
   const profileFile = join(root, PROFILE_PATH);
   const j = await helix.submit({
-    repo, spec: readFileSync(file, 'utf8'), name: basename(file), ...(draft ? { draft: true } : {}), ...(skills.length ? { skills: skills.map(({ sha: _sha, ...s }) => s) } : {}),
+    repo, spec: readFileSync(file, 'utf8'), name: basename(file), ...(draft ? { draft: true } : {}), ...(oneSession ? { one_session: true } : {}), ...(skills.length ? { skills: skills.map(({ sha: _sha, ...s }) => s) } : {}),
     ...(existsSync(profileFile) ? { profile: readFileSync(profileFile, 'utf8') } : {}),
   });
   announce(j, skills);
+  // A Helix that predates the option leaves it out of its answer and slices the spec as it always did.
+  if (oneSession && !j.one_session) say('this Helix predates --one-session: the job is sliced as usual');
   return j;
 }
 
@@ -270,7 +275,7 @@ async function main(argv: string[]): Promise<number> {
     options: {
       help: { type: 'boolean', short: 'h' },
       repo: { type: 'string' }, project: { type: 'string' }, 'dry-run': { type: 'boolean' }, keep: { type: 'boolean' }, draft: { type: 'boolean' }, answer: { type: 'string' }, 'after-merged': { type: 'boolean' },
-      json: { type: 'boolean' }, skills: { type: 'string' }, local: { type: 'boolean' }, helix: { type: 'boolean' }, n: { type: 'string', short: 'n' }, again: { type: 'boolean' }, days: { type: 'string' }, force: { type: 'boolean' }, slices: { type: 'boolean' }, yes: { type: 'boolean' }, github: { type: 'string' }, slack: { type: 'string' }, all: { type: 'boolean' }, references: { type: 'string' }, mine: { type: 'boolean' },
+      json: { type: 'boolean' }, skills: { type: 'string' }, local: { type: 'boolean' }, helix: { type: 'boolean' }, n: { type: 'string', short: 'n' }, again: { type: 'boolean' }, days: { type: 'string' }, force: { type: 'boolean' }, slices: { type: 'boolean' }, yes: { type: 'boolean' }, github: { type: 'string' }, slack: { type: 'string' }, all: { type: 'boolean' }, references: { type: 'string' }, mine: { type: 'boolean' }, 'one-session': { type: 'boolean' },
     },
     });
   } catch (err) {
@@ -296,7 +301,7 @@ async function main(argv: string[]): Promise<number> {
     const queue = openLocalQueue();
     try { return fn(queue); } finally { queue.close(); }
   };
-  const flags ={ ...(values.draft ? { draft: true } : {}), ...(values['dry-run'] ? { dryRun: true } : {}), ...(values.keep ? { keep: true } : {}) };
+  const flags ={ ...(values.draft ? { draft: true } : {}), ...(values['dry-run'] ? { dryRun: true } : {}), ...(values.keep ? { keep: true } : {}), ...(values['one-session'] ? { oneSession: true } : {}) };
   const deps = () => {
     const factory = loadFactory();
     return { factory, agent: claudeAgent(factory), publish, evidence: pushEvidence, issues: openIssues, readIssue, log: say };
@@ -355,7 +360,7 @@ async function main(argv: string[]): Promise<number> {
       if (choice.where === 'helix') {
         say(runsLine);
         if (values['dry-run']) throw new AnimusError('--dry-run is for a job on this machine: animus start --local --dry-run');
-        await submitSpec(specFile, repo, Boolean(values.draft), choice.project);
+        await submitSpec(specFile, repo, Boolean(values.draft), choice.project, Boolean(values['one-session']));
         return 0;
       }
       if (!values['dry-run'] && !onPath('gh')) throw new AnimusError('gh is not installed, so no pull request can be opened; install it or use --dry-run');
@@ -368,7 +373,7 @@ async function main(argv: string[]): Promise<number> {
       say(runsLine);
       const queue = openLocalQueue();
       try {
-        const job = enqueue(queue, { repo, spec: specFile, title: spec.title, tier, after, flags: [...(values.draft ? ['--draft'] : []), ...(values['dry-run'] ? ['--dry-run'] : []), ...(values.keep ? ['--keep'] : [])] });
+        const job = enqueue(queue, { repo, spec: specFile, title: spec.title, tier, after, flags: [...(values.draft ? ['--draft'] : []), ...(values['dry-run'] ? ['--dry-run'] : []), ...(values.keep ? ['--keep'] : []), ...(values['one-session'] ? ['--one-session'] : [])] });
         ensureLoop(queue);
         console.log(`job ${job.id} is queued on this machine: ${job.title}\nfollow it with: animus status ${job.id}${helix.helixLogin() ? ' --local' : ''}\nits output: ${logFile(job.id)}`);
       } finally { queue.close(); }
@@ -398,8 +403,8 @@ async function main(argv: string[]): Promise<number> {
       if (spec.after.length) console.log(`  waits for  ${spec.after.join(', ')} to be merged`);
       if (spec.defaulted.length) console.log(`  (no ${spec.defaulted.join(', ')} in the header: the default)`);
       spec.criteria.forEach((c, i) => console.log(`  ${i + 1}. ${c.text}${c.commands.map((x) => `\n       $ ${x}`).join('') || '\n       (no check command: only the reviewer judges it)'}`));
-      if (values.slices) {
-        const planned = planSlices({ factory, agent: claudeAgent(factory), spec, cwd: git(resolve(values.repo ?? cwd), ['rev-parse', '--show-toplevel']), log: say });
+      if (values.slices || values['one-session']) {
+        const planned = planSlices({ factory, agent: claudeAgent(factory), spec, oneSession: Boolean(values['one-session']), cwd: git(resolve(values.repo ?? cwd), ['rev-parse', '--show-toplevel']), log: say });
         console.log(`\n${describeSlicing(spec, planned)}`);
         for (const s of planned.sessions) say(`${s.stage}: $${s.result.cost_usd.toFixed(4)}${s.result.context !== undefined ? `, ${Math.round(s.result.context / 1000)}k tokens of context at the end` : ''}`);
       }
