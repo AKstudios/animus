@@ -180,10 +180,15 @@ export type JobState = {
 
 export const STAGES = ['setup', 'plan', 'implement', 'gates', 'review', 'evidence', 'pr'] as const;
 export type Stage = (typeof STAGES)[number];
+/** A provision job's stages, each attempt going through the first three (helix/src/provision-loop.ts). */
+export const PROVISION_STAGES = ['agent', 'image', 'check', 'pr'] as const;
+export type ProvisionStage = (typeof PROVISION_STAGES)[number];
 
 /** Where a running job is, for whoever watches it: the stage, and who or what is doing it. */
 export type Progress = {
-  stage: Stage; who: string; at: string;
+  stage: Stage | ProvisionStage; who: string; at: string;
+  /** A provision job's attempt: which one, and how many it may make. */
+  attempt?: { n: number; of: number };
   /** When this process began writing progress: how long a running job has run, before its run row exists. */
   started?: string;
   /** The model and effort of the agent working now, when an agent is. */

@@ -3,7 +3,7 @@
 // No DOM here, so the wording is tested without a browser
 // (helix/test/job-page.test.ts), as view.ts is.
 import { jobPage, personPage } from './pages.ts';
-import type { DisplayClosed, DisplayJob, JobPage, LiveSession, ProfilesInfo, TokenCount } from './shape.ts';
+import type { DisplayClosed, DisplayJob, JobPage, LiveSession, ProfilesInfo, ProvisionAttempts, TokenCount } from './shape.ts';
 import { clock, recent, span, tokens, type Tone } from './view.ts';
 
 export type JobPageView = {
@@ -76,6 +76,14 @@ export type GateRunView = { outcome: string; ok: boolean; checks: { name: string
 /** One stage's section: its state, time, agent sessions and what it produced; only the parts the stage has are set. */
 export type StageSection = {
   name: string;
+  /** The heading, when not the stage's own: `Attempt 2`. */
+  title?: string;
+  /** The colour it is drawn in, when not its name's. */
+  kind?: string;
+  /** Lines said under it: what a provision attempt changed. */
+  notes?: string[];
+  /** Output folded under it: why a provision attempt failed. */
+  output?: string;
   state: 'done' | 'now' | 'next' | 'skipped';
   /** The state in words: `done`, `now`, `not reached`, `skipped for a fix`. */
   stateText: string;
@@ -222,17 +230,41 @@ function timelineOf(bar: JobPageView['bar'], agents: NonNullable<JobPage['run']>
 /** The pipeline stage a session belongs to: the planner plans, the implementer implements (slices, fixes, catch-up), the rest review. */
 export const stageOf = (stage: string, role: string) => (role === 'planner' ? 'plan' : role === 'implementer' ? 'implement' : /^(setup|plan|implement|gates|review|evidence|pr)/.exec(stage)?.[0] ?? 'review');
 
-const DOING: Record<string, string> = { setup: 'Setting up', plan: 'Planning', implement: 'Implementing', gates: 'Running the gates', review: 'Reviewing', evidence: 'Gathering evidence', pr: 'Opening the PR' };
+const DOING: Record<string, string> = {
+  agent: 'The agent is editing the environment', image: 'Building the image', check: 'Running setup and the gates', setup: 'Setting up', plan: 'Planning', implement: 'Implementing', gates: 'Running the gates', review: 'Reviewing', evidence: 'Gathering evidence', pr: 'Opening the PR',
+};
 
 /** The Now line: `Implementing slice 2 of 3 · implementer · opus, high effort · 4m · now: Edit plugin/display/app.ts`; the agent and tool only where the job has them. */
 function nowOf(pr: NonNullable<DisplayJob['progress']>, live: LiveSession | undefined, now: number): string {
   const slice = /slice \d+ of \d+/.exec(pr.who)?.[0];
   return [
-    `${DOING[pr.stage] ?? pr.stage}${slice ? ` ${slice}` : ''}`,
+    `${DOING[pr.stage] ?? pr.stage}${slice ? ` ${slice}` : ''}${pr.attempt ? `, attempt ${pr.attempt.n} of ${pr.attempt.of}` : ''}`,
     ...(pr.model ? [pr.who.split(' · ')[0]!, `${pr.model}${pr.effort ? `, ${pr.effort} effort` : ''}`] : []),
     span(now - Date.parse(pr.at)),
     ...(live?.tool ? [`now: ${live.tool}${live.target ? ` ${live.target}` : ''}`] : []),
   ].join(' · ');
+}
+
+/**
+ * A provision job's page lists its attempts where a run lists its stages:
+ * each with what the agent changed and how the add check went, the one under
+ * way saying what it is doing now.
+ */
+function attemptSections(a: ProvisionAttempts | undefined, j: DisplayJob, now: number): StageSection[] {
+  const doing = j.state === 'running' && j.progress ? DOING[j.progress.stage] ?? j.progress.stage : '';
+  return (a?.attempts ?? []).map((x): StageSection => {
+    const live = x.result === 'running' && j.state === 'running';
+    const why = (x.why ?? '').trim();
+    const head = why.split('\n')[0]!.replace(/:$/, '');
+    const stateText = live ? doing.toLowerCase() || 'working' : x.result === 'passed' ? 'the add check passed' : x.result === 'running' ? 'stopped' : head.length > 140 ? `${head.slice(0, 139)}…` : head || 'failed';
+    const changed = x.changed.length ? `Changed ${x.changed.join(', ')}` : x.result === 'running' && live ? '' : 'Changed nothing';
+    return {
+      name: `attempt-${x.n}`, title: `Attempt ${x.n}`, kind: 'attempt', state: live ? 'now' : 'done', stateText,
+      took: x.ms !== undefined ? span(x.ms) : live ? span(now - Date.parse(x.started)) : '–', sessions: [],
+      notes: [x.summary ?? '', changed, x.discarded?.length ? `Thrown away, being outside the two files it may change: ${x.discarded.join(', ')}` : ''].filter(Boolean),
+      ...(x.result === 'failed' && why.includes('\n') ? { output: why } : {}),
+    };
+  });
 }
 
 /** A finished agent session as a row, without where it sits on the bar. */
@@ -391,6 +423,8 @@ export function jobView(p: JobPage, now: number, local = false, closed?: Display
     if (name === 'pr' && (j.pr || p.pr_body)) part.pr = { ...(j.pr && /^https?:\/\//.test(j.pr) ? { href: j.pr } : {}), text: j.pr ? (pr ? `#${pr}` : j.pr) : 'No pull request', body: p.pr_body ?? '' };
     return part;
   });
+  // A provision job has no run's stages: its attempts take their place, and its numbers count them.
+  if (j.provision) stageSections.splice(0, stageSections.length, ...attemptSections(p.provision, j, now));
   const open: Record<string, boolean> = {
     numbers: true, criteria: !running, spec: false, log: running || j.state === 'queued' || j.state === 'waiting', tools: false, questions: false,
     ...Object.fromEntries(stageSections.map((s) => [`stage-${s.name}`, s.state === 'now'])),
@@ -402,7 +436,10 @@ export function jobView(p: JobPage, now: number, local = false, closed?: Display
     tag: { text: tag, tone },
     line: lineParts.map((x) => x.text).join(' · '),
     lineParts,
-    numbers: [
+    numbers: j.provision ? [
+      { k: 'time taken', v: took }, { k: 'cost', v: j.cost_usd !== undefined ? `$${j.cost_usd.toFixed(2)}` : '–' },
+      { k: 'attempts', v: p.provision ? `${p.provision.attempts.length} of ${p.provision.max}` : '–' },
+    ] : [
       { k: 'time taken', v: took }, { k: 'cost', v: j.cost_usd !== undefined ? `$${j.cost_usd.toFixed(2)}` : '–' },
       { k: `fix ${p.run?.fix_rounds === 1 ? 'round' : 'rounds'} · ${plural(p.gate_runs ?? 0, 'gate run')}`, v: p.run ? String(p.run.fix_rounds) : '–' },
       p.slices?.length ? { k: 'slices passed', v: `${done} of ${p.slices.length}` } : { k: 'review rounds', v: String(p.reviews?.length ?? 0) },

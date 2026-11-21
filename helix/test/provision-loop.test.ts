@@ -168,3 +168,33 @@ test('each attempt builds the image from the branch: a failed build fails the at
   assert.deepEqual(images, ['animus-job:test', undefined, 'animus-project:curl']);
   assert.deepEqual(setupImages, ['animus-project:curl', 'animus-project:curl']);
 });
+
+// Protects: the display following a provision job. Fails when: the loop writes no progress (the display says "Starting" for the whole job), Helix does not read it from the job's folder, or the attempts are not kept for its page.
+test('a provision job says which stage and attempt it is in, and keeps what each attempt changed and how its check went', () => {
+  const p = provisioning();
+  const supervisor = supervise({ store: p.store, config: { host: '127.0.0.1', port: 0, slots: 1 }, home: p.home });
+  const seen: unknown[] = [];
+  const look = () => { const pr = supervisor.progress(p.store.get(p.job.id)!); seen.push(pr && { stage: pr.stage, attempt: pr.attempt }); };
+  const { result } = p.run([
+    (req) => { look(); write(req.cwd, '.animus/Dockerfile', DOCKERFILE); return answer('changed', { summary: 'Added a Dockerfile.' }); },
+    (req) => { look(); write(req.cwd, '.animus/Dockerfile', `${DOCKERFILE}RUN apt-get install -y curl\n`); return answer('changed'); },
+  ], { setup: (...a) => { look(); return needsCurl(...a); } });
+  supervisor.stop();
+  assert.equal(result.outcome, 'pr');
+  assert.deepEqual(seen, [
+    { stage: 'agent', attempt: { n: 1, of: 5 } }, { stage: 'check', attempt: { n: 1, of: 5 } },
+    { stage: 'agent', attempt: { n: 2, of: 5 } }, { stage: 'check', attempt: { n: 2, of: 5 } },
+  ]);
+  const kept = JSON.parse(readFileSync(join(p.home, 'jobs', String(p.job.id), 'attempts.json'), 'utf8')) as { max: number; attempts: { n: number; result: string; changed: string[]; summary?: string; why?: string }[] };
+  assert.equal(kept.max, 5);
+  assert.deepEqual(kept.attempts.map((a) => [a.n, a.result, a.changed, a.summary]), [[1, 'failed', ['.animus/Dockerfile'], 'Added a Dockerfile.'], [2, 'passed', ['.animus/Dockerfile'], 'Installed curl.']]);
+  assert.match(kept.attempts[0]!.why!, /^its gates fail on animus\/provision-\d+ \(test\), so every job would fail at them:\n[\s\S]*curl: not found/);
+});
+
+// Protects: a failed provision job's reason as a list shows it, its first line. Fails when: that line ends at "still fails after 5 attempts:" without the cause.
+test('a provision job that runs out of attempts says in its first line why the last one failed', () => {
+  const p = provisioning();
+  const tries: Step = (req) => { write(req.cwd, '.animus/Dockerfile', `${DOCKERFILE}# nothing installed\n`); return answer('changed'); };
+  const { result } = p.run([tries, tries, tries, tries, tries]);
+  assert.match(result.reason!.split('\n')[0]!, /^the add check still fails after 5 attempts, the last because its gates fail on animus\/provision-\d+ \(test\), so every job would fail at them$/);
+});

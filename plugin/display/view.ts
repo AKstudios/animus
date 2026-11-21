@@ -14,8 +14,8 @@ export type Live = {
   id: number | string; page: string; repo: string; person: string; /** Helix only: the local display has no people pages. */ personPage?: string; title: string; elapsed: string;
   /** What the card names the job by, joined with " · " when drawn: the project, and the person when there is one. */
   by: { text: string; page?: string }[];
-  /** The stage's place in the track; -1 until the job has said where it is. */
-  stage: number; stageText: string; stepText: string; stepShort: string; who: string; now: string;
+  /** The stage's place in the track; -1 until the job has said where it is. `stages` is how many the track has: a provision job has its own. */
+  stage: number; stages: number; stageText: string; stepText: string; stepShort: string; who: string; now: string;
 };
 
 /** A job waiting for an answer: its question, how long it has waited, and the command that answers it. */
@@ -152,16 +152,19 @@ export function view(d: Display, picked: string | null, now: number): View {
   const running = count(d.jobs, 'running');
 
   const live = shown.filter((j) => j.state === 'running').map((j): Live => {
-    const stage = j.progress ? d.stages.indexOf(j.progress.stage) : -1;
+    const stages = j.stages ?? d.stages;
+    const stage = j.progress ? stages.indexOf(j.progress.stage) : -1;
+    // A provision job says which attempt it is on, as each one goes through the stages again.
+    const attempt = j.progress?.attempt ? `attempt ${j.progress.attempt.n} of ${j.progress.attempt.of}` : '';
     return {
       id: j.id, page: jobPage(j.id), repo: j.repo, person: j.person, ...people(j.person, d.local === true), title: j.title,
       by: [{ text: j.repo }, ...(j.person ? [{ text: j.person, page: personPage(j.person) }] : [])],
       elapsed: j.started ? clock(now - Date.parse(j.started)) : '',
-      stage,
-      stageText: stage < 0 ? 'STARTING' : d.stages[stage]!.toUpperCase(),
-      stepText: stage < 0 ? '' : `step ${stage + 1} of ${d.stages.length}`,
-      stepShort: stage < 0 ? '' : `${stage + 1}/${d.stages.length}`,
-      who: j.progress?.who ?? 'starting',
+      stage, stages: stages.length,
+      stageText: stage < 0 ? 'STARTING' : stages[stage]!.toUpperCase(),
+      stepText: stage < 0 ? '' : attempt || `step ${stage + 1} of ${stages.length}`,
+      stepShort: stage < 0 ? '' : attempt ? `${j.progress!.attempt!.n}/${j.progress!.attempt!.of}` : `${stage + 1}/${stages.length}`,
+      who: j.progress ? `${j.progress.who}${attempt ? `, ${attempt}` : ''}` : 'starting',
       now: j.now ?? '',
     };
   });

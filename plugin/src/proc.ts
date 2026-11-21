@@ -70,6 +70,13 @@ export function failureExcerpt(text: string, lines: number): string {
   return out.length > EXCERPT_MAX ? `…\n${out.slice(-EXCERPT_MAX)}` : out;
 }
 
+/** The first line of a failed command's output that looks like an error, else its last line: what a one-line reason leads with. */
+export function firstError(text: string, max = 160): string {
+  const lines = text.replace(ANSI, '').split('\n').map((l) => l.trim()).filter(Boolean);
+  const line = lines.find((l) => ERROR_LINE.test(l)) ?? lines.at(-1) ?? '';
+  return line.length > max ? `${line.slice(0, max)}…` : line;
+}
+
 /**
  * Why a process that should have printed JSON did not: its start, where a CLI
  * says what it refused, and its end, where a crash says how it ended.

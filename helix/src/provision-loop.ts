@@ -6,9 +6,12 @@
 // two hours, or the agent saying the failure is not the environment's. A check
 // that passes ends in a pull request with the check's output as its proof.
 import { readFileSync, rmSync } from 'node:fs';
+import { hostname } from 'node:os';
 import { join } from 'node:path';
 import type { AgentRequest, AgentResult } from '../../plugin/src/agent.ts';
+import type { ProvisionAttempt } from '../../plugin/display/shape.ts';
 import { jobBranch } from '../../plugin/src/git.ts';
+import { writeJson, type Progress, type ProvisionStage } from '../../plugin/src/log.ts';
 import { publish as realPublish, type Publish } from '../../plugin/src/pr.ts';
 import { loadProfile, mask, PROFILE_PATH } from '../../plugin/src/profile.ts';
 import { readPrompt, type Factory } from '../../plugin/src/profiles.ts';
@@ -86,6 +89,21 @@ export function runProvision(o: ProvisionOpts): ProvisionResult {
   let cost = 0;
   const ended = (outcome: ProvisionResult['outcome'], more: Partial<ProvisionResult>): ProvisionResult => ({ outcome, ...more, cost_usd: cost });
 
+  // What the display shows of it: the stage it is in (progress.json, as animus run writes) and each attempt (attempts.json).
+  const max = o.maxAttempts ?? MAX_ATTEMPTS;
+  const began = new Date().toISOString();
+  const records: ProvisionAttempt[] = [];
+  const saveRecords = () => writeJson(join(folder, 'attempts.json'), { max, attempts: records });
+  const stage = (s: ProvisionStage, who: string) => writeJson(join(folder, 'progress.json'), {
+    stage: s, who, at: new Date().toISOString(), started: began, attempt: { n: Math.min(attempts.length + 1, max), of: max }, pid: process.pid, host: hostname(),
+  } satisfies Progress);
+  /** The attempt under way has ended: how, and what it changed. */
+  const finish = (r: Partial<ProvisionAttempt>) => {
+    const a = records.at(-1)!;
+    Object.assign(a, r, { ms: Date.now() - Date.parse(a.started) });
+    saveRecords();
+  };
+
   /** The add check on the branch as it stands: why it failed, or the output that is its proof. */
   const check = (): { why?: string; image?: string; proof: string[] } => {
     const lines: string[] = [];
@@ -104,8 +122,10 @@ export function runProvision(o: ProvisionOpts): ProvisionResult {
         if (why) return fail(why);
       }
       let image: string | undefined;
+      if (o.image) stage('image', 'docker builds the project image');
       try { image = o.image?.(readDockerfile(checkTree, 'HEAD'), profile.base); } catch (err) { if (err instanceof ImageFailed) return fail(err.message); throw err; }
       if (!profile.setup && !profile.installs.length && !Object.keys(profile.commands).length) { sayIt('the profile has no installs, setup or gates to try'); return { ...(image ? { image } : {}), proof: lines }; }
+      stage('check', "the profile's setup and every gate run");
       const why = runEnvironment({ setup: o.setup, worktree: checkTree, clone, env: { ...o.env, ...given }, image, profile, on: branch, say: sayIt });
       return { ...(why ? { why: fail(why).why } : {}), ...(image ? { image } : {}), proof: lines };
     } finally { remove(checkTree); }
@@ -115,9 +135,12 @@ export function runProvision(o: ProvisionOpts): ProvisionResult {
     // The session runs in the project's current image: the base's Dockerfile at first, then what the last attempt built.
     let image: string | undefined;
     try { image = o.image?.(readDockerfile(clone, start), base); } catch (err) { if (!(err instanceof ImageFailed)) throw err; }
-    while (attempts.length < (o.maxAttempts ?? MAX_ATTEMPTS) && now() < deadline) {
+    while (attempts.length < max && now() < deadline) {
       const n = attempts.length + 1;
       say(`attempt ${n}: an agent session on ${branch}${image ? `, in ${image}` : ''}`);
+      records.push({ n, started: new Date().toISOString(), changed: [], result: 'running' });
+      saveRecords();
+      stage('agent', 'the agent edits the Dockerfile and profile');
       const before = git(worktree, ['rev-parse', 'HEAD']);
       const discard = () => { git(worktree, ['reset', '--hard', '--quiet', before]); git(worktree, ['clean', '-fdq']); };
       const r = o.session({
@@ -130,12 +153,14 @@ export function runProvision(o: ProvisionOpts): ProvisionResult {
         discard();
         const reason = `not an environment problem: ${answer.reason ?? answer.summary ?? 'the agent gave no reason'}`;
         say(reason);
+        finish({ result: 'failed', ...(answer.summary ? { summary: answer.summary } : {}), why: reason });
         return ended('failed', { reason });
       }
       if (!r.ok) {
         discard();
         attempts.push({ changed: [], discarded: [], diff: '', failure: `the agent session ended with ${r.status}, so nothing it did was kept` });
         say(`attempt ${n}: ${attempts[n - 1]!.failure}`);
+        finish({ result: 'failed', why: attempts[n - 1]!.failure });
         continue;
       }
       // Whatever the session did, committed or not, is one change against where it started.
@@ -146,28 +171,36 @@ export function runProvision(o: ProvisionOpts): ProvisionResult {
         discard();
         attempts.push({ changed, discarded: other, diff: '', failure: `it changed files other than ${ALLOWED.join(' and ')}, so its changes were thrown away` });
         say(`attempt ${n}: ${attempts[n - 1]!.failure}: ${other.join(', ')}`);
+        finish({ result: 'failed', changed, discarded: other, ...(answer.summary ? { summary: answer.summary } : {}), why: `${attempts[n - 1]!.failure}: ${other.join(', ')}` });
         continue;
       }
       const diff = changed.length ? git(worktree, ['diff', '--cached', before]) : '';
       git(worktree, ['reset', '--soft', '--quiet', before]);
       if (changed.length) git(worktree, ['commit', '--quiet', '--no-verify', '-m', `Provision attempt ${n}: ${answer.summary ?? 'change the environment'}`]);
       say(`attempt ${n} changed ${changed.join(', ') || 'nothing'}: ${answer.summary ?? ''}`);
+      Object.assign(records.at(-1)!, { changed, ...(answer.summary ? { summary: answer.summary } : {}) });
+      saveRecords();
 
       const checked = check();
       image = checked.image;
       if (!checked.why) {
         say('the add check passed');
+        finish({ result: 'passed' });
         if (!Number(git(clone, ['rev-list', '--count', `${start}..${branch}`]))) {
           return ended('failed', { reason: `the add check passes on ${base} with no change to ${ALLOWED.join(' or ')}: add the project again` });
         }
+        stage('pr', 'opening the pull request');
         const url = (o.publish ?? realPublish)({ cwd: worktree, branch, baseBranch: base, title: job.title, body: body(job, attempts.length + 1, checked.proof, answer.summary), draft: false });
         return ended('pr', { pr: url });
       }
       say(`attempt ${n}: the add check failed: ${checked.why.split('\n')[0]}`);
       attempts.push({ changed, discarded: [], diff, failure: failureExcerpt(checked.why, 30) });
+      finish({ result: 'failed', why: checked.why });
     }
-    const stop = attempts.length >= (o.maxAttempts ?? MAX_ATTEMPTS) ? `${attempts.length} attempts` : 'the time it may take';
-    return ended('failed', { reason: `the add check still fails after ${stop}:\n${attempts.map(failureOf).join('\n')}` });
+    const stop = attempts.length >= max ? `${attempts.length} attempts` : 'the time it may take';
+    // The first line is what a list shows, so it says why the last attempt failed; every attempt follows.
+    const last = attempts.at(-1)?.failure.split('\n')[0]?.replace(/:$/, '');
+    return ended('failed', { reason: `the add check still fails after ${stop}${last ? `, the last because ${last}` : ''}\n${attempts.map(failureOf).join('\n')}` });
   } finally {
     remove(worktree);
   }

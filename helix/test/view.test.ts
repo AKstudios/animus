@@ -20,7 +20,7 @@ test('a running job shows its stage, who is working, the last line it said and h
     job({ id: 7, state: 'running', title: 'Export to PDF', started: ago(12.5), progress: { stage: 'gates', who: 'gates · attempt 1', at: ago(1) }, now: 'ok   typecheck' }),
     job({ id: 8, state: 'running', started: ago(0.1) }),
   ]), null, NOW);
-  assert.deepEqual(v.live[0], { id: 7, page: '/jobs/7', repo: 'app', person: 'ana', personPage: '/people/ana', title: 'Export to PDF', by: [{ text: 'app' }, { text: 'ana', page: '/people/ana' }], elapsed: '12:30', stage: 2, stageText: 'GATES', stepText: 'step 3 of 6', stepShort: '3/6', who: 'gates · attempt 1', now: 'ok   typecheck' });
+  assert.deepEqual(v.live[0], { id: 7, page: '/jobs/7', repo: 'app', person: 'ana', personPage: '/people/ana', title: 'Export to PDF', by: [{ text: 'app' }, { text: 'ana', page: '/people/ana' }], elapsed: '12:30', stage: 2, stages: 6, stageText: 'GATES', stepText: 'step 3 of 6', stepShort: '3/6', who: 'gates · attempt 1', now: 'ok   typecheck' });
   // A job that has not said where it is yet has no stage on its track.
   assert.deepEqual([v.live[1]!.stage, v.live[1]!.stageText, v.live[1]!.stepText, v.live[1]!.who, v.live[1]!.elapsed], [-1, 'STARTING', '', 'starting', '00:06']);
   assert.deepEqual([v.running, v.slots, v.queued, v.asks], [2, 2, 0, 0]);
@@ -215,4 +215,11 @@ test('a running job shows only under working now, and a finished row says how lo
   ]), closed: [{ job: 2, number: 2, merged: true, at: ago(-150) }] };
   const v = view(d, null, NOW);
   assert.deepEqual([v.live.map((j) => j.id), v.finished.map((j) => [j.id, j.tag, j.meta])], [[1], [[2, 'Merged #2', '30m · merged in 3h 00m']]]);
+});
+
+// Protects: a provision job's card. Fails when: it is drawn on a run's track and says "Starting" for the whole job, or leaves out which attempt it is on.
+test('a running provision job is drawn on its own stages with the attempt it is on', () => {
+  const v = view(shown([job({ id: 39, state: 'running', provision: true, stages: ['agent', 'image', 'check', 'pr'], started: ago(5), progress: { stage: 'check', who: "the profile's setup and every gate run", at: ago(1), attempt: { n: 2, of: 5 } } })]), null, NOW);
+  const c = v.live[0]!;
+  assert.deepEqual([c.stage, c.stages, c.stageText, c.stepText, c.stepShort, c.who], [2, 4, 'CHECK', 'attempt 2 of 5', '2/5', "the profile's setup and every gate run, attempt 2 of 5"]);
 });

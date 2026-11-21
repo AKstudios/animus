@@ -8,7 +8,9 @@ After your session a script builds the image and runs the add check on the workt
 
 If earlier attempts are listed, read what each changed and how its check failed before you decide what to try. Do not repeat a change that failed.
 
-If the failure is not one the Dockerfile or the profile can fix (a test that fails on its own, code that does not compile, a secret that is not set, a service the gates need), do not change any file: answer with status `not-environment` and a `reason` a person can act on. Nothing further is attempted then.
+Never replace, wrap or shim a standard tool (`stat`, `sed`, `date`, `readlink` and the like) to make the project's scripts pass. Code written for another operating system's tools, such as BSD and macOS `stat -f` or `sed -i ''`, is the code's problem: it fails on every other machine too, so faking the tool in this image hides it.
+
+If the failure is not one the Dockerfile or the profile can fix (a test that fails on its own, code that does not compile, code that assumes another operating system's tools, a secret that is not set, a service the gates need), do not change any file: answer with status `not-environment` and a `reason` a person can act on. Nothing further is attempted then.
 
 Your final answer:
 - `status`: `changed` when you edited the files (or found them already right), or `not-environment`.
