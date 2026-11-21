@@ -122,7 +122,7 @@ export const isPlanned = (factory: Pick<Factory, 'planner'>, size: string) => Bo
 export type Planned = {
   slicing: Slicing;
   /** planner: a session proposed it and the check took it. script: one slice, no session. */
-  by: 'planner' | 'script';
+  by: 'planner' | 'script' | 'person';
   /** The planner's sessions, for the run log. */
   sessions: { stage: string; result: AgentResult }[];
 };
@@ -140,8 +140,9 @@ function planPrompt(spec: Spec, maxSlices: number): string {
  * Otherwise the planner proposes, the check decides, and a refused plan goes
  * back to the same session once with the reasons.
  */
-export function planSlices(p: { factory: Factory; agent: Agent; spec: Spec; cwd: string; personal?: readonly PersonalSkill[]; /** The planner's lessons, as a section of its instructions; asked for only when it is going to plan. */ lessons?: () => string; log?: (line: string) => void; record?: (stage: string, result: AgentResult) => void }): Planned {
+export function planSlices(p: { factory: Factory; agent: Agent; spec: Spec; cwd: string; personal?: readonly PersonalSkill[]; /** The planner's lessons, as a section of its instructions; asked for only when it is going to plan. */ lessons?: () => string; log?: (line: string) => void; record?: (stage: string, result: AgentResult) => void; /** The person chose one session: the planner is not asked. */ oneSession?: boolean }): Planned {
   const { factory, spec } = p;
+  if (p.oneSession) return { slicing: oneSlice(spec), by: 'person', sessions: [] };
   const planner = factory.planner;
   if (!planner || !isPlanned(factory, spec.size)) return { slicing: oneSlice(spec), by: 'script', sessions: [] };
   const log = p.log ?? (() => {});
@@ -183,7 +184,7 @@ export function criteriaSoFar(slicing: Slicing | undefined, done: number): Set<n
 
 export function describeSlicing(spec: Pick<Spec, 'criteria'>, planned: Pick<Planned, 'slicing' | 'by'>): string {
   const { slices, brief } = planned.slicing;
-  const head = planned.by === 'script' ? 'one slice (this size is not cut: no planner session)' : `${slices.length} slice(s), cut by the planner`;
+  const head = planned.by === 'person' ? 'one slice (one session, as asked: no planner session)' : planned.by === 'script' ? 'one slice (this size is not cut: no planner session)' :`${slices.length} slice(s), cut by the planner`;
   const lines = slices.flatMap((s, i) => [
     `  ${i + 1}. ${s.title}${s.prefactor ? ' (prefactor)' : ''}${s.after.length ? `, after ${s.after.join(', ')}` : ''}`,
     `       delivers  ${s.delivers}`,

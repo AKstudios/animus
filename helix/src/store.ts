@@ -22,6 +22,8 @@ export type HelixJob = {
   spec: string;
   title: string;
   draft: boolean;
+  /** The person chose one implementer session for the whole spec (`animus start --one-session`). */
+  one_session?: boolean;
   /** The GitHub issue it was submitted from with /animus submit. */
   github?: { repo: string; issue: number };
   submitted: string;

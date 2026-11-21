@@ -43,7 +43,7 @@ export const animusArgs = (job: HelixJob, repoDir: string): string[] => {
   // `--` keeps an ask that starts with a dash from being read as an option.
   if (job.ask) return ['fix', '--repo', repoDir, ...skills, ...references, '--', job.pr!, job.ask!];
   // A job with `after:` is only started once the queue has seen the earlier pull request merged, so `animus run` neither looks for that spec's file nor waits.
-  return ['run', job.spec, '--repo', repoDir, ...(job.after?.length ? ['--after-merged'] : []), ...(job.draft ? ['--draft'] : []), ...skills];
+  return ['run', job.spec, '--repo', repoDir, ...(job.after?.length ? ['--after-merged'] : []), ...(job.draft ? ['--draft'] : []), ...(job.one_session ? ['--one-session'] : []), ...skills];
 };
 
 /** Where Helix keeps the skills a person sent with a spec: beside it, so a job's container sees them where the spec is. */
@@ -69,7 +69,7 @@ export { MAX_INTERRUPTIONS };
 export type Preflight = (person: string, env: Record<string, string>, repoDir: string, repo: string) => { why?: string; env?: Record<string, string> };
 
 /** github: the issue it was submitted from, which its progress is told on. */
-export type Submission = { repo: string; spec: string; name?: string; draft?: boolean; skills?: PersonalSkill[]; github?: { repo: string; issue: number } };
+export type Submission = { repo: string; spec: string; name?: string; draft?: boolean; one_session?: boolean; skills?: PersonalSkill[]; github?: { repo: string; issue: number } };
 
 /** While this file is in Helix's home, no job starts; submissions still queue. `helix upgrade` sets it to drain the machine. */
 export const pauseFile = (home: string) => join(home, 'paused');
@@ -487,7 +487,7 @@ export function supervise(opts: {
       } catch (err) { throw new Refused(400, (err as Error).message); }
       // A spec that runs after another waits in the queue, with no slot and no process, until that spec's pull request is merged; the first look is now.
       const job = store.add({
-        state: after.length ? 'waiting' : 'queued', person, repo: s.repo, spec: '', title, ...(tier ? { tier } : {}), draft: Boolean(s.draft), ...(s.github ? { github: s.github } : {}), submitted: now(),
+        state: after.length ? 'waiting' : 'queued', person, repo: s.repo, spec: '', title, ...(tier ? { tier } : {}), draft: Boolean(s.draft), ...(s.one_session ? { one_session: true } : {}), ...(s.github ? { github: s.github } : {}), submitted: now(),
         ...(after.length ? { after, waiting: waitingFor(after[0]!) } : {}),
       });
       job.spec = join(home, 'jobs', String(job.id), basename(s.name ?? 'spec.md'));

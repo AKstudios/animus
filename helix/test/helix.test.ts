@@ -412,6 +412,18 @@ for (const [when, failing] of [['ends', 'ended'], ['is started by the queue', 'r
   });
 }
 
+// Protects: criterion 4. Fails when: Helix drops the choice or its job's animus run is not told --one-session.
+test('a submission that asks for one session is kept and its job runs with --one-session', async () => {
+  const h = await helix();
+  const j = await client.submit({ repo: 'app', spec: SPEC('one session'), name: 'spec.md', one_session: true });
+  assert.equal(j.one_session, true);
+  assert.ok(animusArgs(h.store.get(j.id)!, '/repo').includes('--one-session'));
+  const plain = await h.submit('sliced as usual');
+  assert.equal(plain.one_session, undefined);
+  assert.ok(!animusArgs(h.store.get(plain.id)!, '/repo').includes('--one-session'));
+  h.stop();
+});
+
 test('skills sent with a spec are kept beside it and passed to animus run; bad ones are refused', async () => {
   const h = await helix();
   const skills = [{ name: 'sql-style', roles: ['implementer'], text: 'Name tables in the singular.\n' }];

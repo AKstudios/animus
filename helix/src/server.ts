@@ -245,7 +245,7 @@ export function serve(opts: {
           if (typeof b.repo !== 'string' || typeof b.spec !== 'string') throw new Refused(400, 'a submission needs repo (its name here) and spec (the file\'s text)');
           let skills: PersonalSkill[];
           try { skills = parseSkills(b.skills, 'the submission'); } catch (err) { throw new Refused(400, (err as Error).message); }
-          const s: Submission = { repo: b.repo, spec: b.spec, ...(typeof b.name === 'string' ? { name: b.name } : {}), ...(b.draft === true ? { draft: true } : {}), ...(skills.length ? { skills } : {}) };
+          const s: Submission = { repo: b.repo, spec: b.spec, ...(typeof b.name === 'string' ? { name: b.name } : {}), ...(b.draft === true ? { draft: true } : {}), ...(b.one_session === true ? { one_session: true } : {}), ...(skills.length ? { skills } : {}) };
           // Admitted against the project as GitHub has it: the person gets the whole list now, not a failed job later (docs/adr/0007).
           let warnings: string[] = [];
           if (opts.admit) {
@@ -262,7 +262,7 @@ export function serve(opts: {
           }
           // The skills it took, so a client can tell them from a Helix that predates them.
           const submitted = supervisor.submit(person, s);
-          return send(201, { ...submitted, skills: skills.map((k) => k.name), links: jobLinks(config, submitted.id), ...(warnings.length ? { warnings } : {}) });
+          return send(201, { ...submitted, skills: skills.map((k) => k.name), ...(s.one_session ? { one_session: true } : {}), links: jobLinks(config, submitted.id), ...(warnings.length ? { warnings } : {}) });
         }
       } else if (id === 'fix' && !action && req.method === 'POST') {
         const b = await body(req);

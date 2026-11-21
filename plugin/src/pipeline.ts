@@ -67,6 +67,8 @@ export type RunOptions = {
   /** The queue has seen every `after:` pull request merged: start from the base without looking for the earlier spec or waiting again. */
   afterMerged?: boolean;
   trigger?: string;
+  /** The person chose one implementer session for the whole spec: the planner is not asked (a resume or a fix of the job keeps it). */
+  oneSession?: boolean;
   /** The line saying where the job runs (`animus start`), logged first so the watch line can follow it with the job's id. */
   runsLine?: string;
   /** The submitter's own skills (personal.ts), copied into the job's folder when it starts; a resumed job reads that copy. */
@@ -184,6 +186,7 @@ async function runJobWith(opts: RunOptions, deps: Deps, live: { run?: Run; start
   // A fix with only the pull request to go on (fix.ts, fixAlone): the spec is the one in its description.
   const alone = opts.fix?.alone;
   const carried = Boolean(before || alone);
+  const oneSession = Boolean(opts.oneSession || before?.one_session);
   if (before) {
     // A job picked up again, or a fix, keeps the spec it was admitted with.
     spec = loadSpec(before.spec);
@@ -298,6 +301,7 @@ async function runJobWith(opts: RunOptions, deps: Deps, live: { run?: Run; start
   // A fix carries on from the session of the job it continues, and from that job's list of fixes.
   const state: JobState = {
     job, repo, spec: specCopy, submitter: run.submitter, ...(run.submitter_name ? { submitter_name: run.submitter_name } : {}), ...(source ? { source } : {}), workspace: ws, plan, ...(before?.session ? { session: before.session } : {}), ...(before?.context !== undefined ? { context: before.context } : {}), ...(answers.length ? { answers } : {}),
+    ...(oneSession ? { one_session: true } : {}),
     ...(prior?.slicing ? { slicing: prior.slicing, sliced_by: prior.sliced_by ?? 'script', slices_done: prior.slices_done ?? [] } : {}),
     ...(fix ? { fix_of: fix.of, ask: fix.ask, ...(fix.pr ? { pr: fix.pr } : {}), ...(fixStart ? { fix_start: fixStart } : {}) } : {}), ...(inherited?.fixes ? { fixes: inherited.fixes } : {}), ...(inherited?.closes ? { closes: inherited.closes } : {}),
     ...(inherited.issues?.length ? { issues: inherited.issues } : {}), ...(inherited.settled?.length ? { settled: inherited.settled } : {}),
@@ -568,8 +572,8 @@ async function runJobWith(opts: RunOptions, deps: Deps, live: { run?: Run; start
     if (!state.slicing) {
       state.slicing = carried ? oneSlice(spec) : await timed('plan', () => {
         try {
-          if (isPlanned(factory, spec.size)) at('plan', `planner · ${factory.planner!.tier} tier`, factory.planner!.tier, factory.planner!.effort);
-          const planned = planSlices({ factory, agent: deps.agent, spec, cwd: wt, personal, lessons: () => lessonsFor('planner'), log, record: (stage, r) => record(stage, 'planner', factory.planner!.tier, factory.planner!.effort, r) });
+          if (!oneSession && isPlanned(factory, spec.size)) at('plan', `planner · ${factory.planner!.tier} tier`, factory.planner!.tier, factory.planner!.effort);
+          const planned = planSlices({ factory, agent: deps.agent, spec, cwd: wt, personal, oneSession, lessons: () => lessonsFor('planner'), log, record: (stage, r) => record(stage, 'planner', factory.planner!.tier, factory.planner!.effort, r) });
           state.sliced_by = planned.by;
           if (planned.by === 'planner') for (const name of roleSkills(factory, 'planner', plan.type, wt, personal).names) if (!run.skills.includes(name)) run.skills.push(name);
           return planned.slicing;
@@ -585,7 +589,7 @@ async function runJobWith(opts: RunOptions, deps: Deps, live: { run?: Run; start
           restore(wt);
         }
       });
-      state.sliced_by ??= 'script';
+      state.sliced_by ??= oneSession ? 'person' : 'script';
       state.slices_done = [];
       saveState(state);
     }
