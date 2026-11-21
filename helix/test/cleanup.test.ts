@@ -63,6 +63,27 @@ test('animus cleanup runs in each person\'s Animus home with their credentials, 
   assert.deepEqual(await animusCleanups(store, { home, contained: false }), [{ who: 'this machine' }]);
 });
 
+// Protects: criterion 6. Fails when: cleanup skips outcomes, runs them as the wrong person, or a GitHub failure stops the next person's.
+test('cleanup refreshes each person\'s outcomes as that person and skips one whose GitHub fails', async () => {
+  const { home, store } = helix();
+  for (const name of ['ana', 'bo']) {
+    const envFile = join(home, `${name}.env`);
+    writeFileSync(envFile, `GH_TOKEN=ghp_${name}\n`);
+    store.putPerson(name, { token_sha256: name, env_file: envFile });
+    mkdirSync(join(personDirs(home, name).animus, 'jobs'), { recursive: true });
+  }
+  const asked: (string | undefined)[] = [];
+  const lines: string[] = [];
+  await helixCleanup(store, {
+    home, contained: true, days: 30, dryRun: false, version: '0.3.4', docker: () => ({ status: 1, stdout: '' }),
+    outcomes: (env) => { asked.push(env?.GH_TOKEN); return asked.length === 1 ? { status: 1, stderr: 'gh: no network' } : { status: 0 }; },
+  }, (l) => lines.push(l));
+  assert.deepEqual(asked, ['ghp_ana', 'ghp_bo']);
+  assert.ok(lines.includes('ana: animus outcomes failed (exit 1); skipped'));
+  assert.ok(lines.includes('  gh: no network'));
+  assert.equal(lines.some((l) => l.startsWith('bo: animus outcomes')), false);
+});
+
 /**
  * A Helix whose project app had OLD as its Dockerfile and has NEW on GitHub's
  * base branch now, fetched into the machine's clone, with a Docker whose job
