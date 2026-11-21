@@ -380,7 +380,8 @@ export function supervise(opts: {
           const { pid: _pid, ...kept } = current;
           saveAndTell({
             ...kept, state: 'ended', ended: now(), outcome: result.outcome ?? 'failed',
-            ...(result.pr ? { pr: result.pr } : {}), ...(result.question ? { question: result.question } : {}), ...(result.cost_usd !== undefined ? { cost_usd: result.cost_usd } : {}),
+            // A resumed job reports its own run's cost: the job's is the sum of its runs.
+            ...(result.pr ? { pr: result.pr } : {}), ...(result.question ? { question: result.question } : {}), ...(result.cost_usd !== undefined ? { cost_usd: (current.cost_usd ?? 0) + result.cost_usd } : {}),
             ...(why ? { reason: why } : {}),
           });
           say(`job ${job.id} ended: ${result.outcome ?? 'failed'}${result.pr ? ` ${result.pr}` : ''}`);
@@ -402,7 +403,11 @@ export function supervise(opts: {
     child.on('close', (code, signal) => {
       end(() => {
         // Animus says why on its last line when it refuses to start a job.
-        const last = existsSync(logFile(job.id)) ? readFileSync(logFile(job.id), 'utf8').trimEnd().split('\n').pop() : undefined;
+        const lines = existsSync(logFile(job.id)) ? readFileSync(logFile(job.id), 'utf8').trimEnd().split('\n') : [];
+        // An uncaught error ends its trace with "Node.js v..."; the message is on the "...Error: message" line above.
+        const thrown = lines.findLast((l) => /^\w*Error: /.test(l))?.replace(/^\w+: /, '');
+        const last = /^Node\.js v\d/.test(lines.at(-1) ?? '') && thrown ? undefined : lines.at(-1);
+        if (last === undefined && thrown) return thrown;
         return `animus ended with ${signal ?? `exit ${code}`} and no result${last ? `: ${last.replace(/^(animus|helix): /, '')}` : ''}`;
       });
     });

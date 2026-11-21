@@ -26,7 +26,9 @@ const fs = require('node:fs');
 const [title, answer, release] = process.argv.slice(1);
 console.error('job fake-' + title.replace(/ /g, '-') + ': ' + title);
 const end = (r) => { console.log(JSON.stringify({ ...r, reason: 'user=' + process.env.ANIMUS_USER + ' secret=' + (process.env.SECRET || '') + ' answer=' + answer })); };
-if (title.startsWith('ask') && !answer) end({ outcome: 'needs-input', question: 'which one?' });
+if (title.startsWith('ask') && !answer) end({ outcome: 'needs-input', question: 'which one?', cost_usd: 1.5 });
+else if (title.startsWith('ask')) end({ outcome: 'pr', pr: 'https://example.test/pr/' + title, cost_usd: 2 });
+else if (title.startsWith('crash')) throw new Error('the spec cannot be read');
 else if (title.startsWith('hold')) { const t = setInterval(() => { if (fs.existsSync(release)) { clearInterval(t); end({ outcome: 'pr', pr: 'https://example.test/pr/' + title }); } }, 20); }
 else end({ outcome: 'pr', pr: 'https://example.test/pr/' + title });
 `;
@@ -120,6 +122,26 @@ test('a job that asks a question waits for its answer, then resumes with it', as
   assert.match(done.reason!, /answer=the second/);
   assert.equal(done.question, undefined);
   await assert.rejects(client.answer(String(j.id), 'again'), /not waiting for an answer/);
+  h.stop();
+});
+
+// Protects: criterion 4. Fails when: a resumed job shows only its last run's cost.
+test('a job that was resumed shows the cost of all its runs together', async () => {
+  const h = await helix();
+  const j = await h.submit('ask me');
+  assert.equal((await h.ended(j.id)).cost_usd, 1.5);
+  await client.answer(String(j.id), 'the second');
+  const done = await until(() => client.job(String(j.id)), (x) => x.outcome === 'pr');
+  assert.equal(done.cost_usd, 3.5);
+  h.stop();
+});
+
+// Protects: criterion 3. Fails when: a crashed job's reason is the stack trace's last line, "Node.js v...".
+test('a job whose process dies on an uncaught error has the error\'s message as its reason', async () => {
+  const h = await helix();
+  const j = await h.submit('crash now');
+  const done = await h.ended(j.id);
+  assert.deepEqual([done.outcome, done.reason], ['failed', 'the spec cannot be read']);
   h.stop();
 });
 
