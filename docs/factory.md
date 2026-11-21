@@ -57,7 +57,7 @@ Scripts do everything that needs no judgment, one agent implements, a fresh agen
 | Set up workspace | Script | Fresh container, clone, database, storage, migrations, seed. |
 | Plan | Agent proposes, script decides | A medium spec is cut into slices: a read-only session proposes the cut, and a script takes it only if every criterion is held by exactly one slice. |
 | Implement | Agent | One fresh session per slice writes the code and checks its own work. The gates for the slices so far run before the next slice starts. |
-| Run the gates | Script | Lint, type-check, tests, build. Failures go back to the same agent. |
+| Run the gates | Script | Lint, type-check, tests, build. A check the session's `animus check` passed on the same files is taken over, not run again. Failures go back to the same agent. |
 | Review | Fresh agent | Sees only the spec and the diff, and checks the change and its tests against the criteria. |
 | Catch up with the base | Script; a fresh agent for conflicts | If the base branch moved during the job, merges it into the job's branch with one merge commit and runs every gate again, with their own fix rounds. A conflict goes to a fresh implementer session, and the script takes its resolution only with no conflict markers left and the gates green; the PR lists the resolved files. A conflict in a protected path, one the session cannot settle, or gates still failing end the job as needs input, and the answer picks it up here. |
 | Open the PR | Script | Pushes the branch and opens the PR with evidence for each criterion, then deletes the container. |

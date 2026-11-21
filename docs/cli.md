@@ -459,7 +459,7 @@ The implementer runs these during a job. They fail anywhere else.
 
 | Command | What it does |
 | --- | --- |
-| `animus check` | Runs the job's gates now: the profile's commands, then the criteria's commands (only those of the slices so far, part-way through a sliced job), and `fails-on-base` for a bug. |
+| `animus check` | Runs the job's gates now: the profile's commands, then the criteria's commands (only those of the slices so far, part-way through a sliced job), and `fails-on-base` for a bug. It keeps what it ran in the job's folder, and the gates reuse each check it passed while the worktree's files (committed or not) are still the same. |
 | `animus shots [--again]` | Screenshots a UI job's pages. Reuses the last set when the worktree has not changed since, unless `--again`. |
 | `animus ui up \| down` | Starts or stops a UI job's app. |
 

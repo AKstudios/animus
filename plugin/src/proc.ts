@@ -17,8 +17,8 @@ export function animusCommand(): string {
   return bin ? `"${bin}"` : 'animus';
 }
 
-export function git(cwd: string, args: string[]): string {
-  const r = spawnSync('git', args, { cwd, encoding: 'utf8' });
+export function git(cwd: string, args: string[], env?: NodeJS.ProcessEnv): string {
+  const r = spawnSync('git', args, { cwd, encoding: 'utf8', ...(env ? { env: { ...process.env, ...env } } : {}) });
   if (r.status !== 0) {
     // Without a cwd git never starts: no status and no output to read.
     const why = existsSync(cwd) ? (r.stderr || r.stdout || r.error?.message || '').trim() : 'the directory does not exist';
