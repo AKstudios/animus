@@ -5,7 +5,7 @@
 import { spawnSync } from 'node:child_process';
 import { existsSync, readFileSync, rmSync } from 'node:fs';
 import { basename, join } from 'node:path';
-import type { CheckResult } from './gates.ts';
+import { REUSED, type CheckResult } from './gates.ts';
 import type { Plan } from './profiles.ts';
 import { maskSecrets } from './profile.ts';
 import { ANSI, git, AnimusError } from './proc.ts';
@@ -129,7 +129,7 @@ export function prBody(p: PrInput): string {
     evidence.push(`${i + 1}. ${oneLine(c.text)}`, `   - Check: ${cmds.length ? cmds.join('<br>') : c.commands.length ? 'not run' : 'no command'}`, `   - Review: ${v ? `${v.met ? 'met' : '**not met**'}: ${cell(v.proof)}` : p.review ? 'no verdict' : 'not reviewed'}`);
   });
   evidence.push('');
-  for (const g of ran) evidence.push(`**${g.name}** ${g.ok ? 'passed' : 'failed'} in ${(g.ms / 1000).toFixed(1)}s: \`${g.command}\``, '', '```', tail(g.output), '```', '');
+  for (const g of ran) evidence.push(`**${g.name}** ${g.ok ? 'passed' : 'failed'} in ${(g.ms / 1000).toFixed(1)}s${g.reused ? ` (${REUSED})` : ''}: \`${g.command}\``, '', '```', tail(g.output), '```', '');
   if (skipped.length) evidence.push(`Skipped: ${skipped.map((g) => `${g.name} (${g.output})`).join('; ')}.`);
   out.push(...fold(`Evidence: the output of ${ran.length} check${ran.length === 1 ? '' : 's'}, captured by Animus on the final commit`, ...evidence));
 

@@ -99,14 +99,19 @@ export function saveSessionChecks(job: string, code: string, results: readonly C
   writeJson(sessionFile(job), { code, checks: results } satisfies SessionChecks);
 }
 
-/** The session's pass for a check, when it ran the same command on the code the worktree holds now. */
-function sessionPasses(worktree: string, job: string): (c: Check) => CheckResult | undefined {
+/** What a gate file and the pull request say above a result taken over from the session. */
+export const REUSED = 'reused: the session\'s own `animus check` passed this on the same code';
+
+/** The session's pass for a check by this name whose command `command` accepts, when it ran on the code the worktree holds now. Take it before anything changes the worktree. */
+export type SessionPasses = (name: string, command: (recorded: string) => boolean) => CheckResult | undefined;
+
+export function sessionPasses(worktree: string, job: string): SessionPasses {
   const file = sessionFile(job);
   if (!existsSync(file)) return () => undefined;
   const record = JSON.parse(readFileSync(file, 'utf8')) as SessionChecks;
   if (record.code !== contentTree(worktree)) return () => undefined;
-  return (c) => {
-    const r = c.skip ? undefined : record.checks.find((x) => x.name === c.name && x.command === c.command && x.ok && !x.skipped);
+  return (name, command) => {
+    const r = record.checks.find((x) => x.name === name && command(x.command) && x.ok && !x.skipped);
     return r && { ...r, reused: true };
   };
 }
@@ -116,9 +121,8 @@ function sessionPasses(worktree: string, job: string): (c: Check) => CheckResult
  * over; the rest run, then each failed check once more on the same tree:
  * passing then, it was flaky and counts as passed.
  */
-export function runGates(worktree: string, checks: readonly Check[], job: string, log: (line: string) => void = () => {}): CheckResult[] {
-  const passed = sessionPasses(worktree, job);
-  const taken = checks.map(passed);
+export function runGates(worktree: string, checks: readonly Check[], job: string, log: (line: string) => void = () => {}, passed = sessionPasses(worktree, job)): CheckResult[] {
+  const taken = checks.map((c) => c.skip ? undefined : passed(c.name, (command) => command === c.command));
   const ran = runChecks(worktree, checks.filter((_, i) => !taken[i]), job);
   const results = taken.map((r) => r ?? ran.shift()!);
   const failed = results.filter((r) => !r.ok);
@@ -169,7 +173,7 @@ export function findsNoTests(output: string): boolean {
 }
 
 /** A gate run as the job's folder keeps it (gates/run-N.txt): describe(), then each check that ran with all it printed. A job page reads it back. */
-export const gateReport = (results: readonly CheckResult[]) => `${describe(results)}\n\n${results.filter((r) => !r.skipped).map((r) => `=== ${r.name}: ${r.command}\n${r.output}`).join('\n')}`;
+export const gateReport = (results: readonly CheckResult[]) => `${describe(results)}\n\n${results.filter((r) => !r.skipped).map((r) => `=== ${r.name}: ${r.command}\n${r.reused ? `${REUSED}\n` : ''}${r.output}`).join('\n')}`;
 
 /** One line per check (a skipped one says why), then the output of each failure, short. */
 export function describe(results: readonly CheckResult[]): string {

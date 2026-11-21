@@ -11,7 +11,7 @@ import { userInfo } from 'node:os';
 import { basename, dirname, join, resolve } from 'node:path';
 import { resolveAfter, waitForMerged } from './after.ts';
 import type { Agent, AgentResult } from './agent.ts';
-import { describe, failsOnBase, gateReport, jobChecks, LATER_SLICE, restore, runGates, type CheckResult } from './gates.ts';
+import { describe, FAILS_ON_BASE, failsOnBase, gateReport, jobChecks, LATER_SLICE, restore, runGates, sessionPasses, type CheckResult } from './gates.ts';
 import { commitAll, mainCheckout, matchesAny, touchedFiles } from './git.ts';
 import { appendRun, CANCELLED_MARKER, jobDir, masked, toolsLog, saveProgress, saveState, writeJson, type Cause, type FindingLog, type JobState, type Outcome, type Run, type Stage } from './log.ts';
 import { evidenceBranch, findPrByTitle, prBody, prDraft, prState, PushRejected, type DraftLookup, type PrFind, type Evidence, type PrLookup, type Publish } from './pr.ts';
@@ -448,10 +448,16 @@ async function runJobWith(opts: RunOptions, deps: Deps, live: { run?: Run; start
       at('gates', `gates${of} · attempt ${attempt}${run.fix_rounds ? ` after ${run.fix_rounds === 1 ? 'a fix round' : `${run.fix_rounds} fix rounds`}` : ''}`);
       const t = Date.now();
       lastGates = await timed('gates', () => {
-        const results = runGates(wt, checks, job, log);
+        // Taken before the gates run: their commands may leave files behind.
+        const passed = sessionPasses(wt, job);
+        const results = runGates(wt, checks, job, log, passed);
         // The proof that the tests fail without the change is for the whole job: it runs on the finished branch.
         if (!plan.prove || slice) return results;
-        return [...results, failsOnBase({ repo, profile: repoProfile, spec, base: ws.base, head, files: touchedFiles(wt, ws.base, head), job, green: results.every((r) => r.ok) })];
+        const green = results.every((r) => r.ok);
+        // The proof records the acceptance command that failed on the base, so any of the spec's commands is its own.
+        const commands = spec.criteria.flatMap((c) => c.commands);
+        const proof = green && passed(FAILS_ON_BASE, (command) => commands.includes(command));
+        return [...results, proof || failsOnBase({ repo, profile: repoProfile, spec, base: ws.base, head, files: touchedFiles(wt, ws.base, head), job, green })];
       });
       restore(wt);
       const ok = lastGates.every((r) => r.ok);
