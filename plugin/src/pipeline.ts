@@ -6,7 +6,7 @@
 // function behind a queue.
 import { spawnSync } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
-import { appendFileSync, copyFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { appendFileSync, copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { userInfo } from 'node:os';
 import { basename, dirname, join, resolve } from 'node:path';
 import { resolveAfter, waitForMerged } from './after.ts';
@@ -81,7 +81,7 @@ export type RunOptions = {
 class Stop extends Error {
   outcome: 'needs-input' | 'failed';
   cause: Cause;
-  detail: { failing_checks?: string[]; blockers_left?: number };
+  detail: { failing_checks?: string[]; blockers_left?: number; summary?: string };
   constructor(outcome: 'needs-input' | 'failed', reason: string, cause?: Cause, detail: Stop['detail'] = {}) {
     super(reason);
     this.outcome = outcome;
@@ -418,7 +418,7 @@ async function runJobWith(opts: RunOptions, deps: Deps, live: { run?: Run; start
     if (report.status === 'needs-input') throw new Stop('needs-input', report.question ?? report.summary);
     // A `failed` is a claim: with work on the branch the gates check it, and its note goes with the work.
     if (report.status === 'failed') {
-      if (!changed) throw new Stop('failed', `the implementer gave up: ${report.summary}`);
+      if (!changed) throw new Stop('failed', report.notes || report.question || report.summary, undefined, { summary: report.summary });
       log(`${stage}: the implementer reported failed (${report.summary}) but changed the branch, so the gates decide`);
       report.notes = [`The implementer reported it failed: ${report.summary}`, report.notes].filter(Boolean).join(' ');
     }
@@ -442,7 +442,8 @@ async function runJobWith(opts: RunOptions, deps: Deps, live: { run?: Run; start
     for (;;) {
       const head = git(wt, ['rev-parse', 'HEAD']);
       if (head === (fixStart ?? ws.base)) throw new Stop('failed', 'the implementer changed nothing');
-      const attempt = run.gates.length + 1;
+      // A resumed job's run starts with no gates of its own: number after the files the job already has.
+      const attempt = Math.max(run.gates.length, ...(existsSync(join(dir, 'gates')) ? readdirSync(join(dir, 'gates')) : []).map((f) => Number(/^run-(\d+)\.txt$/.exec(f)?.[1] ?? 0))) + 1;
       const checks = jobChecks(repoProfile, plan, spec, { base: ws.base, files: touchedFiles(wt, ws.base, head) }, slice?.only);
       log(`gates${of}, run ${attempt}: ${checks.filter((c) => !c.skip).map((c) => c.name).join(', ') || 'nothing to run'}`);
       at('gates', `gates${of} · attempt ${attempt}${run.fix_rounds ? ` after ${run.fix_rounds === 1 ? 'a fix round' : `${run.fix_rounds} fix rounds`}` : ''}`);
@@ -728,6 +729,10 @@ async function runJobWith(opts: RunOptions, deps: Deps, live: { run?: Run; start
   at('pr', outcome === 'needs-input' ? 'pr · stopping to ask' : outcome === 'failed' ? 'pr · writing the failure report' : 'pr · writing the description');
   const head = git(wt, ['rev-parse', 'HEAD']);
   run.head = head;
+  if (head !== ws.base) {
+    const lines = git(wt, ['diff', '--numstat', ws.base, head]).split('\n').filter(Boolean).map((l) => l.split('\t')); // binary files count for no lines
+    run.diff = { files: lines.length, added: lines.reduce((n, l) => n + (Number(l[0]) || 0), 0), removed: lines.reduce((n, l) => n + (Number(l[1]) || 0), 0) };
+  }
   run.protected_touched = touchedFiles(wt, ws.base, head).filter((f) => matchesAny(f, repoProfile.protected));
   const all = [...found.values()];
   if (reviewRounds) run.review = { rounds: reviewRounds, findings: all.length, blockers: all.filter((f) => f.severity === 'blocker').length, acted_on: actedOn, open: outcome === 'failed' ? open.length : 0, log: findingLog };
