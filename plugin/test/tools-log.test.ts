@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { readFileSync } from 'node:fs';
+import { readFileSync, writeFileSync } from 'node:fs';
 import { test } from 'node:test';
 import { toolCalls } from '../src/agent.ts';
 import { toolsLog } from '../src/log.ts';
@@ -58,4 +58,19 @@ test('animus tools names the problem for a job with no run', () => {
   const r = spawnSync(process.execPath, ['--disable-warning=ExperimentalWarning', cli, 'tools', 'no-such-job'], { encoding: 'utf8' });
   assert.equal(r.status, 2);
   assert.match(r.stderr, /no run of job no-such-job/);
+});
+
+// Protects: one row per call. Fails when a transcript line repeated with the same id adds a row that is marked failed.
+test('a call that appears on more than one transcript line is one row, with its result', () => {
+  const file = toolTranscript([{ tool: 'Read', input: { file_path: 'a.txt' } }]);
+  const lines = readFileSync(file, 'utf8').split('\n');
+  writeFileSync(file, [lines[0], lines[0], lines[1]].join('\n'));
+  const got = toolCalls(file);
+  assert.deepEqual(got.map((c) => [c.tool, c.ok, c.ms]), [['Read', true, 1000]]);
+});
+
+test('a call with no result at the end of the session is failed', () => {
+  const file = toolTranscript([{ tool: 'Bash', input: { command: 'sleep 9' } }]);
+  writeFileSync(file, readFileSync(file, 'utf8').split('\n')[0]!);
+  assert.deepEqual(toolCalls(file).map((c) => [c.tool, c.ok]), [['Bash', false]]);
 });

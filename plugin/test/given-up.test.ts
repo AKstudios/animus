@@ -46,6 +46,17 @@ test('an implementer that gives up having changed nothing ends the job as failed
   const d = deps(agent);
   const run = await runJob({ repo, specFile: writeSpec(SMALL) }, d);
   assert.equal(run.outcome, 'failed');
-  assert.match(run.reason!, /the implementer gave up: cannot/);
+  assert.equal(run.reason, "cannot");
   assert.equal(d.published.length, 0);
+});
+
+// Protects: the reason says why it stopped. Fails when the reason is the summary of the work.
+test('a give-up\'s reason is the implementer\'s notes, else its question, else its summary; the summary stays on the run', async () => {
+  const stop = async (output: Record<string, unknown>) => runJob({ repo: makeRepo(), specFile: writeSpec(SMALL) }, deps(fakeAgent([() => ({ output })]).agent));
+  const withNotes = await stop({ status: 'failed', summary: 'tried the parser', notes: 'the API has no such call' });
+  assert.equal(withNotes.reason, 'the API has no such call');
+  assert.equal(withNotes.summary, 'tried the parser');
+  assert.equal(withNotes.cause, 'agent-error');
+  assert.equal((await stop({ status: 'failed', summary: 'tried', question: 'which API?' })).reason, 'which API?');
+  assert.equal((await stop({ status: 'failed', summary: 'cannot' })).reason, 'cannot');
 });

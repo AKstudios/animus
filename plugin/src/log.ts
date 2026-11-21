@@ -125,6 +125,10 @@ export type Run = {
   /** With cause `review`: the blockers left. */
   blockers_left?: number;
   reason?: string;
+  /** With a give-up: what the implementer said it did, which the reason (why it stopped) is not. */
+  summary?: string;
+  /** What the job changed against its base; absent when it changed nothing. */
+  diff?: { files: number; added: number; removed: number };
   question?: string;
   pr?: string;
   branch: string;

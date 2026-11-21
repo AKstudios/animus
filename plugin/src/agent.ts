@@ -180,7 +180,8 @@ export function toolCalls(transcript: string, since = 0): ToolCall[] {
     const time = Date.parse(at);
     if (!Array.isArray(e.message?.content)) continue;
     for (const part of e.message.content as { type?: string; id?: string; name?: string; input?: Record<string, unknown>; tool_use_id?: string; is_error?: boolean }[]) {
-      if (part.type === 'tool_use' && part.id && part.name) calls.push({ id: part.id, start: time, at, tool: part.name, target: targetOf(part.input ?? {}), ok: false, ms: 0 });
+      // A transcript can hold one call on several lines: the first is the call.
+      if (part.type === 'tool_use' && part.id && part.name) { if (!calls.some((c) => c.id === part.id)) calls.push({ id: part.id, start: time, at, tool: part.name, target: targetOf(part.input ?? {}), ok: false, ms: 0 }); }
       else if (part.type === 'tool_result') {
         const call = calls.find((c) => c.id === part.tool_use_id);
         if (call) { call.ok = !part.is_error; call.ms = Number.isNaN(time) || Number.isNaN(call.start) ? 0 : Math.max(0, time - call.start); }

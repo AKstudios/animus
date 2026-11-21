@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { copyFileSync, existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
@@ -531,4 +531,30 @@ test('a job given lessons by ANIMUS_LESSONS_FILE logs their ids and leaves the c
     assert.equal(existsSync(lessonsFile()), false);
     assert.equal(JSON.parse(readFileSync(helixFile, 'utf8')).lessons[0].uses, 0);
   } finally { delete process.env.ANIMUS_LESSONS_FILE; }
+});
+
+// Protects: a resumed job's gate output. Fails when its first gate run overwrites the earlier run's run-1.txt.
+test('a resumed job numbers its gate runs after the earlier run\'s, keeping every file', async () => {
+  const repo = makeRepo();
+  const first = fakeAgent([() => ({ output: { status: 'needs-input', summary: '', question: 'Which?' } })]);
+  const run = await runJob({ repo, specFile: writeSpec(SMALL) }, deps(first.agent));
+  mkdirSync(join(run.dir, 'gates'), { recursive: true });
+  writeFileSync(join(run.dir, 'gates', 'run-1.txt'), 'earlier run');
+
+  const second = fakeAgent([say('done'), () => clean()]);
+  const again = await runJob({ repo, resume: { state: loadState(run.job)!, answer: 'This.' } }, deps(second.agent));
+  assert.equal(readFileSync(join(run.dir, 'gates', 'run-1.txt'), 'utf8'), 'earlier run');
+  assert.ok(existsSync(join(run.dir, 'gates', 'run-2.txt')));
+  assert.deepEqual(again.gates.map((g) => g.attempt), [2]);
+});
+
+// Protects: the run record says how large the change was. Fails when diff is missing, or present for a job that changed nothing.
+test('a run record carries the files, added and removed lines against the base, and none when nothing changed', async () => {
+  const { agent } = fakeAgent([say('done'), () => clean()]);
+  const run = await runJob({ repo: makeRepo(), specFile: writeSpec(SMALL) }, deps(agent));
+  assert.deepEqual(readRuns().find((r) => r.job === run.job)!.diff, { files: 1, added: 1, removed: 0 });
+
+  const none = fakeAgent([() => ({ output: { status: 'failed', summary: 'cannot' } })]);
+  const gaveUp = await runJob({ repo: makeRepo(), specFile: writeSpec(SMALL) }, deps(none.agent));
+  assert.equal(readRuns().find((r) => r.job === gaveUp.job)!.diff, undefined);
 });
