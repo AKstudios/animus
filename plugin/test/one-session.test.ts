@@ -1,7 +1,11 @@
 // --one-session: a medium or large spec goes to one implementer session, with no planner.
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
+import { mkdtempSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { test } from 'node:test';
+import { openLocalQueue } from '../src/local-queue.ts';
 import { fixTarget } from '../src/fix.ts';
 import { loadState } from '../src/log.ts';
 import { runJob } from '../src/pipeline.ts';
@@ -58,4 +62,16 @@ test('animus plan --one-session prints the spec as one slice without asking a pl
   assert.equal(r.status, 0, r.stdout + r.stderr);
   assert.match(r.stdout, /one slice \(one session, as asked: no planner session\)/);
   assert.match(r.stdout, /criteria {2}1\. The feature says done\.\n {17}2\. The second file says two\./);
+});
+
+// Protects: criterion 1's command. Fails when: `animus start --local --one-session` does not queue the job with --one-session, so the loop's `animus run` would ask a planner.
+test('animus start --local --one-session queues the job with --one-session', () => {
+  const home = mkdtempSync(join(tmpdir(), 'animus-home-'));
+  // A Claude command that cannot start: the loop's job stops at its first session and no model runs.
+  const env = { ...process.env, ANIMUS_HOME: home, ANIMUS_CLAUDE: join(home, 'no-such-claude') };
+  const r = spawnSync(process.execPath, ['--disable-warning=ExperimentalWarning', cli, 'start', writeSpec(LARGE, CRITERIA), '--local', '--dry-run', '--one-session', '--repo', makeRepo()], { env, encoding: 'utf8', timeout: 60_000 });
+  assert.equal(r.status, 0, r.stderr);
+  const queue = openLocalQueue(home);
+  assert.deepEqual(queue.get(1)?.flags, ['--dry-run', '--one-session']);
+  queue.close();
 });
