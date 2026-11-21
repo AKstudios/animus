@@ -1,5 +1,5 @@
 // Git helpers shared by the workspace, the install cache and the gates.
-import { mkdtempSync, rmSync } from 'node:fs';
+import { copyFileSync, existsSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, isAbsolute, join, matchesGlob, resolve } from 'node:path';
 import { git, tryGit } from './proc.ts';
@@ -54,6 +54,26 @@ export function matchesAny(path: string, globs: readonly string[]): boolean {
     const folder = g.replace(/\/+$/, '');
     return path === g || matchesGlob(path, g) || path.startsWith(`${folder}/`);
   });
+}
+
+/**
+ * The identity of what the worktree holds: the tree `git add -A` would commit
+ * (tracked and untracked files that are not ignored, deleted ones gone),
+ * written through a copy of the index so the real one is left alone.
+ * Committing the same files gives the same identity.
+ */
+export function contentTree(cwd: string): string {
+  const tmp = mkdtempSync(join(tmpdir(), 'animus-index-'));
+  const index = join(tmp, 'index');
+  try {
+    const real = resolve(cwd, git(cwd, ['rev-parse', '--git-path', 'index']));
+    // A copy keeps the index's file stats, so only files changed since are read again.
+    if (existsSync(real)) copyFileSync(real, index);
+    git(cwd, ['add', '-A'], { GIT_INDEX_FILE: index });
+    return git(cwd, ['write-tree'], { GIT_INDEX_FILE: index });
+  } finally {
+    rmSync(tmp, { recursive: true, force: true });
+  }
 }
 
 /** Commits everything in the worktree that is not committed yet. Returns whether there was anything. */

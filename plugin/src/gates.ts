@@ -2,9 +2,10 @@
 // build), then the `$ command` lines of the spec's acceptance criteria, run in
 // the job's worktree by a script. Their captured output is also the evidence
 // the pull request shows for each criterion. Adapted from orbit's checks.ts.
-import { existsSync, rmSync } from 'node:fs';
+import { existsSync, readFileSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
-import { matchesAny, withScratch } from './git.ts';
+import { contentTree, matchesAny, withScratch } from './git.ts';
+import { jobDir, writeJson } from './log.ts';
 import { checksFor, type Profile } from './profile.ts';
 import type { Plan } from './profiles.ts';
 import { ANSI, failureExcerpt, sh, tryGit } from './proc.ts';
@@ -13,7 +14,7 @@ import { ensureSetup } from './workspace.ts';
 
 /** criterion: the acceptance criterion (from 1) the command proves. skip: why this job does not run it. */
 export type Check = { name: string; command: string; cwd?: string; skip?: string; env?: Record<string, string>; note?: string; criterion?: number };
-export type CheckResult = { name: string; command: string; ok: boolean; skipped: boolean; ms: number; output: string; note?: string; criterion?: number; flaky?: boolean };
+export type CheckResult = { name: string; command: string; ok: boolean; skipped: boolean; ms: number; output: string; note?: string; criterion?: number; flaky?: boolean; reused?: boolean };
 
 /** The project's own tool folders, in front of PATH, so `vitest` or `pytest` runs the worktree's copy. */
 const TOOL_DIRS = ['node_modules/.bin', '.venv/bin'];
@@ -89,9 +90,37 @@ export function restore(worktree: string): void {
   tryGit(worktree, ['clean', '-fdq']);
 }
 
-/** runChecks, then each failed check once more on the same tree: passing then, it was flaky and counts as passed. */
+/** What `animus check` ran in the session, and the code it ran on (contentTree), in the job's folder. */
+type SessionChecks = { code: string; checks: readonly CheckResult[] };
+const sessionFile = (job: string) => join(jobDir(job), 'session-checks.json');
+
+/** Keeps what `animus check` ran; `code` is contentTree of the worktree, taken before the checks ran. */
+export function saveSessionChecks(job: string, code: string, results: readonly CheckResult[]): void {
+  writeJson(sessionFile(job), { code, checks: results } satisfies SessionChecks);
+}
+
+/** The session's pass for a check, when it ran the same command on the code the worktree holds now. */
+function sessionPasses(worktree: string, job: string): (c: Check) => CheckResult | undefined {
+  const file = sessionFile(job);
+  if (!existsSync(file)) return () => undefined;
+  const record = JSON.parse(readFileSync(file, 'utf8')) as SessionChecks;
+  if (record.code !== contentTree(worktree)) return () => undefined;
+  return (c) => {
+    const r = c.skip ? undefined : record.checks.find((x) => x.name === c.name && x.command === c.command && x.ok && !x.skipped);
+    return r && { ...r, reused: true };
+  };
+}
+
+/**
+ * The checks `animus check` passed in the session on this same code are taken
+ * over; the rest run, then each failed check once more on the same tree:
+ * passing then, it was flaky and counts as passed.
+ */
 export function runGates(worktree: string, checks: readonly Check[], job: string, log: (line: string) => void = () => {}): CheckResult[] {
-  const results = runChecks(worktree, checks, job);
+  const passed = sessionPasses(worktree, job);
+  const taken = checks.map(passed);
+  const ran = runChecks(worktree, checks.filter((_, i) => !taken[i]), job);
+  const results = taken.map((r) => r ?? ran.shift()!);
   const failed = results.filter((r) => !r.ok);
   if (!failed.length) return results;
   restore(worktree);

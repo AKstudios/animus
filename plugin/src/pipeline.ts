@@ -455,7 +455,7 @@ async function runJobWith(opts: RunOptions, deps: Deps, live: { run?: Run; start
       });
       restore(wt);
       const ok = lastGates.every((r) => r.ok);
-      run.gates.push({ attempt, ok, ms: Date.now() - t, checks: lastGates.map((r) => ({ name: r.name, ok: r.ok, skipped: r.skipped, ms: r.ms, ...(r.flaky ? { flaky: true } : {}) })) });
+      run.gates.push({ attempt, ok, ms: Date.now() - t, checks: lastGates.map((r) => ({ name: r.name, ok: r.ok, skipped: r.skipped, ms: r.ms, ...(r.flaky ? { flaky: true } : {}), ...(r.reused ? { reused: true } : {}) })) });
       mkdirSync(join(dir, 'gates'), { recursive: true });
       writeFileSync(join(dir, 'gates', `run-${attempt}.txt`), maskSecrets(gateReport(lastGates)));
       for (const line of describe(lastGates).split('\n').slice(0, lastGates.length)) log(`  ${line}`);

@@ -11,9 +11,9 @@ import { enable, realRun, setup, terminalIo, thisMachine } from './setup.ts';
 import { initProfile } from './init.ts';
 import { ask, githubLogin, joinHelix, leaveHelix, openPage } from './join.ts';
 import { addProject } from './project.ts';
-import { describe, failsOnBase, jobChecks, runChecks } from './gates.ts';
+import { describe, failsOnBase, jobChecks, runChecks, saveSessionChecks } from './gates.ts';
 import { fixAlone, fixFromPr, fixSkills, fixTarget, isPr, keptFromBody, openedHere, whereToFix } from './fix.ts';
-import { githubUrl, mainCheckout, touchedFiles } from './git.ts';
+import { contentTree, githubUrl, mainCheckout, touchedFiles } from './git.ts';
 import { describeRuns, describeTools, jobDir, loadState, masked, readRuns, readTools, type Run } from './log.ts';
 import { jobOf, onPath, runJob, uiJobOf } from './pipeline.ts';
 import { describeNumbers, numbers, refreshOutcomes } from './outcomes.ts';
@@ -656,12 +656,15 @@ async function main(argv: string[]): Promise<number> {
         const files = [...new Set([...touchedFiles(root, state.workspace.base, 'HEAD'), ...git(root, ['ls-files', '--others', '--modified', '--exclude-standard']).split('\n').filter(Boolean)])];
         // Part-way through a job's slices, only the criteria of the slices so far are checked.
         const only = criteriaSoFar(state.slicing, state.slices_done?.length ?? 0);
+        const code = contentTree(root);
         const results = runChecks(root, jobChecks(profile, state.plan, spec, { base: state.workspace.base, files }, only), state.job);
         if (state.plan.prove && !only) {
           // The proof reads the test files from a commit, so it sees only what is committed.
           const head = git(root, ['rev-parse', 'HEAD']);
           results.push(failsOnBase({ repo: state.repo, profile, spec, base: state.workspace.base, head, files: touchedFiles(root, state.workspace.base, head), job: state.job, green: results.every((r) => r.ok) }));
         }
+        // The gates take over what passed here, when they find the same code.
+        saveSessionChecks(state.job, code, results);
         console.log(describe(results));
         return results.every((r) => r.ok) ? 0 : 1;
       }
